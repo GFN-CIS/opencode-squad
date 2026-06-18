@@ -14,7 +14,9 @@ test("mentions the delegation decision and the skill name", () => {
   expect(out).toContain("orchestrating-subagents");
 });
 
-test("marker is a stable non-empty string", () => {
-  expect(typeof BOOTSTRAP_MARKER).toBe("string");
-  expect(BOOTSTRAP_MARKER.length).toBeGreaterThan(0);
+test("marker is the exact stable string the injection guard relies on", () => {
+  // Pinned: the plugin's double-injection guard does
+  // `text.includes(BOOTSTRAP_MARKER)`. Changing this value silently breaks
+  // that guard, so the exact string is part of the contract.
+  expect(BOOTSTRAP_MARKER).toBe("<ORCHESTRATE_BOOTSTRAP>");
 });

@@ -27,8 +27,14 @@ test("worker can edit and run bash but cannot spawn tasks", () => {
 
 test("reviewer is read-only and cannot spawn tasks", () => {
   const reviewer = agentDefinitions(promptsDir)["work-reviewer"];
+  expect(reviewer.mode).toBe("subagent");
+  expect(reviewer.hidden).toBe(true);
+  expect(reviewer.model).toBe("anthropic/claude-sonnet-4-6");
   expect(reviewer.permission.edit).toBe("deny");
   expect(reviewer.permission.bash).toBe("deny");
+  // webfetch is the one capability the reviewer needs to read external refs;
+  // assert it so an accidental removal is caught.
+  expect(reviewer.permission.webfetch).toBe("allow");
   expect(reviewer.permission.task["*"]).toBe("deny");
   expect(reviewer.prompt).toContain("STRICT JSON");
 });
