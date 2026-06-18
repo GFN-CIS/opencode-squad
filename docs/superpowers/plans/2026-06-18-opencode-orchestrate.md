@@ -14,7 +14,7 @@
 - Node built-ins imported with the `node:` prefix (`node:path`, `node:fs`, `node:url`).
 - Test runner: `bun test`. Test files end in `.test.js` and live in `tests/`.
 - Plugin entry path is exactly `.opencode/plugins/orchestrate.js` and must match `package.json` `main`.
-- Plugin export form: `export default { server: OrchestratePlugin }` (matches opencode-time-logger).
+- Plugin export form: `export default { id: "orchestrate", server: OrchestratePlugin }`. The `id` field is REQUIRED — a local plugin without it fails to load in opencode 1.17.7 with "Path plugin ... must export id" (verified in Task 0 spike).
 - Default subagent model: `anthropic/claude-sonnet-4-6`. Never hardcode any other model.
 - Code comments in English.
 - Subagent names are exactly `worker` and `work-reviewer` (with hyphen).
@@ -647,7 +647,7 @@ git commit -m "feat: programmatic worker and reviewer agent definitions"
 
 - [ ] **Step 1: Read the spike findings**
 
-Read `docs/spikes/2026-06-18-transform-hook.md`. Note `INJECT_FILTER_STRATEGY` and `SKILLS_PATHS_WORKS`. The implementation below assumes `INJECT_FILTER_STRATEGY === "inject-everywhere"` and `SKILLS_PATHS_WORKS === true`. If the spike concluded otherwise, adjust per the doc's rationale (see Step 4 note) before committing.
+Read `docs/spikes/2026-06-18-transform-hook.md`. The spike concluded: `INJECT_FILTER_STRATEGY = "info-agent-filter"` (filter by `message.info.agent === "build"` inside the transform hook), `SKILLS_PATHS_WORKS = true`, and the plugin MUST export `{ id, server }`. The implementation below already reflects these conclusions — no adaptation needed.
 
 - [ ] **Step 2: Write the plugin**
 
@@ -678,6 +678,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
 const PROMPTS_DIR = path.join(PACKAGE_ROOT, "prompts");
 const SKILLS_DIR = path.join(PACKAGE_ROOT, "skills");
+
+// The primary agent that acts as the orchestrator. Injection targets only this
+// agent's sessions (verified via message.info.agent in the Task 0 spike).
+const ORCHESTRATOR_AGENT = "build";
 
 // Cache the assembled bootstrap per process (inventory is read once).
 let _bootstrapCache; // undefined = not loaded
@@ -720,10 +724,15 @@ export const OrchestratePlugin = async ({ client }) => {
     },
 
     "experimental.chat.messages.transform": async (_input, output) => {
-      const bootstrap = await getBootstrap();
       if (!output.messages || output.messages.length === 0) return;
       const firstUser = output.messages.find((m) => m?.info?.role === "user");
       if (!firstUser || !firstUser.parts || firstUser.parts.length === 0) return;
+
+      // Only inject for the orchestrator (primary build agent). The hook's
+      // `input` is empty, but each message carries `info.agent` (verified in
+      // the Task 0 spike: "build" for the primary session, the subagent name
+      // for worker/work-reviewer sessions). This skips subagent sessions.
+      if (firstUser.info?.agent !== ORCHESTRATOR_AGENT) return;
 
       // Guard against double injection.
       if (
@@ -734,13 +743,14 @@ export const OrchestratePlugin = async ({ client }) => {
         return;
       }
 
+      const bootstrap = await getBootstrap();
       const ref = firstUser.parts[0];
       firstUser.parts.unshift({ ...ref, type: "text", text: bootstrap });
     },
   };
 };
 
-export default { server: OrchestratePlugin };
+export default { id: "orchestrate", server: OrchestratePlugin };
 ```
 
 - [ ] **Step 3: Verify the package still loads and tests pass**
@@ -748,9 +758,9 @@ export default { server: OrchestratePlugin };
 Run: `cd /home/alex/Projects/opencode-orchestrate && bun test`
 Expected: PASS (all unit tests from Tasks 2/3/5 still green; the plugin file has no unit test but must parse — confirm no import/syntax error by also running `bun build .opencode/plugins/orchestrate.js --target node > /dev/null` and expecting exit 0).
 
-- [ ] **Step 4: Adapt filter strategy if the spike said so**
+- [ ] **Step 4: Confirm export form and filter match the spike**
 
-If `INJECT_FILTER_STRATEGY !== "inject-everywhere"`: implement the chosen mechanism per the spike doc (e.g. add a `chat.message` hook that records `sessionID → agent` and skip injection for known subagent sessions). If `SKILLS_PATHS_WORKS === false`: replace the skills registration with the fallback recorded in the spike doc (e.g. one-time idempotent copy of `SKILLS_DIR` into the global skills dir). Keep the change minimal and documented with a code comment referencing the spike.
+Verify the file ends with `export default { id: "orchestrate", server: OrchestratePlugin };` (the `id` is mandatory — see spike) and that the transform hook gates on `firstUser.info?.agent === ORCHESTRATOR_AGENT`. Both are already in the Step 2 code; this step is a final read-through, not a change.
 
 - [ ] **Step 5: Commit**
 
