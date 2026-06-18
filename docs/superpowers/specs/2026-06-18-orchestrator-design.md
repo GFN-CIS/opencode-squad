@@ -84,16 +84,28 @@ Two hooks:
 directory:
 
 1. Pushes the bundled `skills/` directory onto `config.skills.paths` (proven
-   pattern used by both superpowers and time-logger).
+   pattern used by both superpowers and time-logger; not present in the typed
+   `Config`, applied via an `any`-cast, runtime-verified).
 2. Defines `config.agent.worker` and `config.agent["work-reviewer"]`
-   **programmatically as objects**, but **only if the user has not already
+   **programmatically as objects** (`config.agent` is typed and accepts
+   arbitrary keys → `AgentConfig`), but **only if the user has not already
    defined them** (user override wins). Agent prompts are read from `prompts/`
    via `fs.readFileSync` (not hardcoded in JS).
 
 **`experimental.chat.messages.transform` hook** — injects a hidden, lightweight
-bootstrap block into the **first user message** of each `build`-agent session
+bootstrap block into the **first user message** of an orchestrator session
 (mirrors superpowers). The block is invisible in the chat UI and is **not**
 repeated on every turn.
+
+**Agent-filter caveat:** the `experimental.chat.messages.transform` hook
+receives an **empty `input` ({})** — it carries no `sessionID` and no `agent`.
+Therefore the exact mechanism to restrict injection to the `build`/orchestrator
+agent (and skip `worker`/`work-reviewer` subagent sessions) is **not yet
+known** and must be resolved by a spike (Task 0 of the plan) before any other
+code is written. Candidate mechanisms: (a) inject everywhere and let the
+subagents' own prompts dominate the orphan block; (b) correlate `sessionID` via
+a companion `chat.message` hook; (c) a marker the subagents' prompts carry to
+self-skip. The spike picks one based on observed runtime behavior.
 
 The bootstrap block contains:
 - A short trigger: "before acting, decide — do it yourself or delegate via the
@@ -300,19 +312,38 @@ sessions**. We add no duplicate skills.
 9. Manual smoke: install locally via `git+file://`, verify bootstrap injects in
    a fresh session and worker/reviewer get invoked.
 
-## 9. Verification Risks (resolve during implementation)
+## 9. Verified API Facts & Open Risks
 
-- **R1 — Programmatic agent definition via `config` hook.** Superpowers and
-  time-logger only register `skills.paths` through the `config` hook; defining
-  `config.agent.X` from a plugin hook is unverified. **Primary approach:**
-  define agents in the `config` hook. **Verification step:** confirm the agents
-  appear and are invocable. **Fallback:** bundled markdown agents + a registered
-  agents path, or a one-time idempotent copy into `~/.config/opencode/agents/`.
+Resolved against `@opencode-ai/plugin@1.15.10` and `@opencode-ai/sdk` type
+definitions:
+
+- **F1 — Agent inventory API:** `client.app.agents()` returns `{ data: Agent[] }`.
+  `Agent = { name, description?, mode: "subagent"|"primary"|"all", builtIn,
+  permission, model?: {modelID, providerID}, prompt?, tools }`. Subagents are
+  filtered by `mode === "subagent"`. (Resolves former R3.)
+- **F2 — Programmatic agent definition:** the `config` hook receives the typed
+  `Config`; `config.agent` is `{ [key: string]: AgentConfig }`. `AgentConfig`
+  has `model?, prompt?, tools?, description?, mode?, permission?` plus an index
+  signature, so `hidden` and `permission.task` are accepted. Defining
+  `config.agent.worker = {...}` is type-valid. (Resolves former R1.)
+- **F3 — Hooks:** `config?: (input: Config) => Promise<void>` and
+  `"experimental.chat.messages.transform"?: (input: {}, output: { messages:
+  { info: Message; parts: Part[] }[] }) => Promise<void>` both exist.
+
+Open risks:
+
 - **R2 — User override precedence.** Confirm that a user-defined
   `agent.worker` in their `opencode.json` wins over the plugin-defined default.
   Guard with "define only if not already present".
-- **R3 — SDK inventory API.** Confirm the SDK call that lists agents
-  (`client.agent` / `client.config`) and its shape; adapt `inventory.js`.
+- **R4 — Agent filter in `messages.transform`.** The hook's `input` is `{}`
+  (no `sessionID`, no `agent`), so restricting injection to the orchestrator
+  agent is not directly possible inside the hook. **Resolved by a spike
+  (Task 0)** that logs real hook payloads on a live session and picks the
+  injection/filter mechanism before any other code is written.
+- **R5 — `config.skills.paths` is untyped.** It is used by superpowers and
+  time-logger via an `any`-cast but is absent from the typed `Config`. The
+  spike (Task 0) also verifies that pushing onto `config.skills.paths` actually
+  registers the bundled skill.
 
 ## 10. Out of Scope (YAGNI)
 
