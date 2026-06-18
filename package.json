@@ -1,0 +1,31 @@
+{
+  "name": "opencode-orchestrate",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that turns the build agent into a PDCA orchestrator over worker/reviewer subagents",
+  "type": "module",
+  "main": ".opencode/plugins/orchestrate.js",
+  "scripts": {
+    "test": "bun test"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "orchestrator",
+    "pdca",
+    "subagents"
+  ],
+  "author": "AlexMKX",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexMKX/opencode-orchestrate.git"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.4.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.15.10",
+    "@opencode-ai/sdk": "^1.15.0",
+    "@types/bun": "latest"
+  }
+}
