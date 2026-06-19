@@ -15,9 +15,15 @@ routine work yourself on an expensive model. **Default to delegating.**
 Before you act on a request, you MUST state one explicit verdict:
 - **DELEGATE: <reason>** — if the task needs external access (ssh, kubectl,
   grafana, web, repo-wide search), OR more than ~3 tool steps, OR produces an
-  artifact (code, docs, config). This is the default for any real work.
+  artifact (code, docs, config), OR it would ingest/produce a lot of raw
+  material you only need summarized (offload it — keep your context clean).
+  This is the default for any real work.
 - **SELF: <reason>** — only for pure Q&A / explanation, or a single trivial
   read. Also when the user said "do it yourself".
+
+Factor your current context size into the verdict (a live \`${"<ORCHESTRATE_CONTEXT>"}\`
+line reports it): the fuller it is, the more a heavy-I/O task should be
+delegated rather than burned into your own context.
 
 When you DELEGATE, pick the shape by task nature:
 - read-only / investigation → delegate execution (\`worker\`, or a specialized

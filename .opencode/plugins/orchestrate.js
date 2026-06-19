@@ -17,6 +17,12 @@ import { fileURLToPath } from "node:url";
 import { agentDefinitions } from "../../src/agents.js";
 import { formatInventory } from "../../src/inventory.js";
 import { buildBootstrap, BOOTSTRAP_MARKER } from "../../src/bootstrap.js";
+import {
+  estimateContextTokens,
+  formatContextLine,
+  buildLimitMap,
+  DEFAULT_LIMIT,
+} from "../../src/context.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
@@ -29,6 +35,9 @@ const ORCHESTRATOR_AGENT = "build";
 
 // Cache the assembled bootstrap per process (inventory is read once).
 let _bootstrapCache; // undefined = not loaded
+
+// Model context-window lookup, resolved once from the provider list.
+let _limitMap; // undefined = not loaded
 
 /** @type {import("@opencode-ai/plugin").Plugin} */
 export const OrchestratePlugin = async ({ client }) => {
@@ -43,6 +52,18 @@ export const OrchestratePlugin = async ({ client }) => {
     }
     _bootstrapCache = buildBootstrap(inventory);
     return _bootstrapCache;
+  };
+
+  const getLimitMap = async () => {
+    if (_limitMap !== undefined) return _limitMap;
+    _limitMap = {};
+    try {
+      const res = await client.config.providers();
+      _limitMap = buildLimitMap(res?.data?.providers ?? []);
+    } catch {
+      // Best-effort; falls back to DEFAULT_LIMIT per model.
+    }
+    return _limitMap;
   };
 
   return {
@@ -90,6 +111,30 @@ export const OrchestratePlugin = async ({ client }) => {
       const bootstrap = await getBootstrap();
       const ref = firstUser.parts[0];
       firstUser.parts.unshift({ ...ref, type: "text", text: bootstrap });
+
+      // Append a live context-budget line to the LATEST user message so the
+      // orchestrator can weigh its current context size in the verdict. Not
+      // persisted (like the bootstrap), so it never accumulates across turns;
+      // null before the first assistant reply (context is still small).
+      const ctx = estimateContextTokens(output.messages);
+      let line = null;
+      if (ctx) {
+        const limits = await getLimitMap();
+        const limit =
+          limits[`${ctx.providerID}/${ctx.modelID}`] ??
+          limits[ctx.modelID] ??
+          DEFAULT_LIMIT;
+        line = formatContextLine(ctx.used, limit);
+      }
+      if (line) {
+        const lastUser = [...output.messages]
+          .reverse()
+          .find((m) => m?.info?.role === "user" && m.parts?.length);
+        if (lastUser) {
+          const lref = lastUser.parts[0];
+          lastUser.parts.push({ ...lref, type: "text", text: line });
+        }
+      }
     },
   };
 };
