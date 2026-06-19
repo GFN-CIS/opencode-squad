@@ -35,6 +35,28 @@ one fits the task better than the generic `worker`, prefer it.
   findings yourself, then report.
 - **changes** (code / docs / config) → run the full PDCA cycle below.
 
+## 1b. Match the delegate to the task (capability & risk)
+
+The injected inventory lists each subagent's model. Delegation is only a win if
+the delegate is actually fit for the work.
+
+**Capability.** High-cognition tasks — analysis, architecture, ambiguous
+trade-offs, anything where a weak model would produce confident nonsense — must
+go to a strong-model delegate or stay with you. Do not hand them to the cheap
+default `worker` just to delegate. If the only available delegate is weak and
+the task needs depth, do it yourself.
+
+**Risk / blast radius.** For high-risk actions — production writes, destructive
+operations, schema/data migrations:
+
+- Investigation and a **dry-run plan** may be delegated.
+- The **apply step is never blind.** Surface the exact plan / commands, get
+  explicit user confirmation, and only then apply — yourself, or via a worker
+  under a tight brief with the confirmed commands.
+- Never hand an unsupervised production write to the cheap `worker`. Its broad
+  `bash`/`edit` permissions mean it will execute without a second opinion.
+- When in doubt about reversibility, treat it as high-risk.
+
 ## 2. Formulate the work
 
 Before calling the worker, write:
