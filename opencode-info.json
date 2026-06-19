@@ -1,0 +1,10 @@
+{
+  "productId": "opencode-orchestrate",
+  "type": "plugin",
+  "displayName": "OpenCode Orchestrate",
+  "description": "An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator over worker and reviewer subagents. On every request it states an explicit SELF/DELEGATE verdict: trivial work it handles itself; real work (code, docs, config changes) it hands to a hidden `worker` subagent and routes through a `work-reviewer` for the Deming check-act cycle, with up to 3 retry iterations before escalating. Read-only investigations skip the reviewer entirely. A live context-usage signal feeds the routing decision so a heavy task is not burned into an already-full context window.",
+  "repoUrl": "https://github.com/AlexMKX/opencode-orchestrate",
+  "homepageUrl": "https://github.com/AlexMKX/opencode-orchestrate",
+  "tags": ["orchestration", "subagents", "pdca", "workflow", "agents", "automation", "plugin"],
+  "installation": "Add one line to `~/.config/opencode/opencode.json`:\n\n```json\n{\n  \"plugin\": [\"opencode-orchestrate@git+https://github.com/AlexMKX/opencode-orchestrate.git\"]\n}\n```\n\nThat is all. On next start, OpenCode registers everything automatically.\n\n**Optional: override subagent models**\n\nThe default model for both subagents is `anthropic/claude-sonnet-4-6`. To use a different model:\n\n```json\n{\n  \"plugin\": [\"opencode-orchestrate@git+https://github.com/AlexMKX/opencode-orchestrate.git\"],\n  \"agent\": {\n    \"worker\": { \"model\": \"anthropic/claude-sonnet-4-6\" },\n    \"work-reviewer\": { \"model\": \"anthropic/claude-haiku-4-5\" }\n  }\n}\n```"
+}
