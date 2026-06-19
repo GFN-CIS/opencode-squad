@@ -3,6 +3,8 @@ import {
   estimateContextTokens,
   formatContextLine,
   buildLimitMap,
+  resolveOrchestratorModel,
+  formatLocalDateTime,
   CONTEXT_MARKER,
 } from "../src/context.js";
 
@@ -68,6 +70,28 @@ test("format degrades gracefully without a known limit", () => {
   const out = formatContextLine(50000, null);
   expect(out).toContain("~50k tokens");
   expect(out).not.toContain("%");
+});
+
+test("resolveOrchestratorModel returns provider/model of the latest assistant", () => {
+  const messages = [
+    { info: { role: "assistant", modelID: "claude-opus-4-5", providerID: "anthropic" } },
+    { info: { role: "user" } },
+    { info: { role: "assistant", modelID: "claude-opus-4-7", providerID: "anthropic" } },
+    { info: { role: "user" } },
+  ];
+  expect(resolveOrchestratorModel(messages)).toBe("anthropic/claude-opus-4-7");
+  // No assistant yet -> null (caller uses the configured fallback).
+  expect(resolveOrchestratorModel([{ info: { role: "user" } }])).toBe(null);
+  expect(resolveOrchestratorModel(undefined)).toBe(null);
+});
+
+test("formatLocalDateTime renders ISO-like time with the zone", () => {
+  const d = new Date("2026-06-19T08:49:52Z");
+  expect(formatLocalDateTime(d, "UTC")).toBe("2026-06-19 08:49:52 (UTC)");
+  // A non-UTC zone shifts the clock and is labelled.
+  const moscow = formatLocalDateTime(d, "Europe/Moscow");
+  expect(moscow).toContain("11:49:52");
+  expect(moscow).toContain("(Europe/Moscow)");
 });
 
 test("limit map keys by provider/model and bare model (provider array)", () => {

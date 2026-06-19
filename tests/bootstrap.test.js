@@ -18,10 +18,28 @@ test("carries the capability and high-risk matching rules", () => {
   const out = buildBootstrap("(no subagents available)").toLowerCase();
   // Capability: don't hand high-cognition work to the cheap worker.
   expect(out).toContain("capability");
-  expect(out).toContain("strong model");
+  expect(out).toContain("strong");
   // Risk: prod-write/destructive needs confirmation before apply.
   expect(out).toContain("risk");
   expect(out).toContain("confirmation");
+});
+
+test("embeds live session facts (time + current model) when provided", () => {
+  const out = buildBootstrap("(no subagents available)", {
+    nowText: "2026-06-19 11:49:52 (Europe/Moscow)",
+    modelText: "anthropic/claude-opus-4-7",
+  });
+  expect(out.startsWith(BOOTSTRAP_MARKER)).toBe(true);
+  expect(out).toContain("2026-06-19 11:49:52 (Europe/Moscow)");
+  expect(out).toContain("anthropic/claude-opus-4-7");
+  expect(out.toLowerCase()).toContain("trust this over any assumption");
+});
+
+test("omits the facts block when no facts are provided", () => {
+  const out = buildBootstrap("(no subagents available)");
+  expect(out.startsWith(BOOTSTRAP_MARKER)).toBe(true);
+  expect(out).not.toContain("Current local time");
+  expect(out).not.toContain("You are running on");
 });
 
 test("marker is the exact stable string the injection guard relies on", () => {

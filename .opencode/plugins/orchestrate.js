@@ -22,6 +22,8 @@ import {
   formatContextLine,
   buildLimitMap,
   DEFAULT_LIMIT,
+  resolveOrchestratorModel,
+  formatLocalDateTime,
 } from "../../src/context.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,25 +35,30 @@ const SKILLS_DIR = path.join(PACKAGE_ROOT, "skills");
 // agent's sessions (verified via message.info.agent in the Task 0 spike).
 const ORCHESTRATOR_AGENT = "build";
 
-// Cache the assembled bootstrap per process (inventory is read once).
-let _bootstrapCache; // undefined = not loaded
+// Cache the subagent inventory string per process (it does not change at
+// runtime). The bootstrap itself is assembled per injection so the live facts
+// (current time, current model) stay fresh.
+let _inventoryCache; // undefined = not loaded
+
+// Configured orchestrator model, captured from config (fallback for turn 1,
+// before any assistant message reveals the actual model).
+let _orchestratorModel = null;
 
 // Model context-window lookup, resolved once from the provider list.
 let _limitMap; // undefined = not loaded
 
 /** @type {import("@opencode-ai/plugin").Plugin} */
 export const OrchestratePlugin = async ({ client }) => {
-  const getBootstrap = async () => {
-    if (_bootstrapCache !== undefined) return _bootstrapCache;
-    let inventory = "(no subagents available)";
+  const getInventory = async () => {
+    if (_inventoryCache !== undefined) return _inventoryCache;
+    _inventoryCache = "(no subagents available)";
     try {
       const res = await client.app.agents();
-      inventory = formatInventory(res?.data ?? []);
+      _inventoryCache = formatInventory(res?.data ?? []);
     } catch {
       // Inventory is best-effort; the bootstrap still works without it.
     }
-    _bootstrapCache = buildBootstrap(inventory);
-    return _bootstrapCache;
+    return _inventoryCache;
   };
 
   const getLimitMap = async () => {
@@ -68,6 +75,11 @@ export const OrchestratePlugin = async ({ client }) => {
 
   return {
     config: async (config) => {
+      // Capture the orchestrator's configured model as a turn-1 fallback
+      // (build's own model, else the global default).
+      _orchestratorModel =
+        config.agent?.[ORCHESTRATOR_AGENT]?.model ?? config.model ?? null;
+
       // Register bundled skills directory (runtime field, untyped).
       if (fs.existsSync(SKILLS_DIR)) {
         const cfg = /** @type {any} */ (config);
@@ -108,7 +120,16 @@ export const OrchestratePlugin = async ({ client }) => {
         return;
       }
 
-      const bootstrap = await getBootstrap();
+      // Assemble per injection so the live facts stay fresh (datetime must not
+      // be cached across the long-lived process; model may change per session).
+      const inventory = await getInventory();
+      const nowText = formatLocalDateTime(
+        new Date(),
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+      );
+      const modelText =
+        resolveOrchestratorModel(output.messages) ?? _orchestratorModel ?? null;
+      const bootstrap = buildBootstrap(inventory, { nowText, modelText });
       const ref = firstUser.parts[0];
       firstUser.parts.unshift({ ...ref, type: "text", text: bootstrap });
 

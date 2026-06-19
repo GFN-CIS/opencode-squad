@@ -47,6 +47,47 @@ export function estimateContextTokens(messages) {
   return null;
 }
 
+/**
+ * Resolve the orchestrator's actual model from the latest assistant turn
+ * (exact), as `providerID/modelID`. Null on the first turn (no assistant yet),
+ * where the caller falls back to the configured agent model.
+ *
+ * @param {Array<{info?:{role?:string,modelID?:string,providerID?:string}}>} messages
+ * @returns {string|null}
+ */
+export function resolveOrchestratorModel(messages) {
+  if (!Array.isArray(messages)) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const info = messages[i]?.info;
+    if (info?.role === "assistant" && info.modelID) {
+      return info.providerID ? `${info.providerID}/${info.modelID}` : info.modelID;
+    }
+  }
+  return null;
+}
+
+/**
+ * Format a Date as `YYYY-MM-DD HH:mm:ss (TimeZone)` in the given IANA zone.
+ * sv-SE gives an ISO-like, locale-stable rendering. Returns null if formatting
+ * is unavailable.
+ *
+ * @param {Date} date
+ * @param {string} [timeZone] IANA zone, e.g. "Europe/Moscow"
+ * @returns {string|null}
+ */
+export function formatLocalDateTime(date, timeZone) {
+  try {
+    const s = new Intl.DateTimeFormat("sv-SE", {
+      dateStyle: "short",
+      timeStyle: "medium",
+      timeZone,
+    }).format(date);
+    return timeZone ? `${s} (${timeZone})` : s;
+  } catch {
+    return null;
+  }
+}
+
 const k = (n) => `${Math.round(n / 1000)}k`;
 
 /**

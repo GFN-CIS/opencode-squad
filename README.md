@@ -25,8 +25,10 @@ That is all. On next start, OpenCode registers everything automatically.
 | `worker` | hidden subagent | Executes delegated tasks |
 | `work-reviewer` | hidden subagent | Reviews worker output, returns a strict JSON verdict |
 | `orchestrating-subagents` | skill | Loaded into the `build` agent; governs the PDCA cycle |
-| Bootstrap | hidden injection | Injected once into the first user message of the `build` agent; sets the orchestrator role, the selection rules, and an inventory of available subagents |
+| Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
 | Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
+
+The bootstrap carries live session facts resolved at injection time — the current local time (with timezone) and the model the orchestrator is actually running on (so an Opus session does not mistake itself for Sonnet). Each subagent in the inventory is listed with its model, so the orchestrator can match work to capability.
 
 "Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via the task tool. Both injections target **only the `build` agent's own sessions** — worker/reviewer subagent sessions are never injected into, so there is no recursion.
 
@@ -80,7 +82,7 @@ Once it delegates, the shape depends on the task:
 
 Delegating only helps if the delegate is actually fit for the task. The injected inventory lists each subagent's model, and the orchestrator weighs two things before handing work over:
 
-- **Capability** — high-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheap default `worker`, where a weak model would produce confident nonsense. The orchestrator picks a strong-model delegate or keeps the task itself.
+- **Capability** — the orchestrator routes by what the *specific* models involved are good and bad at as of the current date (its own model and each subagent's model are in the bootstrap/inventory), rather than from fixed rules. High-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheap default `worker`, where a weak model would produce confident nonsense — it picks a strong-model delegate or keeps the task itself.
 - **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheap `worker` (its broad `bash`/`edit` permissions would execute it without a second opinion).
 
 For full routing rules, escape hatches, and edge-case handling see [skills/orchestrating-subagents/SKILL.md](skills/orchestrating-subagents/SKILL.md).

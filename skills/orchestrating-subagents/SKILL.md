@@ -40,11 +40,15 @@ one fits the task better than the generic `worker`, prefer it.
 The injected inventory lists each subagent's model. Delegation is only a win if
 the delegate is actually fit for the work.
 
-**Capability.** High-cognition tasks — analysis, architecture, ambiguous
-trade-offs, anything where a weak model would produce confident nonsense — must
-go to a strong-model delegate or stay with you. Do not hand them to the cheap
-default `worker` just to delegate. If the only available delegate is weak and
-the task needs depth, do it yourself.
+**Capability.** Each subagent's model is in the inventory and your own model and
+the current date are stated in the bootstrap. Route by what those *specific*
+models are actually good and bad at as of that date — reason from the model
+identities, not from stale habits — and never send a task into a model's known
+weak spot. High-cognition tasks — analysis, architecture, ambiguous trade-offs,
+anything where a weak model would produce confident nonsense — must go to a
+strong-model delegate or stay with you. Do not hand them to the cheap default
+`worker` just to delegate. If the only available delegate is weak and the task
+needs depth, do it yourself.
 
 **Risk / blast radius.** For high-risk actions — production writes, destructive
 operations, schema/data migrations:

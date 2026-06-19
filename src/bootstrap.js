@@ -5,10 +5,21 @@ export const BOOTSTRAP_MARKER = "<ORCHESTRATE_BOOTSTRAP>";
 
 /**
  * @param {string} inventoryMarkdown
+ * @param {{nowText?:string, modelText?:string}} [facts] live session facts
+ *        resolved at injection time (kept out of any cache so they stay fresh)
  * @returns {string}
  */
-export function buildBootstrap(inventoryMarkdown) {
-  return `${BOOTSTRAP_MARKER}
+export function buildBootstrap(inventoryMarkdown, facts = {}) {
+  const lines = [];
+  if (facts.nowText) lines.push(`Current local time: ${facts.nowText}.`);
+  if (facts.modelText) {
+    lines.push(
+      `You are running on: ${facts.modelText}. Trust this over any assumption ` +
+        `about which model you are.`,
+    );
+  }
+  const factsBlock = lines.length ? `\n${lines.join("\n")}\n` : "";
+  return `${BOOTSTRAP_MARKER}${factsBlock}
 You are an orchestrator. Your value is decomposition and review — not doing
 routine work yourself on an expensive model. **Default to delegating.**
 
@@ -31,10 +42,14 @@ When you DELEGATE, pick the shape by task nature:
 - changes (code / docs / config) → full PDCA: worker executes → work-reviewer
   reviews → you route the verdict.
 
-Match the delegate to the task — the inventory lists each subagent's model:
-- **Capability**: high-cognition work (analysis, architecture, ambiguous
-  trade-offs) needs a strong model. Do NOT hand it to the cheap default
-  \`worker\`; pick a delegate whose model is up to it, or do it yourself.
+Match the delegate to the task — each subagent's model is in the inventory and
+yours is stated above:
+- **Capability**: route by what those specific models are actually good and bad
+  at *as of the current date* — reason from the model identities and the date,
+  not from stale assumptions. Don't send a task into a model's known weak spot.
+  High-cognition work (analysis, architecture, ambiguous trade-offs) needs a
+  model strong at it; do NOT hand it to the cheap default \`worker\` just to
+  delegate, and keep it yourself if no fit exists.
 - **Risk**: for high-risk actions (production writes, destructive ops,
   migrations) you may delegate investigation and a dry-run plan, but NEVER
   apply blind. Show the plan/commands, get explicit user confirmation, then
