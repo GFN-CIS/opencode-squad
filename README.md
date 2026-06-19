@@ -1,6 +1,6 @@
 # opencode-orchestrate
 
-An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator, delegating non-trivial work to a `worker` subagent and routing its output through a `work-reviewer` subagent before accepting the result.
+An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator. On every request it states an explicit `SELF`/`DELEGATE` verdict: trivial work it does itself; real work it hands to a `worker` subagent — routing changes through a `work-reviewer` (the Deming check), and investigations straight back to itself. A live context-usage signal feeds the decision so a heavy task isn't burned into an already-full context.
 
 ---
 
@@ -25,9 +25,10 @@ That is all. On next start, OpenCode registers everything automatically.
 | `worker` | hidden subagent | Executes delegated tasks |
 | `work-reviewer` | hidden subagent | Reviews worker output, returns a strict JSON verdict |
 | `orchestrating-subagents` | skill | Loaded into the `build` agent; governs the PDCA cycle |
-| Bootstrap | hidden injection | Injected once into the first user message of the `build` agent; contains an inventory of available subagents |
+| Bootstrap | hidden injection | Injected once into the first user message of the `build` agent; sets the orchestrator role, the selection rules, and an inventory of available subagents |
+| Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
 
-"Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via the task tool.
+"Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via the task tool. Both injections target **only the `build` agent's own sessions** — worker/reviewer subagent sessions are never injected into, so there is no recursion.
 
 ---
 
@@ -49,19 +50,46 @@ Your `agent` block wins; anything you do not specify falls back to the default.
 
 ---
 
-## How the PDCA cycle works
+## How it works
 
-The `build` agent (the orchestrator) decides at the start of each task whether to act itself or delegate:
+On **every** request the orchestrator must state one explicit verdict before acting — `SELF: <reason>` or `DELEGATE: <reason>`. This is the core mechanic: it forces a conscious choice instead of silently doing the work itself (the failure mode this plugin was built to fix). The default leans toward delegating — an expensive primary model's value is decomposition and review, not routine work.
 
-- **Trivial task** (single step, no ambiguity) — orchestrator does it directly. No subagents are involved.
-- **Non-trivial task** — the orchestrator formulates a task brief and definition of done, then runs the loop:
-  1. **Plan / Do** — calls `worker` with the brief, context, and (from iteration 2 onward) the reviewer's feedback.
+### Selection principles
+
+The orchestrator picks **DELEGATE** when *any* signal is present (this is the default for real work):
+
+- **External access** — the task needs ssh, kubectl, grafana, the web, or a repo-wide search.
+- **Depth** — it would take more than ~3 tool steps.
+- **Artifact** — it produces code, docs, or config.
+- **Heavy I/O** — it would ingest or generate a lot of raw material when you only need a summary (offload it, keep the orchestrator's context clean).
+- **Context pressure** — the fuller the orchestrator's own context already is, the more a heavy task should be delegated rather than burned into it. A live `<ORCHESTRATE_CONTEXT>` line (e.g. `~120k / 1000k (12%)`) reports the current size each turn so this is a real number, not a guess.
+
+It picks **SELF** only for: pure Q&A / explanation, a single trivial read, or when you explicitly told it to.
+
+### Delegation shapes
+
+Once it delegates, the shape depends on the task:
+
+- **Read-only / investigation** (status checks, "why is X", log/metric digs) → delegate execution to `worker` (or a specialized read agent like `Explore`) with **no reviewer** — there is no artifact to review. The orchestrator sanity-checks the findings itself, then reports.
+- **Changes** (code / docs / config) → the full PDCA loop:
+  1. **Plan / Do** — calls `worker` with the brief, definition of done, context, and (from iteration 2 onward) the reviewer's feedback.
   2. **Check** — calls `work-reviewer` with the brief and the worker's output. The reviewer returns a strict JSON verdict: `{"verdict": "PASS"|"FAIL", "checks": [...], "issues": [...], "suggested_fixes": [...], "blocking": <bool>}`.
-  3. **Act** — on `PASS`, the orchestrator runs a final sanity-check (e.g. tests/lint) and delivers the result. On `FAIL`, it retries — up to **3 iterations total**.
-
-After 3 failures the orchestrator escalates to the user rather than retrying blindly.
+  3. **Act** — on `PASS`, the orchestrator runs a final sanity-check (e.g. tests/lint) and delivers the result. On `FAIL`, it retries — up to **3 iterations total**, then escalates to the user rather than retrying blindly.
 
 For full routing rules, escape hatches, and edge-case handling see [skills/orchestrating-subagents/SKILL.md](skills/orchestrating-subagents/SKILL.md).
+
+---
+
+## Forcing a mode
+
+The verdict is the model's call, but you steer it directly:
+
+- **Force SELF** — say *"do it yourself"* (or "делай сам") in your request. This is a first-class override: the orchestrator skips delegation entirely.
+- **Force DELEGATE** — just say *"delegate this"* / *"делегируй"*. The orchestrator follows the instruction even when a task would otherwise look trivial.
+- **Force a specific subagent** — name it: *"delegate to `Explore`"*, *"use the worker"*. If a specialized subagent fits better than the generic `worker`, the orchestrator prefers it on its own, but naming one is decisive.
+- **Skip the reviewer** — frame the task as read-only / investigation, or say so outright ("just investigate, no review"). Changes always default to the full PDCA loop.
+
+You can confirm the orchestrator is in the right mode by reading its first line — it prints `SELF: …` or `DELEGATE: …` with its reasoning before acting.
 
 ---
 
@@ -75,9 +103,13 @@ Check the OpenCode log for a line referencing `orchestrate.js` or `opencode-orch
 
 `worker` and `work-reviewer` do not appear in the `@` mention menu because they are registered with `hidden: true`. They are invoked internally by the orchestrator. If you need to verify they are registered, use a one-off session and ask the model to list available subagents (it can introspect the session state).
 
+**Check which mode it chose**
+
+The orchestrator prints its verdict (`SELF: …` / `DELEGATE: …`) as the first line of its reply. If it delegated when you wanted it to act itself, prepend "do it yourself" to your request; if it acted itself when you wanted delegation, say "delegate this". See [Forcing a mode](#forcing-a-mode).
+
 **Iteration cap and cost**
 
-Each PDCA iteration fires two LLM calls (worker + reviewer) on top of the orchestrator's own context. On a complex task with 3 iterations that is potentially 7+ model calls. Use this plugin for genuinely non-trivial work; the orchestrator is instructed to handle simple tasks itself.
+A full PDCA iteration (the *changes* branch) fires two LLM calls (worker + reviewer) on top of the orchestrator's own context. On a complex task with 3 iterations that is potentially 7+ model calls. Read-only / investigation delegations skip the reviewer, and trivial tasks are handled by the orchestrator directly — so cost scales with task weight, which is what the selection signals (and the live context line) are there to gauge.
 
 ---
 
@@ -85,7 +117,7 @@ Each PDCA iteration fires two LLM calls (worker + reviewer) on top of the orches
 
 ```bash
 bun install
-bun test          # runs 9 unit tests
+bun test          # runs the unit suite (bootstrap, inventory, agents, context)
 ```
 
 ---
