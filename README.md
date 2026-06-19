@@ -102,6 +102,19 @@ You can confirm the orchestrator is in the right mode by reading its first line 
 
 ---
 
+## What a turn looks like
+
+The orchestrator opens with its verdict, then proceeds:
+
+| Request | Verdict (first line) | What happens |
+|---|---|---|
+| "Is the working tree clean?" | `SELF: single trivial read.` | Runs `git status` itself. No subagents. |
+| "Why are the prod pages timing out?" | `DELEGATE: investigation across logs/metrics → Explore, no reviewer.` | A read agent digs through logs/metrics; the orchestrator sanity-checks the findings and reports. |
+| "Add input validation to the upload endpoint." | `DELEGATE: produces code → worker, full PDCA.` | `worker` implements, `work-reviewer` checks against the definition of done, up to 3 iterations, then a final sanity-check. |
+| "Drop the stale `sessions_old` table on prod." | `DELEGATE: high-risk write — plan first, confirm before apply.` | Investigation and a dry-run plan may be delegated; the exact command is surfaced and **waits for your confirmation** before anything runs. |
+
+---
+
 ## Troubleshooting
 
 **Confirm the plugin loaded**
