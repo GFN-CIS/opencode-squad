@@ -4,6 +4,14 @@
   "description": "OpenCode plugin that turns the build agent into a PDCA orchestrator over worker/reviewer subagents",
   "type": "module",
   "main": ".opencode/plugins/orchestrate.js",
+  "files": [
+    ".opencode",
+    "src",
+    "prompts",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "bun test"
   },
