@@ -76,6 +76,13 @@ Once it delegates, the shape depends on the task:
   2. **Check** — calls `work-reviewer` with the brief and the worker's output. The reviewer returns a strict JSON verdict: `{"verdict": "PASS"|"FAIL", "checks": [...], "issues": [...], "suggested_fixes": [...], "blocking": <bool>}`.
   3. **Act** — on `PASS`, the orchestrator runs a final sanity-check (e.g. tests/lint) and delivers the result. On `FAIL`, it retries — up to **3 iterations total**, then escalates to the user rather than retrying blindly.
 
+### Matching the delegate (capability & risk)
+
+Delegating only helps if the delegate is actually fit for the task. The injected inventory lists each subagent's model, and the orchestrator weighs two things before handing work over:
+
+- **Capability** — high-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheap default `worker`, where a weak model would produce confident nonsense. The orchestrator picks a strong-model delegate or keeps the task itself.
+- **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheap `worker` (its broad `bash`/`edit` permissions would execute it without a second opinion).
+
 For full routing rules, escape hatches, and edge-case handling see [skills/orchestrating-subagents/SKILL.md](skills/orchestrating-subagents/SKILL.md).
 
 ---

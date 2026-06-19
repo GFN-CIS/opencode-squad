@@ -14,6 +14,16 @@ test("mentions the delegation decision and the skill name", () => {
   expect(out).toContain("orchestrating-subagents");
 });
 
+test("carries the capability and high-risk matching rules", () => {
+  const out = buildBootstrap("(no subagents available)").toLowerCase();
+  // Capability: don't hand high-cognition work to the cheap worker.
+  expect(out).toContain("capability");
+  expect(out).toContain("strong model");
+  // Risk: prod-write/destructive needs confirmation before apply.
+  expect(out).toContain("risk");
+  expect(out).toContain("confirmation");
+});
+
 test("marker is the exact stable string the injection guard relies on", () => {
   // Pinned: the plugin's double-injection guard does
   // `text.includes(BOOTSTRAP_MARKER)`. Changing this value silently breaks
