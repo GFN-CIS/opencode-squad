@@ -25,6 +25,7 @@ That is all. On next start, OpenCode registers everything automatically.
 | `worker` | hidden subagent | Executes delegated tasks |
 | `work-reviewer` | hidden subagent | Reviews worker output, returns a strict JSON verdict |
 | `orchestrating-subagents` | skill | Loaded into the `build` agent; governs the PDCA cycle |
+| `generating-model-workers` | skill | Generates one hidden `worker-<provider>-<model>` per model id you supply, giving the orchestrator a menu of models to delegate to |
 | Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
 | Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
 
@@ -49,6 +50,20 @@ The default model for both subagents is `anthropic/claude-sonnet-4-6`. To use a 
 ```
 
 Your `agent` block wins; anything you do not specify falls back to the default.
+
+---
+
+## Per-model workers
+
+opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model is to have one named worker agent per model. The `generating-model-workers` skill does this: you give it a list of `provider/model` ids and it writes one hidden worker agent per model into `~/.config/opencode/agent/`.
+
+```
+anthropic/claude-opus-4-7   →  worker-anthropic-claude-opus-4-7
+openai/gpt-5.5              →  worker-openai-gpt-5-5
+google/gemini-3.5-flash     →  worker-google-gemini-3-5-flash
+```
+
+Each generated worker shares the bundled worker prompt and permissions, differs only in `model`, and is `hidden` (dispatched by the orchestrator via `task`, not shown in the `@`-menu). They appear in the orchestrator's inventory **with their models**, which is what makes the capability-matching rule concrete — it can route analysis/architecture to a strong model and mechanical work to a cheap one. Re-running syncs the set (prunes generated workers no longer listed; never touches hand-authored agents). Reload opencode to pick up new agents. The generic `worker` / `work-reviewer` remain as the default.
 
 ---
 
