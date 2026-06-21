@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import {
   estimateContextTokens,
+  crudePayloadTokens,
   formatContextLine,
   buildLimitMap,
   resolveOrchestratorModel,
@@ -48,19 +49,68 @@ test("estimate falls back to input+output+reasoning+cache when total absent", ()
   expect(estimateContextTokens(messages).used).toBe(20135);
 });
 
+test("estimate suppresses the line when a compaction made the count stale", () => {
+  // Last recorded turn is huge, but the live payload is tiny -> a compaction
+  // happened and 580k is stale. Suppress (null) rather than reporting "60%".
+  const messages = [
+    {
+      info: {
+        role: "assistant",
+        modelID: "claude-opus-4-8",
+        providerID: "anthropic",
+        tokens: { total: 580000, cache: { read: 0, write: 0 } },
+      },
+      parts: [{ type: "text", text: "x".repeat(40) }],
+    },
+    { info: { role: "user" }, parts: [{ type: "text", text: "ok" }] },
+  ];
+  expect(estimateContextTokens(messages)).toBe(null);
+});
+
+test("estimate keeps the accurate count when the payload is consistent", () => {
+  const big = "y".repeat(200000); // crude ~50k, not < 25% of 48k -> no false drop
+  const messages = [
+    { info: { role: "assistant", tokens: { total: 48000 } }, parts: [{ type: "text", text: big }] },
+  ];
+  expect(estimateContextTokens(messages).used).toBe(48000);
+});
+
+test("crudePayloadTokens counts all parts including tool content", () => {
+  const m = [
+    {
+      parts: [
+        { type: "text", text: "a".repeat(400) },
+        { type: "tool", state: { output: "b".repeat(400) } },
+      ],
+    },
+  ];
+  expect(crudePayloadTokens(m)).toBeGreaterThan(150);
+  expect(crudePayloadTokens([])).toBe(0);
+  expect(crudePayloadTokens(undefined)).toBe(0);
+});
+
 test("format returns null when there is no usage", () => {
   expect(formatContextLine(null, 200000)).toBe(null);
   expect(formatContextLine(0, 200000)).toBe(null);
 });
 
-test("format shows percent and a nudge past 50%", () => {
-  const out = formatContextLine(120000, 200000);
-  expect(out.startsWith(CONTEXT_MARKER)).toBe(true);
-  expect(out).toContain("~120k / 200k (60%)");
-  expect(out.toUpperCase()).toContain("PREFER DELEGATING");
+test("nudge keys on remaining headroom, not a flat percentage", () => {
+  // 58% of a 1M window = ~420k free: must NOT nudge (the post-compaction gripe).
+  const big = formatContextLine(580000, 1000000);
+  expect(big.startsWith(CONTEXT_MARKER)).toBe(true);
+  expect(big).toContain("(58%)");
+  expect(big.toUpperCase()).not.toContain("PREFER DELEGATING");
+  // Near-full 1M window -> nudge.
+  expect(formatContextLine(900000, 1000000).toUpperCase()).toContain(
+    "PREFER DELEGATING",
+  );
+  // Small window near full -> nudge.
+  expect(formatContextLine(170000, 200000).toUpperCase()).toContain(
+    "PREFER DELEGATING",
+  );
 });
 
-test("format omits the nudge below 50%", () => {
+test("format shows percent/size and no nudge with ample headroom", () => {
   const out = formatContextLine(40000, 200000);
   expect(out).toContain("(20%)");
   expect(out.toUpperCase()).not.toContain("PREFER DELEGATING");
