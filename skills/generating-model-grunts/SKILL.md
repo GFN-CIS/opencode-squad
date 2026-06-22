@@ -32,8 +32,8 @@ auto-discover models unless asked.
 
 2. **Locate the generator** (shipped with this package):
    ```bash
-   SCRIPT="$(find ~/.cache/opencode/packages -path '*node_modules/opencode-orchestrate/scripts/generate-workers.mjs' 2>/dev/null | head -1)"
-   [ -z "$SCRIPT" ] && SCRIPT="$(find ~ -path '*opencode-orchestrate/scripts/generate-workers.mjs' 2>/dev/null | head -1)"
+   SCRIPT="$(find ~/.cache/opencode/packages -path '*node_modules/opencode-squad/scripts/generate-workers.mjs' 2>/dev/null | head -1)"
+   [ -z "$SCRIPT" ] && SCRIPT="$(find ~ -path '*opencode-squad/scripts/generate-workers.mjs' 2>/dev/null | head -1)"
    echo "$SCRIPT"
    ```
 
