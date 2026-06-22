@@ -1,24 +1,24 @@
 #!/usr/bin/env node
-// Generate one hidden worker subagent per model id.
+// Generate one hidden grunt (per-model worker) subagent per model id.
 //
 // Usage:
 //   node generate-workers.mjs [--dir <agentDir>] [--no-prune] <provider/model>...
 //
 // Defaults to the global agent dir (~/.config/opencode/agent). Re-running syncs
 // the managed set: it (re)writes the listed models and prunes previously
-// generated worker-*.md files (those carrying our marker) that are no longer in
-// the list. Hand-authored agents are never touched.
+// generated grunt-*.md (and legacy worker-*.md) files carrying our marker that
+// are no longer in the list. Hand-authored agents are never touched.
 
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { slugForModel, workerAgentMarkdown, GENERATED_MARKER } from "../src/workers.js";
+import { slugForModel, workerAgentMarkdown, GENERATED_MARKER_PREFIX } from "../src/workers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
-const WORKER_PROMPT = path.join(PACKAGE_ROOT, "prompts", "worker.md");
+const GRUNT_PROMPT = path.join(PACKAGE_ROOT, "prompts", "grunt.md");
 
 function parseArgs(argv) {
   const models = [];
@@ -45,7 +45,7 @@ function main() {
     process.exit(2);
   }
 
-  const promptBody = fs.readFileSync(WORKER_PROMPT, "utf8");
+  const promptBody = fs.readFileSync(GRUNT_PROMPT, "utf8");
   fs.mkdirSync(dir, { recursive: true });
 
   const written = [];
@@ -57,11 +57,14 @@ function main() {
     written.push({ id, filename });
   }
 
-  // Prune our own previously-generated workers that are no longer requested.
+  // Prune our own previously-generated grunts that are no longer requested.
+  // Match both the current `grunt-` prefix and the legacy `worker-` one, so the
+  // worker->grunt rename migrates cleanly. Only files carrying our marker prefix
+  // are touched — hand-authored agents are never removed.
   const pruned = [];
   if (prune) {
     for (const f of fs.readdirSync(dir)) {
-      if (!/^worker-.*\.md$/.test(f)) continue;
+      if (!/^(?:grunt|worker)-.*\.md$/.test(f)) continue;
       const slug = f.replace(/\.md$/, "");
       if (wantedSlugs.has(slug)) continue;
       const full = path.join(dir, f);
@@ -71,7 +74,7 @@ function main() {
       } catch {
         continue;
       }
-      if (body.includes(GENERATED_MARKER)) {
+      if (body.includes(GENERATED_MARKER_PREFIX)) {
         fs.unlinkSync(full);
         pruned.push(f);
       }
@@ -82,7 +85,7 @@ function main() {
   for (const w of written) console.log(`  wrote  ${w.filename}   (${w.id})`);
   for (const f of pruned) console.log(`  pruned ${f}`);
   console.log(
-    `\n${written.length} worker(s) generated, ${pruned.length} pruned.`,
+    `\n${written.length} grunt(s) generated, ${pruned.length} pruned.`,
   );
   console.log(
     "Reload opencode (restart the TUI / start a new run) to pick up the new agents.",

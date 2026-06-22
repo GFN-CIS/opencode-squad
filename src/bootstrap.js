@@ -32,7 +32,7 @@ On every request, state one explicit verdict before acting:
   default for real work. Route by capability — each subagent's model is in the
   inventory, yours is above; don't send high-cognition work (analysis,
   architecture) to a weak model, and never hand an unsupervised production write
-  to the cheap worker.
+  to the cheap grunt.
 
 A live \`${"<ORCHESTRATE_CONTEXT>"}\` line reports your context size each turn —
 weigh it (heavy work bloats your own context; delegating offloads it).

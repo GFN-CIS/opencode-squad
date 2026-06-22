@@ -9,32 +9,32 @@ const promptsDir = path.join(
   "prompts",
 );
 
-test("defines worker and work-reviewer subagents", () => {
+test("defines grunt and drill subagents", () => {
   const defs = agentDefinitions(promptsDir);
-  expect(Object.keys(defs).sort()).toEqual(["work-reviewer", "worker"]);
+  expect(Object.keys(defs).sort()).toEqual(["drill", "grunt"]);
 });
 
-test("worker can edit and run bash but cannot spawn tasks", () => {
-  const { worker } = agentDefinitions(promptsDir);
-  expect(worker.mode).toBe("subagent");
-  expect(worker.hidden).toBe(true);
-  expect(worker.model).toBe("anthropic/claude-sonnet-4-6");
-  expect(worker.permission.edit).toBe("allow");
-  expect(worker.permission.bash).toBe("allow");
-  expect(worker.permission.task["*"]).toBe("deny");
-  expect(worker.prompt.length).toBeGreaterThan(20);
+test("grunt can edit and run bash but cannot spawn tasks", () => {
+  const { grunt } = agentDefinitions(promptsDir);
+  expect(grunt.mode).toBe("subagent");
+  expect(grunt.hidden).toBe(true);
+  expect(grunt.model).toBe("anthropic/claude-sonnet-4-6");
+  expect(grunt.permission.edit).toBe("allow");
+  expect(grunt.permission.bash).toBe("allow");
+  expect(grunt.permission.task["*"]).toBe("deny");
+  expect(grunt.prompt.length).toBeGreaterThan(20);
 });
 
-test("reviewer is read-only and cannot spawn tasks", () => {
-  const reviewer = agentDefinitions(promptsDir)["work-reviewer"];
-  expect(reviewer.mode).toBe("subagent");
-  expect(reviewer.hidden).toBe(true);
-  expect(reviewer.model).toBe("anthropic/claude-sonnet-4-6");
-  expect(reviewer.permission.edit).toBe("deny");
-  expect(reviewer.permission.bash).toBe("deny");
-  // webfetch is the one capability the reviewer needs to read external refs;
+test("drill is read-only and cannot spawn tasks", () => {
+  const { drill } = agentDefinitions(promptsDir);
+  expect(drill.mode).toBe("subagent");
+  expect(drill.hidden).toBe(true);
+  expect(drill.model).toBe("anthropic/claude-sonnet-4-6");
+  expect(drill.permission.edit).toBe("deny");
+  expect(drill.permission.bash).toBe("deny");
+  // webfetch is the one capability drill needs to read external refs;
   // assert it so an accidental removal is caught.
-  expect(reviewer.permission.webfetch).toBe("allow");
-  expect(reviewer.permission.task["*"]).toBe("deny");
-  expect(reviewer.prompt).toContain("STRICT JSON");
+  expect(drill.permission.webfetch).toBe("allow");
+  expect(drill.permission.task["*"]).toBe("deny");
+  expect(drill.prompt).toContain("STRICT JSON");
 });
