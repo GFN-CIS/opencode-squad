@@ -71,15 +71,15 @@ test("format returns null when there is no usage", () => {
   expect(formatContextLine(0, 200000)).toBe(null);
 });
 
-test("format states the facts with no threshold or delegate judgment", () => {
+test("format states the facts with no threshold, judgment, or caveats", () => {
   // 58% of a 1M window must NOT carry any "prefer delegating" instruction —
-  // the model decides; we only report the number and the staleness caveat.
+  // the model decides; we report only the number. No compaction caveat either:
+  // it would hand the model an excuse to dismiss the figure.
   const out = formatContextLine(580000, 1000000);
   expect(out.startsWith(CONTEXT_MARKER)).toBe(true);
   expect(out).toContain("(58%)");
   expect(out.toUpperCase()).not.toContain("PREFER DELEGAT");
-  expect(out).toContain("last completed turn");
-  expect(out.toLowerCase()).toContain("compaction");
+  expect(out.toLowerCase()).not.toContain("compaction");
 });
 
 test("format shows percent/size for a small fill too", () => {
