@@ -44,6 +44,17 @@ grunt or stay with you. Do not hand them to the cheap default `grunt` just to
 delegate. If the only available delegate is weak and the task needs depth, do it
 yourself.
 
+**Cost is total, not per-token.** The cheapest model is rarely the cheapest job.
+A weak grunt on a task beyond it burns more of its own (cheap) tokens through
+extra turns and lower quality — and worse, burns *your* expensive tokens
+reviewing thin work and sending "fix it" rounds, so the bill can match or beat
+using a capable model once. Optimize three vectors together — quality, speed,
+cost — and lean toward quality and speed: a capable grunt that nails it in one
+pass usually wins on all three. The cheap grunt is the right call only where it
+genuinely suffices (mechanical, well-specified work); equally, don't reach for an
+expensive model when a cheap one clearly does the job. Pick the optimum, not the
+extreme.
+
 **Risk / blast radius.** For high-risk actions — production writes, destructive
 operations, schema/data migrations:
 
