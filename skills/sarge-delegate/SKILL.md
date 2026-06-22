@@ -55,6 +55,12 @@ genuinely suffices (mechanical, well-specified work); equally, don't reach for a
 expensive model when a cheap one clearly does the job. Pick the optimum, not the
 extreme.
 
+And the optimum is not fixed — **it shifts with the stakes.** The more sensitive
+the job (production, security, money, data, anything hard to undo), the harder
+you lean to quality — a strong-model grunt, or do it yourself — even at higher
+cost and lower speed; a wrong answer there is far more expensive than the tokens.
+Cheap-and-fast is for low-stakes, well-specified, reversible work.
+
 **Risk / blast radius.** For high-risk actions — production writes, destructive
 operations, schema/data migrations:
 
