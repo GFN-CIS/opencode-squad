@@ -102,6 +102,36 @@ For iteration N = 1..3:
 - Two consecutive FAILs on the same fundamental blocker → take control: either
   finish it yourself or escalate. This signals the brief/DoD was poorly formed.
 
+## 4a. When work stalls — break the frame, don't grind
+
+This applies to **your own (SELF) work too**, not just the worker's — the SELF
+path otherwise has no circuit breaker. You are stalled when any of these holds:
+
+- you've exceeded the effort your verdict assumed — a "trivial / ≤3 steps" SELF
+  premise is now false;
+- you're repeating an approach, or hitting the same error, with no new
+  information;
+- turns pass with no new artifact or movement toward done.
+
+A stall falsifies the "I can just do this" hypothesis. Do NOT try harder on the
+same track — trying harder is what a loop feels like from the inside. Escalate
+by changing the frame, cheapest first:
+
+1. **Name it.** Stop and write: the goal, what you tried, why each attempt
+   failed. Externalizing often breaks the loop and becomes the brief for what
+   comes next.
+2. **Re-decide the verdict.** A stalled SELF step is no longer simple → default
+   to DELEGATE.
+3. **Fresh context, different model.** Delegate to a worker on a *different*
+   model than the one that stalled (see the inventory), passing the "what
+   failed" write-up so it does not repeat dead ends. A clean context + a
+   different model is the strongest loop-breaker — the stuck model's context is
+   poisoned by its own failed attempts.
+4. **Switch method.** For a real bug, use `systematic-debugging` (find the root
+   cause) instead of more attempts.
+5. **Escalate to the user** when blocked on access, information, or a decision —
+   do not auto-retry those.
+
 ## 5. Escape hatches
 
 You may abort the cycle at any point and finish the work yourself if delegation

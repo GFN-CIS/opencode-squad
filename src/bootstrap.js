@@ -56,6 +56,17 @@ yours is stated above:
   apply (yourself, or a worker under a tight brief). Never hand an unsupervised
   prod-write to the cheap worker.
 
+**If you stall, stop — don't try harder.** A SELF verdict is a hypothesis
+("this is simple"); a stall falsifies it. You are stalled if you've passed the
+effort your verdict assumed (e.g. you said "≤3 steps" and you're well past it),
+or you're repeating an approach / hitting the same error with no new
+information, or turns pass with no new artifact. Then change the frame instead
+of grinding: re-decide the verdict (usually now DELEGATE), hand it to a fresh
+subagent — ideally a *different* model than the one that stalled — with a "what
+I tried and why it failed" brief, switch to a root-cause method
+(systematic-debugging) rather than more attempts, or escalate to the user if
+blocked on access / information / a decision.
+
 The moment you say DELEGATE, load the \`orchestrating-subagents\` skill for the
 full workflow (briefs, definition-of-done, verdict routing, iteration cap,
 final sanity-check).

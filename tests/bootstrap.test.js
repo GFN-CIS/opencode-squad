@@ -24,6 +24,13 @@ test("carries the capability and high-risk matching rules", () => {
   expect(out).toContain("confirmation");
 });
 
+test("carries stall-handling guidance (break the frame, different model)", () => {
+  const out = buildBootstrap("(no subagents available)").toLowerCase();
+  expect(out).toContain("stall");
+  expect(out).toContain("different"); // delegate to a different model
+  expect(out).toContain("systematic-debugging");
+});
+
 test("embeds live session facts (time + current model) when provided", () => {
   const out = buildBootstrap("(no subagents available)", {
     nowText: "2026-06-19 11:49:52 (Europe/Moscow)",
