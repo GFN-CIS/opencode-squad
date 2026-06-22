@@ -10,8 +10,11 @@
 // generator can prune its own previous output without touching hand-authored
 // agents. Detection uses this prefix (stable across renames); the full line
 // below carries the current skill name for readability.
-export const GENERATED_MARKER_PREFIX = "generated-by: opencode-orchestrate";
+export const GENERATED_MARKER_PREFIX = "generated-by: opencode-squad";
 export const GENERATED_MARKER = `${GENERATED_MARKER_PREFIX} generating-model-grunts`;
+// Prune detection matches files from before the opencode-orchestrate -> squad
+// rename too, so regenerating cleanly migrates older generated agents.
+export const GENERATED_MARKER_DETECT = "generated-by: opencode-";
 
 // Per-model grunt agent name prefix. Legacy "worker-" files are still pruned on
 // regeneration (see the generator) so the rename migrates cleanly.

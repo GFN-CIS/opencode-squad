@@ -1,4 +1,4 @@
-# opencode-orchestrate
+# opencode-squad
 
 An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator. On every request it states an explicit `SELF`/`DELEGATE` verdict: trivial work it does itself; real work it hands to a `grunt` subagent — routing changes through a `drill` (the Deming check), and investigations straight back to itself. A live context-usage signal feeds the decision so a heavy task isn't burned into an already-full context.
 
@@ -10,7 +10,7 @@ Add one line to `~/.config/opencode/opencode.json`:
 
 ```json
 {
-  "plugin": ["opencode-orchestrate@git+https://github.com/AlexMKX/opencode-orchestrate.git"]
+  "plugin": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"]
 }
 ```
 
@@ -42,7 +42,7 @@ The default model for both subagents is `anthropic/claude-sonnet-4-6`. To use a 
 
 ```json
 {
-  "plugin": ["opencode-orchestrate@git+https://github.com/AlexMKX/opencode-orchestrate.git"],
+  "plugin": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"],
   "agent": {
     "grunt": { "model": "anthropic/claude-sonnet-4-6" },
     "drill": { "model": "anthropic/claude-haiku-4-5" }
@@ -135,7 +135,7 @@ The orchestrator opens with its verdict, then proceeds:
 
 **Confirm the plugin loaded**
 
-Check the OpenCode log for a line referencing `orchestrate.js` or `opencode-orchestrate`. If the plugin fails to load, the log prints the error immediately after startup.
+Check the OpenCode log for a line referencing `orchestrate.js` or `opencode-squad`. If the plugin fails to load, the log prints the error immediately after startup.
 
 **Subagents are hidden — that is intentional**
 

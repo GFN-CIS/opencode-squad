@@ -1,5 +1,5 @@
 /**
- * opencode-orchestrate plugin entry.
+ * opencode-squad plugin entry.
  *
  * Responsibilities:
  *   1. Register the bundled grunt (worker) / drill (reviewer) subagents (only

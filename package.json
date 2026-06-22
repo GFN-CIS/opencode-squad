@@ -1,7 +1,7 @@
 {
-  "name": "opencode-orchestrate",
+  "name": "opencode-squad",
   "version": "0.1.0",
-  "description": "OpenCode plugin that turns the build agent into a PDCA orchestrator over worker/reviewer subagents",
+  "description": "OpenCode plugin that turns the build agent into a PDCA orchestrator (sarge) over grunt/drill subagents",
   "type": "module",
   "main": ".opencode/plugins/orchestrate.js",
   "files": [
@@ -23,11 +23,11 @@
     "pdca",
     "subagents"
   ],
-  "author": "AlexMKX",
+  "author": "GFN-CIS",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AlexMKX/opencode-orchestrate.git"
+    "url": "git+https://github.com/GFN-CIS/opencode-squad.git"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.4.0"

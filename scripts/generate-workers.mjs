@@ -14,7 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { slugForModel, workerAgentMarkdown, GENERATED_MARKER_PREFIX } from "../src/workers.js";
+import { slugForModel, workerAgentMarkdown, GENERATED_MARKER_DETECT } from "../src/workers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
@@ -74,7 +74,7 @@ function main() {
       } catch {
         continue;
       }
-      if (body.includes(GENERATED_MARKER_PREFIX)) {
+      if (body.includes(GENERATED_MARKER_DETECT)) {
         fs.unlinkSync(full);
         pruned.push(f);
       }
