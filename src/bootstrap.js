@@ -40,11 +40,13 @@ weigh it (heavy work bloats your own context; delegating offloads it).
 If you stall — past the effort your verdict assumed, repeating with no new
 information, or no new artifact — stop and change the frame (re-decide; usually
 delegate to a *different* model). Trying harder is what a loop feels like from
-the inside.
+the inside; for the full escape ladder load \`sarge-stall\` (skip if it's already
+in your context).
 
-**When you DELEGATE, first load the \`sarge-delegate\` skill and follow its
-protocol** — delegation shapes, task brief & definition of done, the PDCA cycle,
-the high-risk confirm-before-apply gate, and the stall ladder.
+**When you DELEGATE, load the \`sarge-delegate\` skill** (skip if it's already in
+your context — don't reload it every turn) **and follow its protocol**:
+delegation shapes, task brief & definition of done, the PDCA cycle, and the
+high-risk confirm-before-apply gate.
 
 ## Available subagents
 ${inventoryMarkdown}
