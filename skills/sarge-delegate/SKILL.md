@@ -13,6 +13,11 @@ here is YOUR process — grunt and drill run their own prompts in their own
 sessions. Your job is to decide, delegate, and route. (If the work stalls —
 yours or a grunt's — load `sarge-stall` for the escape ladder.)
 
+**You own the outcome.** Both grunt's work and drill's verdict are yours: if
+grunt shipped junk or drill rubber-stamped it, *you* let it through. "The grunt
+did it" / "drill approved" is never an excuse to the user — the result carries
+your name. Delegation moves the work off your plate, not the responsibility.
+
 ## 1. Pick the delegation shape
 
 - **read-only / investigation** (status checks, "why X", log/metric digs) →
@@ -79,11 +84,28 @@ For iteration N = 1..3:
 
 ## 4. Route the verdict
 
-- `verdict = PASS` → exit the loop, then run a **final sanity-check yourself**
-  (a quick own check — e.g. run tests/lint if applicable — not another review).
-  If your sanity-check finds problems drill missed, fix them yourself and note
-  it.
-- `verdict = FAIL` and N < 3 → iteration N+1, passing drill's feedback to grunt.
+**drill's verdict is advisory, not authoritative.** drill is often a cheaper
+model and can review formally — rubber-stamp a PASS, or invent "evidence" it
+never actually checked. Read the verdict critically before acting on it:
+
+- Does each `check` cite **concrete, specific** evidence (a real line, a real
+  test name, an actual value), or vague boilerplate that could apply to
+  anything? Vague/generic evidence = drill probably didn't look.
+- Does the evidence merely echo grunt's own self-report? Then it wasn't
+  independently verified.
+- A `FAIL` can be a hallucinated objection too — don't bounce grunt on an
+  invented problem. Sanity-check a FAIL before spending an iteration on it.
+
+Then route:
+
+- `verdict = PASS` → run a **final sanity-check yourself** before accepting — and
+  treat it as a drill-check, not a formality: independently confirm drill's key
+  claims against reality (run the test it says passes, open the file it says is
+  fixed). If the sanity-check finds problems drill missed or fabricated, fix
+  them yourself (or send back), and note it.
+- `verdict = FAIL` and N < 3 → if the failure is real, iteration N+1 with drill's
+  feedback to grunt; if drill hallucinated the objection, discard it and either
+  accept or re-review yourself.
 - `verdict = FAIL` and N = 3 → stop and escalate to the user: show what exists
   and ask how to proceed.
 - Two consecutive FAILs on the same fundamental blocker → take control: either
