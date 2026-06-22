@@ -24,7 +24,8 @@ That is all. On next start, OpenCode registers everything automatically.
 |---|---|---|
 | `grunt` | hidden subagent | Executes delegated tasks |
 | `drill` | hidden subagent | Reviews grunt output, returns a strict JSON verdict |
-| `sarge-delegate` | skill | The orchestrator's delegation protocol — loaded on demand when it decides to delegate (shapes, PDCA, risk gate, stall ladder) |
+| `sarge-delegate` | skill | The orchestrator's delegation protocol — loaded on demand when it decides to delegate (shapes, PDCA, risk gate) |
+| `sarge-stall` | skill | The orchestrator's stall-breaking ladder — loaded on demand when it recognizes it's stuck (kept separate so a stall doesn't pull in the whole delegation protocol) |
 | `generating-model-grunts` | skill | Generates one hidden `grunt-<provider>-<model>` per model id you supply, giving the orchestrator a menu of models to delegate to |
 | Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
 | Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |

@@ -22,10 +22,20 @@ test("keeps the decision principles inline (capability + risk one-liners)", () =
   expect(out).toContain("production write"); // never hand it to the cheap worker
 });
 
-test("keeps the stall trigger inline (change the frame)", () => {
+test("keeps the stall trigger inline and points to the sarge-stall skill", () => {
   const out = buildBootstrap("(no subagents available)").toLowerCase();
   expect(out).toContain("stall");
   expect(out).toContain("different"); // re-decide -> different model
+  expect(out).toContain("sarge-stall"); // full ladder is a separate skill
+});
+
+test("tells the orchestrator not to reload a skill already in context", () => {
+  // collapse whitespace so a line wrap inside the phrase doesn't matter
+  const out = buildBootstrap("(no subagents available)")
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  expect(out).toContain("already in your context");
+  expect(out).toContain("don't reload it every turn");
 });
 
 test("embeds live session facts (time + current model) when provided", () => {
