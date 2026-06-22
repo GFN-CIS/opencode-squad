@@ -4,7 +4,7 @@
  * Responsibilities:
  *   1. Register the bundled worker / work-reviewer subagents (only if the user
  *      has not already defined an agent with that name).
- *   2. Register the bundled skills directory so orchestrating-subagents is
+ *   2. Register the bundled skills directory so sarge-delegate is
  *      discoverable.
  *   3. Inject a hidden orchestrator bootstrap (with a live subagent inventory)
  *      into the first user message of a session.

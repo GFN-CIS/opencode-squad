@@ -8,27 +8,24 @@ test("block starts with the marker and embeds inventory", () => {
   expect(out).toContain(inv);
 });
 
-test("mentions the delegation decision and the skill name", () => {
+test("mentions the delegation decision and points to the protocol skill", () => {
   const out = buildBootstrap("(no subagents available)");
   expect(out.toLowerCase()).toContain("delegate");
-  expect(out).toContain("orchestrating-subagents");
+  expect(out).toContain("sarge-delegate"); // detailed protocol lives there
 });
 
-test("carries the capability and high-risk matching rules", () => {
+test("keeps the decision principles inline (capability + risk one-liners)", () => {
+  // Principles stay in the lean injection; the detailed gate/ladder moved to
+  // the sarge-delegate skill.
   const out = buildBootstrap("(no subagents available)").toLowerCase();
-  // Capability: don't hand high-cognition work to the cheap worker.
   expect(out).toContain("capability");
-  expect(out).toContain("strong");
-  // Risk: prod-write/destructive needs confirmation before apply.
-  expect(out).toContain("risk");
-  expect(out).toContain("confirmation");
+  expect(out).toContain("production write"); // never hand it to the cheap worker
 });
 
-test("carries stall-handling guidance (break the frame, different model)", () => {
+test("keeps the stall trigger inline (change the frame)", () => {
   const out = buildBootstrap("(no subagents available)").toLowerCase();
   expect(out).toContain("stall");
-  expect(out).toContain("different"); // delegate to a different model
-  expect(out).toContain("systematic-debugging");
+  expect(out).toContain("different"); // re-decide -> different model
 });
 
 test("embeds live session facts (time + current model) when provided", () => {

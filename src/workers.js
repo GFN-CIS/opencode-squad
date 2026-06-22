@@ -42,7 +42,9 @@ export function workerAgentMarkdown(modelId, promptBody) {
   const content = [
     "---",
     `# ${GENERATED_MARKER}`,
-    `description: Per-model worker (${modelId}) for orchestrator-driven PDCA cycles — executes a task brief, returns a structured result.`,
+    // Terse on purpose: the inventory already shows the model separately, and
+    // N per-model workers with a long description bloat the injected context.
+    "description: Per-model worker for orchestrator-driven PDCA.",
     "mode: subagent",
     `model: ${modelId}`,
     "hidden: true",
