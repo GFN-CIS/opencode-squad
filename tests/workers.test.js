@@ -2,27 +2,27 @@ import { test, expect } from "bun:test";
 import { slugForModel, workerAgentMarkdown, GENERATED_MARKER } from "../src/workers.js";
 
 test("slug collapses provider/model and punctuation to dashes", () => {
-  expect(slugForModel("openai/gpt-5.5")).toBe("worker-openai-gpt-5-5");
+  expect(slugForModel("openai/gpt-5.5")).toBe("grunt-openai-gpt-5-5");
   expect(slugForModel("anthropic/claude-opus-4-7")).toBe(
-    "worker-anthropic-claude-opus-4-7",
+    "grunt-anthropic-claude-opus-4-7",
   );
   expect(slugForModel("google/gemini-3.1-pro-preview-customtools")).toBe(
-    "worker-google-gemini-3-1-pro-preview-customtools",
+    "grunt-google-gemini-3-1-pro-preview-customtools",
   );
 });
 
 test("slug is stable and trimmed (no leading/trailing/doubled dashes)", () => {
-  expect(slugForModel("  Foo//Bar..Baz  ")).toBe("worker-foo-bar-baz");
+  expect(slugForModel("  Foo//Bar..Baz  ")).toBe("grunt-foo-bar-baz");
 });
 
 test("generated markdown carries frontmatter, model, hidden, perms, marker, body", () => {
-  const body = "You are a worker subagent.";
+  const body = "You are grunt, a worker subagent.";
   const { slug, filename, content } = workerAgentMarkdown(
     "anthropic/claude-opus-4-7",
     body,
   );
-  expect(slug).toBe("worker-anthropic-claude-opus-4-7");
-  expect(filename).toBe("worker-anthropic-claude-opus-4-7.md");
+  expect(slug).toBe("grunt-anthropic-claude-opus-4-7");
+  expect(filename).toBe("grunt-anthropic-claude-opus-4-7.md");
   expect(content.startsWith("---\n")).toBe(true);
   expect(content).toContain("mode: subagent");
   expect(content).toContain("model: anthropic/claude-opus-4-7");

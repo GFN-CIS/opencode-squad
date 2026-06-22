@@ -1,6 +1,6 @@
 # opencode-orchestrate
 
-An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator. On every request it states an explicit `SELF`/`DELEGATE` verdict: trivial work it does itself; real work it hands to a `worker` subagent — routing changes through a `work-reviewer` (the Deming check), and investigations straight back to itself. A live context-usage signal feeds the decision so a heavy task isn't burned into an already-full context.
+An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator. On every request it states an explicit `SELF`/`DELEGATE` verdict: trivial work it does itself; real work it hands to a `grunt` subagent — routing changes through a `drill` (the Deming check), and investigations straight back to itself. A live context-usage signal feeds the decision so a heavy task isn't burned into an already-full context.
 
 ---
 
@@ -22,16 +22,16 @@ That is all. On next start, OpenCode registers everything automatically.
 
 | Component | Type | Notes |
 |---|---|---|
-| `worker` | hidden subagent | Executes delegated tasks |
-| `work-reviewer` | hidden subagent | Reviews worker output, returns a strict JSON verdict |
+| `grunt` | hidden subagent | Executes delegated tasks |
+| `drill` | hidden subagent | Reviews grunt output, returns a strict JSON verdict |
 | `sarge-delegate` | skill | The orchestrator's delegation protocol — loaded on demand when it decides to delegate (shapes, PDCA, risk gate, stall ladder) |
-| `generating-model-workers` | skill | Generates one hidden `worker-<provider>-<model>` per model id you supply, giving the orchestrator a menu of models to delegate to |
+| `generating-model-grunts` | skill | Generates one hidden `grunt-<provider>-<model>` per model id you supply, giving the orchestrator a menu of models to delegate to |
 | Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
 | Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
 
 The bootstrap carries live session facts resolved at injection time — the current local time (with timezone) and the model the orchestrator is actually running on (so an Opus session does not mistake itself for Sonnet). Each subagent in the inventory is listed with its model, so the orchestrator can match work to capability.
 
-"Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via the task tool. Both injections target **only the `build` agent's own sessions** — worker/reviewer subagent sessions are never injected into, so there is no recursion.
+"Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via the task tool. Both injections target **only the `build` agent's own sessions** — grunt/drill subagent sessions are never injected into, so there is no recursion.
 
 ---
 
@@ -43,8 +43,8 @@ The default model for both subagents is `anthropic/claude-sonnet-4-6`. To use a 
 {
   "plugin": ["opencode-orchestrate@git+https://github.com/AlexMKX/opencode-orchestrate.git"],
   "agent": {
-    "worker": { "model": "anthropic/claude-sonnet-4-6" },
-    "work-reviewer": { "model": "anthropic/claude-haiku-4-5" }
+    "grunt": { "model": "anthropic/claude-sonnet-4-6" },
+    "drill": { "model": "anthropic/claude-haiku-4-5" }
   }
 }
 ```
@@ -53,17 +53,17 @@ Your `agent` block wins; anything you do not specify falls back to the default.
 
 ---
 
-## Per-model workers
+## Per-model grunts
 
-opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model is to have one named worker agent per model. The `generating-model-workers` skill does this: you give it a list of `provider/model` ids and it writes one hidden worker agent per model into `~/.config/opencode/agent/`.
+opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model is to have one named grunt agent per model. The `generating-model-grunts` skill does this: you give it a list of `provider/model` ids and it writes one hidden grunt agent per model into `~/.config/opencode/agent/`.
 
 ```
-anthropic/claude-opus-4-7   →  worker-anthropic-claude-opus-4-7
-openai/gpt-5.5              →  worker-openai-gpt-5-5
-google/gemini-3.5-flash     →  worker-google-gemini-3-5-flash
+anthropic/claude-opus-4-7   →  grunt-anthropic-claude-opus-4-7
+openai/gpt-5.5              →  grunt-openai-gpt-5-5
+google/gemini-3.5-flash     →  grunt-google-gemini-3-5-flash
 ```
 
-Each generated worker shares the bundled worker prompt and permissions, differs only in `model`, and is `hidden` (dispatched by the orchestrator via `task`, not shown in the `@`-menu). They appear in the orchestrator's inventory **with their models**, which is what makes the capability-matching rule concrete — it can route analysis/architecture to a strong model and mechanical work to a cheap one. Re-running syncs the set (prunes generated workers no longer listed; never touches hand-authored agents). Reload opencode to pick up new agents. The generic `worker` / `work-reviewer` remain as the default.
+Each generated grunt shares the bundled grunt prompt and permissions, differs only in `model`, and is `hidden` (dispatched by the orchestrator via `task`, not shown in the `@`-menu). They appear in the orchestrator's inventory **with their models**, which is what makes the capability-matching rule concrete — it can route analysis/architecture to a strong model and mechanical work to a cheap one. Re-running syncs the set (prunes generated grunts no longer listed; never touches hand-authored agents). Reload opencode to pick up new agents. The generic `grunt` / `drill` remain as the default.
 
 ---
 
@@ -87,18 +87,18 @@ It picks **SELF** only for: pure Q&A / explanation, a single trivial read, or wh
 
 Once it delegates, the shape depends on the task:
 
-- **Read-only / investigation** (status checks, "why is X", log/metric digs) → delegate execution to `worker` (or a specialized read agent like `Explore`) with **no reviewer** — there is no artifact to review. The orchestrator sanity-checks the findings itself, then reports.
+- **Read-only / investigation** (status checks, "why is X", log/metric digs) → delegate execution to `grunt` (or a specialized read agent like `Explore`) with **no drill** — there is no artifact to review. The orchestrator sanity-checks the findings itself, then reports.
 - **Changes** (code / docs / config) → the full PDCA loop:
-  1. **Plan / Do** — calls `worker` with the brief, definition of done, context, and (from iteration 2 onward) the reviewer's feedback.
-  2. **Check** — calls `work-reviewer` with the brief and the worker's output. The reviewer returns a strict JSON verdict: `{"verdict": "PASS"|"FAIL", "checks": [...], "issues": [...], "suggested_fixes": [...], "blocking": <bool>}`.
+  1. **Plan / Do** — calls `grunt` with the brief, definition of done, context, and (from iteration 2 onward) the drill's feedback.
+  2. **Check** — calls `drill` with the brief and the grunt's output. The drill returns a strict JSON verdict: `{"verdict": "PASS"|"FAIL", "checks": [...], "issues": [...], "suggested_fixes": [...], "blocking": <bool>}`.
   3. **Act** — on `PASS`, the orchestrator runs a final sanity-check (e.g. tests/lint) and delivers the result. On `FAIL`, it retries — up to **3 iterations total**, then escalates to the user rather than retrying blindly.
 
 ### Matching the delegate (capability & risk)
 
 Delegating only helps if the delegate is actually fit for the task. The injected inventory lists each subagent's model, and the orchestrator weighs two things before handing work over:
 
-- **Capability** — the orchestrator routes by what the *specific* models involved are good and bad at as of the current date (its own model and each subagent's model are in the bootstrap/inventory), rather than from fixed rules. High-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheap default `worker`, where a weak model would produce confident nonsense — it picks a strong-model delegate or keeps the task itself.
-- **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheap `worker` (its broad `bash`/`edit` permissions would execute it without a second opinion).
+- **Capability** — the orchestrator routes by what the *specific* models involved are good and bad at as of the current date (its own model and each subagent's model are in the bootstrap/inventory), rather than from fixed rules. High-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheap default `grunt`, where a weak model would produce confident nonsense — it picks a strong-model delegate or keeps the task itself.
+- **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheap `grunt` (its broad `bash`/`edit` permissions would execute it without a second opinion).
 
 For full routing rules, escape hatches, and edge-case handling see [skills/sarge-delegate/SKILL.md](skills/sarge-delegate/SKILL.md).
 
@@ -110,8 +110,8 @@ The verdict is the model's call, but you steer it directly:
 
 - **Force SELF** — say *"do it yourself"* (or "делай сам") in your request. This is a first-class override: the orchestrator skips delegation entirely.
 - **Force DELEGATE** — just say *"delegate this"* / *"делегируй"*. The orchestrator follows the instruction even when a task would otherwise look trivial.
-- **Force a specific subagent** — name it: *"delegate to `Explore`"*, *"use the worker"*. If a specialized subagent fits better than the generic `worker`, the orchestrator prefers it on its own, but naming one is decisive.
-- **Skip the reviewer** — frame the task as read-only / investigation, or say so outright ("just investigate, no review"). Changes always default to the full PDCA loop.
+- **Force a specific subagent** — name it: *"delegate to `Explore`"*, *"use the grunt"*. If a specialized subagent fits better than the generic `grunt`, the orchestrator prefers it on its own, but naming one is decisive.
+- **Skip the drill** — frame the task as read-only / investigation, or say so outright ("just investigate, no review"). Changes always default to the full PDCA loop.
 
 You can confirm the orchestrator is in the right mode by reading its first line — it prints `SELF: …` or `DELEGATE: …` with its reasoning before acting.
 
@@ -124,8 +124,8 @@ The orchestrator opens with its verdict, then proceeds:
 | Request | Verdict (first line) | What happens |
 |---|---|---|
 | "Is the working tree clean?" | `SELF: single trivial read.` | Runs `git status` itself. No subagents. |
-| "Why are the prod pages timing out?" | `DELEGATE: investigation across logs/metrics → Explore, no reviewer.` | A read agent digs through logs/metrics; the orchestrator sanity-checks the findings and reports. |
-| "Add input validation to the upload endpoint." | `DELEGATE: produces code → worker, full PDCA.` | `worker` implements, `work-reviewer` checks against the definition of done, up to 3 iterations, then a final sanity-check. |
+| "Why are the prod pages timing out?" | `DELEGATE: investigation across logs/metrics → Explore, no drill.` | A read agent digs through logs/metrics; the orchestrator sanity-checks the findings and reports. |
+| "Add input validation to the upload endpoint." | `DELEGATE: produces code → grunt, full PDCA.` | `grunt` implements, `drill` checks against the definition of done, up to 3 iterations, then a final sanity-check. |
 | "Drop the stale `sessions_old` table on prod." | `DELEGATE: high-risk write — plan first, confirm before apply.` | Investigation and a dry-run plan may be delegated; the exact command is surfaced and **waits for your confirmation** before anything runs. |
 
 ---
@@ -138,7 +138,7 @@ Check the OpenCode log for a line referencing `orchestrate.js` or `opencode-orch
 
 **Subagents are hidden — that is intentional**
 
-`worker` and `work-reviewer` do not appear in the `@` mention menu because they are registered with `hidden: true`. They are invoked internally by the orchestrator. If you need to verify they are registered, use a one-off session and ask the model to list available subagents (it can introspect the session state).
+`grunt` and `drill` do not appear in the `@` mention menu because they are registered with `hidden: true`. They are invoked internally by the orchestrator. If you need to verify they are registered, use a one-off session and ask the model to list available subagents (it can introspect the session state).
 
 **Check which mode it chose**
 
@@ -146,7 +146,7 @@ The orchestrator prints its verdict (`SELF: …` / `DELEGATE: …`) as the first
 
 **Iteration cap and cost**
 
-A full PDCA iteration (the *changes* branch) fires two LLM calls (worker + reviewer) on top of the orchestrator's own context. On a complex task with 3 iterations that is potentially 7+ model calls. Read-only / investigation delegations skip the reviewer, and trivial tasks are handled by the orchestrator directly — so cost scales with task weight, which is what the selection signals (and the live context line) are there to gauge.
+A full PDCA iteration (the *changes* branch) fires two LLM calls (grunt + drill) on top of the orchestrator's own context. On a complex task with 3 iterations that is potentially 7+ model calls. Read-only / investigation delegations skip the drill, and trivial tasks are handled by the orchestrator directly — so cost scales with task weight, which is what the selection signals (and the live context line) are there to gauge.
 
 ---
 

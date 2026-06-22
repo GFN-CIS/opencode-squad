@@ -2,8 +2,8 @@
  * opencode-orchestrate plugin entry.
  *
  * Responsibilities:
- *   1. Register the bundled worker / work-reviewer subagents (only if the user
- *      has not already defined an agent with that name).
+ *   1. Register the bundled grunt (worker) / drill (reviewer) subagents (only
+ *      if the user has not already defined an agent with that name).
  *   2. Register the bundled skills directory so sarge-delegate is
  *      discoverable.
  *   3. Inject a hidden orchestrator bootstrap (with a live subagent inventory)
@@ -108,7 +108,7 @@ export const OrchestratePlugin = async ({ client }) => {
       // Only inject for the orchestrator (primary build agent). The hook's
       // `input` is empty, but each message carries `info.agent` (verified in
       // the Task 0 spike: "build" for the primary session, the subagent name
-      // for worker/work-reviewer sessions). This skips subagent sessions.
+      // for grunt/drill subagent sessions). This skips subagent sessions.
       if (firstUser.info?.agent !== ORCHESTRATOR_AGENT) return;
 
       // Guard against double injection.
