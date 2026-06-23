@@ -7,7 +7,8 @@
  *   2. Register the bundled skills directory so sarge-delegate is
  *      discoverable.
  *   3. Inject a hidden orchestrator bootstrap (with a live subagent inventory)
- *      into the first user message of a session.
+ *      into the latest user message every turn, so it survives a context
+ *      compaction instead of being lost with the original first message.
  */
 
 import path from "node:path";
@@ -101,60 +102,70 @@ export const OrchestratePlugin = async ({ client }) => {
     },
 
     "experimental.chat.messages.transform": async (_input, output) => {
-      if (!output.messages || output.messages.length === 0) return;
-      const firstUser = output.messages.find((m) => m?.info?.role === "user");
-      if (!firstUser || !firstUser.parts || firstUser.parts.length === 0) return;
+      const msgs = output.messages;
+      if (!msgs || msgs.length === 0) return;
 
-      // Only inject for the orchestrator (primary build agent). The hook's
-      // `input` is empty, but each message carries `info.agent` (verified in
-      // the Task 0 spike: "build" for the primary session, the subagent name
-      // for grunt/drill subagent sessions). This skips subagent sessions.
-      if (firstUser.info?.agent !== ORCHESTRATOR_AGENT) return;
+      // Only the orchestrator (build) session. Gate on whether ANY message is
+      // tagged with the orchestrator agent — robust across a compaction, where
+      // the leading message becomes a summary (agent="compaction") and a
+      // partless synthetic user marker can head the payload. Gating on the
+      // first user message's agent (as before) silently dropped the injection
+      // after every compaction. Subagent (grunt/drill) sessions carry their own
+      // agent, never "build", so they are still skipped.
+      if (!msgs.some((m) => m?.info?.agent === ORCHESTRATOR_AGENT)) return;
 
-      // Guard against double injection.
+      // Inject into the LATEST user message that has parts — that's the current
+      // turn, always present and re-sent, so the bootstrap survives compaction
+      // (which drops/summarizes the original first message). The bootstrap is
+      // not persisted, so this re-establishes it every turn.
+      const lastUser = [...msgs]
+        .reverse()
+        .find((m) => m?.info?.role === "user" && m.parts?.length);
+      if (!lastUser) return;
+
+      // Never inject into opencode's own internal generations (title / summary /
+      // compaction): that payload is a synthetic prompt, and our text would
+      // pollute the produced title or summary.
+      const leadText =
+        lastUser.parts.find(
+          (p) => p?.type === "text" && typeof p.text === "string",
+        )?.text || "";
       if (
-        firstUser.parts.some(
-          (p) => p?.type === "text" && p.text && p.text.includes(BOOTSTRAP_MARKER),
-        )
+        /^\s*Generate a title for this conversation/.test(leadText) ||
+        /^\s*Summarize what was done in this conversation/.test(leadText)
       ) {
         return;
       }
 
-      // Assemble per injection so the live facts stay fresh (datetime must not
-      // be cached across the long-lived process; model may change per session).
-      const inventory = await getInventory();
-      const nowText = formatLocalDateTime(
-        new Date(),
-        Intl.DateTimeFormat().resolvedOptions().timeZone,
-      );
-      const modelText =
-        resolveOrchestratorModel(output.messages) ?? _orchestratorModel ?? null;
-      const bootstrap = buildBootstrap(inventory, { nowText, modelText });
-      const ref = firstUser.parts[0];
-      firstUser.parts.unshift({ ...ref, type: "text", text: bootstrap });
+      const refPart = lastUser.parts[0];
 
-      // Append a live context-budget line to the LATEST user message so the
-      // orchestrator can weigh its current context size in the verdict. Not
-      // persisted (like the bootstrap), so it never accumulates across turns;
-      // null before the first assistant reply (context is still small).
-      const ctx = estimateContextTokens(output.messages);
-      let line = null;
+      // Bootstrap — ensure it is present this turn (idempotent within the call).
+      if (
+        !lastUser.parts.some(
+          (p) => p?.type === "text" && p.text && p.text.includes(BOOTSTRAP_MARKER),
+        )
+      ) {
+        const inventory = await getInventory();
+        const nowText = formatLocalDateTime(
+          new Date(),
+          Intl.DateTimeFormat().resolvedOptions().timeZone,
+        );
+        const modelText =
+          resolveOrchestratorModel(msgs) ?? _orchestratorModel ?? null;
+        const bootstrap = buildBootstrap(inventory, { nowText, modelText });
+        lastUser.parts.unshift({ ...refPart, type: "text", text: bootstrap });
+      }
+
+      // Live context-budget line on the same latest user message.
+      const ctx = estimateContextTokens(msgs);
       if (ctx) {
         const limits = await getLimitMap();
         const limit =
           limits[`${ctx.providerID}/${ctx.modelID}`] ??
           limits[ctx.modelID] ??
           DEFAULT_LIMIT;
-        line = formatContextLine(ctx.used, limit);
-      }
-      if (line) {
-        const lastUser = [...output.messages]
-          .reverse()
-          .find((m) => m?.info?.role === "user" && m.parts?.length);
-        if (lastUser) {
-          const lref = lastUser.parts[0];
-          lastUser.parts.push({ ...lref, type: "text", text: line });
-        }
+        const line = formatContextLine(ctx.used, limit);
+        if (line) lastUser.parts.push({ ...refPart, type: "text", text: line });
       }
     },
   };
