@@ -22,6 +22,12 @@ test("keeps the decision principles inline (capability + risk one-liners)", () =
   expect(out).toContain("production write"); // never hand it to the cheap worker
 });
 
+test("tells a weak orchestrator to escalate capability UP", () => {
+  const out = buildBootstrap("(no subagents available)").toLowerCase();
+  expect(out).toContain("cuts both ways"); // capability applies to self too
+  expect(out).toContain("up"); // delegate up / consult up
+});
+
 test("keeps the stall trigger inline and points to the squad-stall skill", () => {
   const out = buildBootstrap("(no subagents available)").toLowerCase();
   expect(out).toContain("stall");

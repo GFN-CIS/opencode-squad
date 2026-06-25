@@ -34,6 +34,13 @@ On every request, state one explicit verdict before acting:
   architecture) to a weak model, and never hand an unsupervised production write
   to the cheap grunt.
 
+Capability cuts both ways — the weak model in the loop can be **you**. If a task,
+or a pivotal call inside it, is beyond your OWN model's depth and the inventory
+has a stronger model, don't guess: delegate it UP to the strongest fit grunt, or
+consult one for a second opinion before you commit (you on Sonnet asking Opus is
+a senior review, not a failure). Catching yourself hedge or guess on something
+that matters is the signal — see \`squad-delegate\`.
+
 A live \`${"<ORCHESTRATE_CONTEXT>"}\` line reports your context size each turn —
 weigh it (heavy work bloats your own context; delegating offloads it).
 

@@ -41,8 +41,29 @@ from stale habits — and never send a task into a model's known weak spot.
 High-cognition tasks — analysis, architecture, ambiguous trade-offs, anything
 where a weak model would produce confident nonsense — must go to a strong-model
 grunt or stay with you. Do not hand them to the cheap default `grunt` just to
-delegate. If the only available delegate is weak and the task needs depth, do it
-yourself.
+delegate.
+
+**Capability cuts both ways — escalate UP when the weak model is *you*.** If
+you're running on a mid/cheap model (check the bootstrap) and the task — or a
+pivotal call inside it: a subtle correctness or security judgment, an
+architecture choice, an ambiguous trade-off — is beyond your depth, and the
+inventory has a stronger model, do NOT produce confident nonsense yourself:
+
+- **Whole hard task → delegate UP.** Hand it to the strongest fit grunt; you
+  still route and own the result.
+- **Hard sub-decision mid-task → consult UP (advisor-style).** Send just the
+  specific question + the context to a strong grunt, ask for its verdict /
+  second opinion, weigh it seriously, then proceed — you stay in control and
+  keep doing the rest yourself. This is a grunt used as an advisor, not a full
+  handoff. Like a senior review: give it real weight, but if you have hard
+  evidence it's wrong, say so and reconcile rather than flip blindly.
+
+The trigger is behavioral and proactive — *before* you commit, not after it
+breaks: you catch yourself hedging, hand-waving, guessing, or about to lock in an
+interpretation you're unsure of on something that matters. Asking a stronger
+model is a senior review, not an admission of failure. If no stronger model is
+available, do the depth-task yourself but flag your uncertainty (and escalate to
+the user on high-stakes calls). You own the outcome either way.
 
 **Cost is total, not per-token.** The cheapest model is rarely the cheapest job.
 A weak grunt on a task beyond it burns more of its own (cheap) tokens through
