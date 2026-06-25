@@ -11,22 +11,22 @@ test("block starts with the marker and embeds inventory", () => {
 test("mentions the delegation decision and points to the protocol skill", () => {
   const out = buildBootstrap("(no subagents available)");
   expect(out.toLowerCase()).toContain("delegate");
-  expect(out).toContain("sarge-delegate"); // detailed protocol lives there
+  expect(out).toContain("squad-delegate"); // detailed protocol lives there
 });
 
 test("keeps the decision principles inline (capability + risk one-liners)", () => {
   // Principles stay in the lean injection; the detailed gate/ladder moved to
-  // the sarge-delegate skill.
+  // the squad-delegate skill.
   const out = buildBootstrap("(no subagents available)").toLowerCase();
   expect(out).toContain("capability");
   expect(out).toContain("production write"); // never hand it to the cheap worker
 });
 
-test("keeps the stall trigger inline and points to the sarge-stall skill", () => {
+test("keeps the stall trigger inline and points to the squad-stall skill", () => {
   const out = buildBootstrap("(no subagents available)").toLowerCase();
   expect(out).toContain("stall");
   expect(out).toContain("different"); // re-decide -> different model
-  expect(out).toContain("sarge-stall"); // full ladder is a separate skill
+  expect(out).toContain("squad-stall"); // full ladder is a separate skill
 });
 
 test("tells the orchestrator not to reload a skill already in context", () => {

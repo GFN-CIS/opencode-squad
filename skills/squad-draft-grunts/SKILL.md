@@ -1,10 +1,10 @@
 ---
-name: draft-grunts
+name: squad-draft-grunts
 description: Use when the user wants to draft, set up, or refresh the per-model grunt roster (grunt-<provider>-<model>) so the sarge orchestrator can pick a grunt by model capability. When invoked, DRIVE it — discover the available models, propose a curated roster, ask what to add or remove, then generate. Triggers: "draft grunts", "set up grunts", "model grunts/workers", "набери грантов", "сделай агентов по моделям".
 license: MIT
 ---
 
-# draft-grunts — draft the per-model grunt roster
+# squad-draft-grunts — draft the per-model grunt roster
 
 opencode's `task` tool takes only `subagent_type` (no model), so the only way to
 let sarge choose a model is a named grunt agent per model. This skill drafts that

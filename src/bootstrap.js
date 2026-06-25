@@ -40,10 +40,10 @@ weigh it (heavy work bloats your own context; delegating offloads it).
 If you stall — past the effort your verdict assumed, repeating with no new
 information, or no new artifact — stop and change the frame (re-decide; usually
 delegate to a *different* model). Trying harder is what a loop feels like from
-the inside; for the full escape ladder load \`sarge-stall\` (skip if it's already
+the inside; for the full escape ladder load \`squad-stall\` (skip if it's already
 in your context).
 
-**When you DELEGATE, load the \`sarge-delegate\` skill** (skip if it's already in
+**When you DELEGATE, load the \`squad-delegate\` skill** (skip if it's already in
 your context — don't reload it every turn) **and follow its protocol**:
 delegation shapes, task brief & definition of done, the PDCA cycle, and the
 high-risk confirm-before-apply gate.
