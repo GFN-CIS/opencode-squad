@@ -4,7 +4,7 @@
  * Responsibilities:
  *   1. Register the bundled grunt (worker) / drill (reviewer) subagents (only
  *      if the user has not already defined an agent with that name).
- *   2. Register the bundled skills directory so sarge-delegate is
+ *   2. Register the bundled skills directory so squad-delegate is
  *      discoverable.
  *   3. Inject a hidden orchestrator bootstrap (with a live subagent inventory)
  *      into the latest user message every turn, so it survives a context

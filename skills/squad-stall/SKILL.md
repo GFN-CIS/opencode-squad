@@ -1,10 +1,10 @@
 ---
-name: sarge-stall
+name: squad-stall
 description: The sarge orchestrator's stall-breaking ladder. Load this when you (the orchestrator) recognize you're stuck — past the effort your verdict assumed, repeating an approach or the same error with no new information, or a delegated grunt keeps failing review with no progress. It is YOUR process, not the grunt's.
 license: MIT
 ---
 
-# sarge-stall — break the frame, don't grind
+# squad-stall — break the frame, don't grind
 
 This is **your** job as sarge, not grunt's — grunt just reports; you manage the
 process and decide what happens next. Watch for a stall in either place:
@@ -28,7 +28,7 @@ by changing the frame, cheapest first:
    failed. Externalizing often breaks the loop and becomes the brief for what
    comes next.
 2. **Re-decide the verdict.** A stalled SELF step is no longer simple → default
-   to DELEGATE (load `sarge-delegate` for the protocol).
+   to DELEGATE (load `squad-delegate` for the protocol).
 3. **Fresh context, different model.** Delegate to a grunt on a *different* model
    than the one that stalled (see the inventory), passing the "what failed"
    write-up so it does not repeat dead ends. A clean context + a different model

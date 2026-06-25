@@ -24,9 +24,9 @@ That is all. On next start, OpenCode registers everything automatically.
 |---|---|---|
 | `grunt` | hidden subagent | Executes delegated tasks |
 | `drill` | hidden subagent | Reviews grunt output, returns a strict JSON verdict |
-| `sarge-delegate` | skill | The orchestrator's delegation protocol — loaded on demand when it decides to delegate (shapes, PDCA, risk gate) |
-| `sarge-stall` | skill | The orchestrator's stall-breaking ladder — loaded on demand when it recognizes it's stuck (kept separate so a stall doesn't pull in the whole delegation protocol) |
-| `draft-grunts` | skill | Drafts the per-model grunt roster — discovers available models, proposes a tiered set, asks what to add/remove, then generates one hidden `grunt-<provider>-<model>` each, giving the orchestrator a menu of models to delegate to |
+| `squad-delegate` | skill | The orchestrator's delegation protocol — loaded on demand when it decides to delegate (shapes, PDCA, risk gate) |
+| `squad-stall` | skill | The orchestrator's stall-breaking ladder — loaded on demand when it recognizes it's stuck (kept separate so a stall doesn't pull in the whole delegation protocol) |
+| `squad-draft-grunts` | skill | Drafts the per-model grunt roster — discovers available models, proposes a tiered set, asks what to add/remove, then generates one hidden `grunt-<provider>-<model>` each, giving the orchestrator a menu of models to delegate to |
 | Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
 | Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
 
@@ -56,7 +56,7 @@ Your `agent` block wins; anything you do not specify falls back to the default.
 
 ## Per-model grunts
 
-opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model is to have one named grunt agent per model. The `draft-grunts` skill sets this up interactively: invoke it and it discovers the available models (`opencode models`), proposes a tiered roster, asks what to add or remove, then — on your OK — writes one hidden grunt agent per model into `~/.config/opencode/agent/`.
+opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model is to have one named grunt agent per model. The `squad-draft-grunts` skill sets this up interactively: invoke it and it discovers the available models (`opencode models`), proposes a tiered roster, asks what to add or remove, then — on your OK — writes one hidden grunt agent per model into `~/.config/opencode/agent/`.
 
 ```
 anthropic/claude-opus-4-7   →  grunt-anthropic-claude-opus-4-7
@@ -101,7 +101,7 @@ Delegating only helps if the delegate is actually fit for the task. The injected
 - **Capability** — the orchestrator routes by what the *specific* models involved are good and bad at as of the current date (its own model and each subagent's model are in the bootstrap/inventory), rather than from fixed rules. High-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheap default `grunt`, where a weak model would produce confident nonsense — it picks a strong-model delegate or keeps the task itself.
 - **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheap `grunt` (its broad `bash`/`edit` permissions would execute it without a second opinion).
 
-For full routing rules, escape hatches, and edge-case handling see [skills/sarge-delegate/SKILL.md](skills/sarge-delegate/SKILL.md).
+For full routing rules, escape hatches, and edge-case handling see [skills/squad-delegate/SKILL.md](skills/squad-delegate/SKILL.md).
 
 ---
 
