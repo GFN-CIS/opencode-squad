@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { slugCandidates, lookupBenchmark } from "../src/benchmarks.js";
+import { slugCandidates, lookupBenchmark, agenticScore, formatBench } from "../src/benchmarks.js";
 
 const snapshot = JSON.parse(
   fs.readFileSync(
@@ -47,4 +47,22 @@ test("snapshot has a meta block and a healthy model count", () => {
 
 test("unknown model returns null", () => {
   expect(lookupBenchmark("acme/not-a-real-model", snapshot.models)).toBeNull();
+});
+
+test("agenticScore aggregates tau2 + terminalbench to 0-100", () => {
+  expect(agenticScore({ agentic: { tau2: 0.94, terminalbench_v2_1: 0.86 } })).toBe(90);
+  expect(agenticScore({ agentic: { tau2: 0.98, terminalbench_v2_1: null } })).toBe(98);
+  expect(agenticScore({ agentic: {} })).toBeNull();
+});
+
+test("formatBench is the minimal routing set (intel/code/agentic/$), no speed/details", () => {
+  const s = formatBench("anthropic/claude-opus-4-8", snapshot.models);
+  expect(s).toContain("AA");
+  expect(s).toMatch(/intel \d+/);
+  expect(s).toMatch(/code \d+/);
+  expect(s).toMatch(/agentic \d+/);
+  expect(s).toContain("$");
+  expect(s.toLowerCase()).not.toContain("tps");
+  expect(s.toLowerCase()).not.toContain("scicode");
+  expect(formatBench("acme/nope", snapshot.models)).toBeNull();
 });

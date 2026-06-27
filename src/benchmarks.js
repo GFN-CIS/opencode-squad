@@ -51,3 +51,43 @@ export function lookupBenchmark(modelId, models) {
   }
   return null;
 }
+
+/**
+ * One aggregated agentic score (0-100) from AA's agentic/tool-use benchmarks —
+ * there is no single agentic index in the API. Mean of the available core
+ * agentic evals (tau2 tool-use, terminalbench autonomous terminal), each 0-1,
+ * scaled to 0-100. Null if none are scored.
+ *
+ * @param {any} data  a benchmarks.json model entry
+ * @returns {number|null}
+ */
+export function agenticScore(data) {
+  const a = (data && data.agentic) || {};
+  const vals = [a.tau2, a.terminalbench_v2_1].filter(
+    (v) => typeof v === "number",
+  );
+  if (!vals.length) return null;
+  return Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 100);
+}
+
+/**
+ * Minimal decision-useful one-liner for the inventory: the aggregated indices
+ * sarge needs to route — general / coding / agentic / cost. No raw sub-benchmark
+ * details, no speed. Returns null when the model isn't in the snapshot.
+ *
+ * @param {string} modelId  e.g. "openai/gpt-5.5"
+ * @param {Record<string, any>} models  benchmarks.json `models`
+ * @returns {string|null}  e.g. "AA intel 55 · code 74 · agentic 90 · $10/M"
+ */
+export function formatBench(modelId, models) {
+  const r = lookupBenchmark(modelId, models);
+  if (!r) return null;
+  const d = r.data;
+  const parts = [];
+  if (typeof d.intelligence === "number") parts.push(`intel ${Math.round(d.intelligence)}`);
+  if (typeof d.coding === "number") parts.push(`code ${Math.round(d.coding)}`);
+  const ag = agenticScore(d);
+  if (ag != null) parts.push(`agentic ${ag}`);
+  if (typeof d.price_blended === "number") parts.push(`$${d.price_blended}/M`);
+  return parts.length ? `AA ${parts.join(" · ")}` : null;
+}

@@ -35,3 +35,26 @@ test("handles missing description", () => {
   ]);
   expect(out).toContain("- `x`: (no description) (model: inherited)");
 });
+
+test("appends the minimal AA bench summary when a snapshot is given", () => {
+  const models = {
+    "gpt-5-5": {
+      intelligence: 54.8,
+      coding: 74.9,
+      agentic: { tau2: 0.9, terminalbench_v2_1: 0.8 },
+      price_blended: 11.25,
+    },
+  };
+  const agents = [
+    {
+      name: "grunt-openai-gpt-5-5",
+      mode: "subagent",
+      description: "Per-model grunt.",
+      model: { providerID: "openai", modelID: "gpt-5.5" },
+    },
+  ];
+  const out = formatInventory(agents, models);
+  expect(out).toContain("AA intel 55 · code 75 · agentic 85 · $11.25/M");
+  // without a snapshot, no bench tail
+  expect(formatInventory(agents)).not.toContain("AA intel");
+});

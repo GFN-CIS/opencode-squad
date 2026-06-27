@@ -41,6 +41,23 @@ const ORCHESTRATOR_AGENT = "build";
 // (current time, current model) stay fresh.
 let _inventoryCache; // undefined = not loaded
 
+// Static AA benchmark snapshot (models object), read once. null if missing.
+let _benchCache; // undefined = not loaded
+function loadBenchmarks() {
+  if (_benchCache !== undefined) return _benchCache;
+  _benchCache = null;
+  try {
+    const raw = fs.readFileSync(
+      path.join(PACKAGE_ROOT, "src", "benchmarks.json"),
+      "utf8",
+    );
+    _benchCache = JSON.parse(raw).models ?? null;
+  } catch {
+    // Best-effort; inventory still works without benchmark numbers.
+  }
+  return _benchCache;
+}
+
 // Configured orchestrator model, captured from config (fallback for turn 1,
 // before any assistant message reveals the actual model).
 let _orchestratorModel = null;
@@ -55,7 +72,7 @@ export const OrchestratePlugin = async ({ client }) => {
     _inventoryCache = "(no subagents available)";
     try {
       const res = await client.app.agents();
-      _inventoryCache = formatInventory(res?.data ?? []);
+      _inventoryCache = formatInventory(res?.data ?? [], loadBenchmarks());
     } catch {
       // Inventory is best-effort; the bootstrap still works without it.
     }
