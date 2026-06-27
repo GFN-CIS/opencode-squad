@@ -30,7 +30,13 @@ That is all. On next start, OpenCode registers everything automatically.
 | Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
 | Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
 
-The bootstrap carries live session facts resolved at injection time — the current local time (with timezone) and the model the orchestrator is actually running on (so an Opus session does not mistake itself for Sonnet). Each subagent in the inventory is listed with its model **and a minimal Artificial Analysis capability summary** (`intel · code · agentic · $/M`) — the aggregated indices sarge needs to route by real numbers, not vibes. The data is a static snapshot (`src/benchmarks.json`, refreshable via `scripts/refresh-benchmarks.mjs`); no raw sub-benchmarks or speed metrics are shown.
+The bootstrap carries live session facts resolved at injection time — the current local time (with timezone) and the model the orchestrator is actually running on (so an Opus session does not mistake itself for Sonnet). Each subagent in the inventory is listed with its model, its **context window** (`ctx`, from opencode), and a minimal **Artificial Analysis capability summary** (`intel · code · agentic · $/M`) — the aggregated facts sarge needs to route by real numbers, not vibes:
+
+```
+grunt-openai-gpt-5-5 … (model: openai/gpt-5.5 · ctx 400k — AA intel 55 · code 75 · agentic 89 · $11.25/M)
+```
+
+The AA data is a static snapshot (`src/benchmarks.json`, refreshable via `scripts/refresh-benchmarks.mjs`); no raw sub-benchmarks or speed metrics are shown.
 
 "Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via the task tool. Both injections target **only the `build` agent's own sessions** — grunt/drill subagent sessions are never injected into, so there is no recursion.
 

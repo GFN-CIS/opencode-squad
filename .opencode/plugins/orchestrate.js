@@ -72,7 +72,11 @@ export const OrchestratePlugin = async ({ client }) => {
     _inventoryCache = "(no subagents available)";
     try {
       const res = await client.app.agents();
-      _inventoryCache = formatInventory(res?.data ?? [], loadBenchmarks());
+      _inventoryCache = formatInventory(
+        res?.data ?? [],
+        loadBenchmarks(),
+        await getLimitMap(),
+      );
     } catch {
       // Inventory is best-effort; the bootstrap still works without it.
     }
