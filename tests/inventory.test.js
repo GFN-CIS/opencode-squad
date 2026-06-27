@@ -58,3 +58,14 @@ test("appends the minimal AA bench summary when a snapshot is given", () => {
   // without a snapshot, no bench tail
   expect(formatInventory(agents)).not.toContain("AA intel");
 });
+
+test("adds the context window from the limits map", () => {
+  const agents = [
+    { name: "g1", mode: "subagent", description: "x", model: { providerID: "openai", modelID: "gpt-5.5" } },
+    { name: "g2", mode: "subagent", description: "x", model: { providerID: "anthropic", modelID: "claude-opus-4-8" } },
+  ];
+  const limits = { "openai/gpt-5.5": 400000, "anthropic/claude-opus-4-8": 1000000 };
+  const out = formatInventory(agents, null, limits);
+  expect(out).toContain("ctx 400k");
+  expect(out).toContain("ctx 1M");
+});
