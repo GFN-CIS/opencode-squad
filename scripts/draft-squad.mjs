@@ -1,24 +1,29 @@
 #!/usr/bin/env node
-// Generate one hidden grunt (per-model worker) subagent per model id.
+// Scaffold the per-model squad — a grunt AND a drill per model — from one list.
 //
 // Usage:
-//   node generate-workers.mjs [--dir <agentDir>] [--no-prune] <provider/model>...
+//   node draft-squad.mjs [--dir <agentDir>] [--no-prune] <provider/model>...
 //
 // Defaults to the global agent dir (~/.config/opencode/agent). Re-running syncs
-// the managed set: it (re)writes the listed models and prunes previously
-// generated grunt-*.md (and legacy worker-*.md) files carrying our marker that
-// are no longer in the list. Hand-authored agents are never touched.
+// the managed set: it (re)writes grunt-<slug>.md + drill-<slug>.md for each
+// listed model, and prunes previously generated grunt-/drill- (and legacy
+// worker-) files carrying our marker that are no longer in the list.
+// Hand-authored agents are never touched.
 
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { slugForModel, workerAgentMarkdown, GENERATED_MARKER_DETECT } from "../src/workers.js";
+import { agentMarkdown, GENERATED_MARKER_DETECT } from "../src/workers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
-const GRUNT_PROMPT = path.join(PACKAGE_ROOT, "prompts", "grunt.md");
+const PROMPTS = {
+  grunt: path.join(PACKAGE_ROOT, "prompts", "grunt.md"),
+  drill: path.join(PACKAGE_ROOT, "prompts", "drill.md"),
+};
+const ROLES = ["grunt", "drill"];
 
 function parseArgs(argv) {
   const models = [];
@@ -40,41 +45,42 @@ function main() {
   const { models, dir, prune } = parseArgs(process.argv.slice(2));
   if (models.length === 0) {
     console.error(
-      "No models given. Usage: generate-workers.mjs [--dir <d>] [--no-prune] <provider/model>...",
+      "No models given. Usage: draft-squad.mjs [--dir <d>] [--no-prune] <provider/model>...",
     );
     process.exit(2);
   }
 
-  const promptBody = fs.readFileSync(GRUNT_PROMPT, "utf8");
+  const body = Object.fromEntries(
+    ROLES.map((r) => [r, fs.readFileSync(PROMPTS[r], "utf8")]),
+  );
   fs.mkdirSync(dir, { recursive: true });
 
   const written = [];
-  const wantedSlugs = new Set();
+  const wanted = new Set();
   for (const id of models) {
-    const { slug, filename, content } = workerAgentMarkdown(id, promptBody);
-    wantedSlugs.add(slug);
-    fs.writeFileSync(path.join(dir, filename), content);
-    written.push({ id, filename });
+    for (const role of ROLES) {
+      const { slug, filename, content } = agentMarkdown(role, id, body[role]);
+      wanted.add(slug);
+      fs.writeFileSync(path.join(dir, filename), content);
+      written.push({ id, filename });
+    }
   }
 
-  // Prune our own previously-generated grunts that are no longer requested.
-  // Match both the current `grunt-` prefix and the legacy `worker-` one, so the
-  // worker->grunt rename migrates cleanly. Only files carrying our marker prefix
-  // are touched — hand-authored agents are never removed.
+  // Prune our own previously-generated grunts/drills (and legacy worker-) no
+  // longer requested. Only files carrying our marker prefix are touched.
   const pruned = [];
   if (prune) {
     for (const f of fs.readdirSync(dir)) {
-      if (!/^(?:grunt|worker)-.*\.md$/.test(f)) continue;
-      const slug = f.replace(/\.md$/, "");
-      if (wantedSlugs.has(slug)) continue;
+      if (!/^(?:grunt|drill|worker)-.*\.md$/.test(f)) continue;
+      if (wanted.has(f.replace(/\.md$/, ""))) continue;
       const full = path.join(dir, f);
-      let body = "";
+      let txt = "";
       try {
-        body = fs.readFileSync(full, "utf8");
+        txt = fs.readFileSync(full, "utf8");
       } catch {
         continue;
       }
-      if (body.includes(GENERATED_MARKER_DETECT)) {
+      if (txt.includes(GENERATED_MARKER_DETECT)) {
         fs.unlinkSync(full);
         pruned.push(f);
       }
@@ -85,7 +91,7 @@ function main() {
   for (const w of written) console.log(`  wrote  ${w.filename}   (${w.id})`);
   for (const f of pruned) console.log(`  pruned ${f}`);
   console.log(
-    `\n${written.length} grunt(s) generated, ${pruned.length} pruned.`,
+    `\n${models.length} model(s) -> ${written.length} agents (grunt + drill), ${pruned.length} pruned.`,
   );
   console.log(
     "Reload opencode (restart the TUI / start a new run) to pick up the new agents.",

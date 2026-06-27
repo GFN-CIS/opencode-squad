@@ -124,7 +124,9 @@ For iteration N = 1..3:
 
 **drill's verdict is advisory, not authoritative.** drill is often a cheaper
 model and can review formally — rubber-stamp a PASS, or invent "evidence" it
-never actually checked. Read the verdict critically before acting on it:
+never actually checked. For a review that matters, dispatch a drill on a strong
+model (`drill-<provider>-<model>` from the inventory), the same way you pick
+grunts — a cheap drill rubber-stamps. Either way, read the verdict critically:
 
 - Does each `check` cite **concrete, specific** evidence (a real line, a real
   test name, an actual value), or vague boilerplate that could apply to

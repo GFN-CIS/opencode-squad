@@ -26,7 +26,7 @@ That is all. On next start, OpenCode registers everything automatically.
 | `drill` | hidden subagent | Reviews grunt output, returns a strict JSON verdict |
 | `squad-delegate` | skill | The orchestrator's delegation protocol — loaded on demand when it decides to delegate (shapes, PDCA, risk gate) |
 | `squad-stall` | skill | The orchestrator's stall-breaking ladder — loaded on demand when it recognizes it's stuck (kept separate so a stall doesn't pull in the whole delegation protocol) |
-| `squad-draft-grunts` | skill | Drafts the per-model grunt roster — discovers available models, proposes a tiered set, asks what to add/remove, then generates one hidden `grunt-<provider>-<model>` each, giving the orchestrator a menu of models to delegate to |
+| `draft-squad` | skill | Scaffolds the per-model squad — discovers available models, proposes a tiered set, asks what to add/remove, then generates a hidden `grunt-<provider>-<model>` (executor) **and** `drill-<provider>-<model>` (reviewer) for each, giving the orchestrator a menu of models for both roles |
 | Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
 | Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
 
@@ -60,17 +60,16 @@ Your `agent` block wins; anything you do not specify falls back to the default.
 
 ---
 
-## Per-model grunts
+## Per-model squad (grunts + drills)
 
-opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model is to have one named grunt agent per model. The `squad-draft-grunts` skill sets this up interactively: invoke it and it discovers the available models (`opencode models`), proposes a tiered roster, asks what to add or remove, then — on your OK — writes one hidden grunt agent per model into `~/.config/opencode/agent/`.
+opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model — for execution or for review — is a named agent per model per role. The `draft-squad` skill sets this up interactively: invoke it and it discovers the available models (`opencode models`), proposes a tiered roster, asks what to add or remove, then — on your OK — writes a hidden **grunt** (executor) and **drill** (read-only reviewer) per model into `~/.config/opencode/agent/`.
 
 ```
-anthropic/claude-opus-4-7   →  grunt-anthropic-claude-opus-4-7
-openai/gpt-5.5              →  grunt-openai-gpt-5-5
-google/gemini-3.5-flash     →  grunt-google-gemini-3-5-flash
+openai/gpt-5.5  →  grunt-openai-gpt-5-5   (executor: edit/bash)
+                →  drill-openai-gpt-5-5   (reviewer: read-only)
 ```
 
-Each generated grunt shares the bundled grunt prompt and permissions, differs only in `model`, and is `hidden` (dispatched by the orchestrator via `task`, not shown in the `@`-menu). They appear in the orchestrator's inventory **with their models**, which is what makes the capability-matching rule concrete — it can route analysis/architecture to a strong model and mechanical work to a cheap one. Re-running syncs the set (prunes generated grunts no longer listed; never touches hand-authored agents). Reload opencode to pick up new agents. The generic `grunt` / `drill` remain as the default.
+Each generated agent shares the bundled grunt/drill prompt and permissions, differs only in `model`, and is `hidden` (dispatched via `task`, not in the `@`-menu). They appear in the orchestrator's inventory **with their models and capability summary**, which makes the routing concrete — analysis/architecture to a strong model, mechanical work to a cheap one, and reviews on a model strong enough to actually catch problems. Re-running syncs the set (prunes generated grunts/drills no longer listed; never touches hand-authored agents). Reload opencode to pick up new agents. The generic `grunt` / `drill` remain as the default.
 
 ---
 
