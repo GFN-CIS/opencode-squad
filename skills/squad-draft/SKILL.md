@@ -1,10 +1,10 @@
 ---
-name: draft-squad
+name: squad-draft
 description: Use when the user wants to draft, set up, or refresh the per-model squad — a grunt (worker) AND a drill (reviewer) per model — from one model list, so the sarge orchestrator can pick an executor or a reviewer by model capability. When invoked, DRIVE it — discover the available models, propose a curated roster, ask what to add or remove, then generate. Triggers: "draft squad", "set up grunts/drills", "model squad", "набери сквад", "сделай агентов по моделям".
 license: MIT
 ---
 
-# draft-squad — scaffold the per-model squad (grunts + drills)
+# squad-draft — scaffold the per-model squad (grunts + drills)
 
 opencode's `task` tool takes only `subagent_type` (no model), so the only way to
 let sarge choose a model — for execution OR review — is a named agent per model.
@@ -42,8 +42,8 @@ explicit list — honor it.)
 
 4. **Generate** the confirmed roster. Locate the bundled generator and run it:
    ```bash
-   SCRIPT="$(find ~/.cache/opencode/packages -path '*node_modules/opencode-squad/scripts/draft-squad.mjs' 2>/dev/null | head -1)"
-   [ -z "$SCRIPT" ] && SCRIPT="$(find ~ -path '*opencode-squad/scripts/draft-squad.mjs' 2>/dev/null | head -1)"
+   SCRIPT="$(find ~/.cache/opencode/packages -path '*node_modules/opencode-squad/scripts/squad-draft.mjs' 2>/dev/null | head -1)"
+   [ -z "$SCRIPT" ] && SCRIPT="$(find ~ -path '*opencode-squad/scripts/squad-draft.mjs' 2>/dev/null | head -1)"
    node "$SCRIPT" <confirmed provider/model ids...>
    ```
    For each model it writes a hidden `grunt-<slug>.md` (executor) and a

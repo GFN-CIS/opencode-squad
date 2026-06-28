@@ -2,7 +2,7 @@
 // Scaffold the per-model squad — a grunt AND a drill per model — from one list.
 //
 // Usage:
-//   node draft-squad.mjs [--dir <agentDir>] [--no-prune] <provider/model>...
+//   node squad-draft.mjs [--dir <agentDir>] [--no-prune] <provider/model>...
 //
 // Defaults to the global agent dir (~/.config/opencode/agent). Re-running syncs
 // the managed set: it (re)writes grunt-<slug>.md + drill-<slug>.md for each
@@ -45,7 +45,7 @@ function main() {
   const { models, dir, prune } = parseArgs(process.argv.slice(2));
   if (models.length === 0) {
     console.error(
-      "No models given. Usage: draft-squad.mjs [--dir <d>] [--no-prune] <provider/model>...",
+      "No models given. Usage: squad-draft.mjs [--dir <d>] [--no-prune] <provider/model>...",
     );
     process.exit(2);
   }

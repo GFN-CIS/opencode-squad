@@ -26,7 +26,7 @@ That is all. On next start, OpenCode registers everything automatically.
 | `drill` | hidden subagent | Reviews grunt output, returns a strict JSON verdict |
 | `squad-delegate` | skill | The orchestrator's delegation protocol — loaded on demand when it decides to delegate (shapes, PDCA, risk gate) |
 | `squad-stall` | skill | The orchestrator's stall-breaking ladder — loaded on demand when it recognizes it's stuck (kept separate so a stall doesn't pull in the whole delegation protocol) |
-| `draft-squad` | skill | Scaffolds the per-model squad — discovers available models, proposes a tiered set, asks what to add/remove, then generates a hidden `grunt-<provider>-<model>` (executor) **and** `drill-<provider>-<model>` (reviewer) for each, giving the orchestrator a menu of models for both roles |
+| `squad-draft` | skill | Scaffolds the per-model squad — discovers available models, proposes a tiered set, asks what to add/remove, then generates a hidden `grunt-<provider>-<model>` (executor) **and** `drill-<provider>-<model>` (reviewer) for each, giving the orchestrator a menu of models for both roles |
 | Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
 | Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
 
@@ -62,7 +62,7 @@ Your `agent` block wins; anything you do not specify falls back to the default.
 
 ## Per-model squad (grunts + drills)
 
-opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model — for execution or for review — is a named agent per model per role. The `draft-squad` skill sets this up interactively: invoke it and it discovers the available models (`opencode models`), proposes a tiered roster, asks what to add or remove, then — on your OK — writes a hidden **grunt** (executor) and **drill** (read-only reviewer) per model into `~/.config/opencode/agent/`.
+opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model — for execution or for review — is a named agent per model per role. The `squad-draft` skill sets this up interactively: invoke it and it discovers the available models (`opencode models`), proposes a tiered roster, asks what to add or remove, then — on your OK — writes a hidden **grunt** (executor) and **drill** (read-only reviewer) per model into `~/.config/opencode/agent/`.
 
 ```
 openai/gpt-5.5  →  grunt-openai-gpt-5-5   (executor: edit/bash)
