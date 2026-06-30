@@ -12,11 +12,14 @@
  */
 
 import path from "node:path";
+import os from "node:os";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { agentDefinitions } from "../../src/agents.js";
 import { formatInventory } from "../../src/inventory.js";
+import { formatBench } from "../../src/benchmarks.js";
+import { readModelData, formatPerf } from "../../src/model-data.js";
 import { buildBootstrap, BOOTSTRAP_MARKER } from "../../src/bootstrap.js";
 import {
   estimateContextTokens,
@@ -58,6 +61,44 @@ function loadBenchmarks() {
   return _benchCache;
 }
 
+// Hand-editable per-squad-model snapshot, keyed by opencode provider/model id.
+// Looked for beside the agent dirs opencode merges: the project's .opencode
+// first, then the global config dir. null if neither exists (we then fall back
+// to the raw AA benchmarks). Read once per process.
+let _modelDataCache; // undefined = not loaded
+function loadModelData() {
+  if (_modelDataCache !== undefined) return _modelDataCache;
+  _modelDataCache = null;
+  const candidates = [
+    path.join(process.cwd(), ".opencode", "model_data.json"),
+    path.join(os.homedir(), ".config", "opencode", "model_data.json"),
+  ];
+  const merged = {};
+  let found = false;
+  // Global first, then project on top, so project entries win on overlap.
+  for (const file of [...candidates].reverse()) {
+    const md = readModelData(file);
+    if (md) {
+      found = true;
+      Object.assign(merged, md.models);
+    }
+  }
+  if (found) _modelDataCache = merged;
+  return _modelDataCache;
+}
+
+// Per-model capability tail for the inventory: model_data entry if we have one
+// (precomputed indices + hand-written note), else the raw AA benchmark lookup.
+function buildPerfLookup() {
+  const modelData = loadModelData();
+  const benchmarks = loadBenchmarks();
+  return (modelId) => {
+    const entry = modelData && modelData[modelId];
+    if (entry) return formatPerf(entry);
+    return benchmarks ? formatBench(modelId, benchmarks) : null;
+  };
+}
+
 // Configured orchestrator model, captured from config (fallback for turn 1,
 // before any assistant message reveals the actual model).
 let _orchestratorModel = null;
@@ -74,7 +115,7 @@ export const OrchestratePlugin = async ({ client }) => {
       const res = await client.app.agents();
       _inventoryCache = formatInventory(
         res?.data ?? [],
-        loadBenchmarks(),
+        buildPerfLookup(),
         await getLimitMap(),
       );
     } catch {

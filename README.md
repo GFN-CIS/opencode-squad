@@ -38,6 +38,8 @@ grunt-openai-gpt-5-5 … (model: openai/gpt-5.5 · ctx 400k — AA intel 55 · c
 
 The AA data is a static snapshot (`src/benchmarks.json`, refreshable via `scripts/refresh-benchmarks.mjs`); no raw sub-benchmarks or speed metrics are shown.
 
+If a `model_data.json` exists (in the project's `.opencode/` or the global `~/.config/opencode/`), the inventory reads its perf from **there** instead of the raw AA dump. It's a small, hand-editable snapshot holding **only the models that have a grunt-/drill- agent**, keyed by the opencode `provider/model` id, with the AA indices copied in plus an `info` note you fill yourself ("good for coding, weak at long context") — which then shows up inline in the inventory so the orchestrator routes on your guidance, not just the numbers. Generate it manually with `node scripts/squad-file-performance.mjs` (it never runs on its own); re-running refreshes the perf numbers but preserves your `info` and any other field you added. Without the file, the inventory falls back to `benchmarks.json` exactly as before.
+
 "Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via the task tool. Both injections target **only the `build` agent's own sessions** — grunt/drill subagent sessions are never injected into, so there is no recursion.
 
 ---
@@ -160,7 +162,7 @@ A full PDCA iteration (the *changes* branch) fires two LLM calls (grunt + drill)
 
 ```bash
 bun install
-bun test          # runs the unit suite (bootstrap, inventory, agents, context)
+bun test          # runs the unit suite (bootstrap, inventory, agents, context, benchmarks, model-data)
 ```
 
 ---

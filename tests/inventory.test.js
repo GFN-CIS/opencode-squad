@@ -59,6 +59,21 @@ test("appends the minimal AA bench summary when a snapshot is given", () => {
   expect(formatInventory(agents)).not.toContain("AA intel");
 });
 
+test("uses a perf lookup function when given one (model_data path)", () => {
+  const agents = [
+    {
+      name: "grunt-openai-gpt-5-5",
+      mode: "subagent",
+      description: "Per-model grunt.",
+      model: { providerID: "openai", modelID: "gpt-5.5" },
+    },
+  ];
+  const lookup = (id) =>
+    id === "openai/gpt-5.5" ? "AA intel 55 · note: good for coding" : null;
+  const out = formatInventory(agents, lookup);
+  expect(out).toContain("— AA intel 55 · note: good for coding");
+});
+
 test("adds the context window from the limits map", () => {
   const agents = [
     { name: "g1", mode: "subagent", description: "x", model: { providerID: "openai", modelID: "gpt-5.5" } },
