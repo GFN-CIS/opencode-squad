@@ -166,6 +166,23 @@ export function formatPerf(entry) {
 }
 
 /**
+ * Whether a freshly built snapshot's `models` differ from what's already on
+ * disk — used by the startup auto-regen to write ONLY on a real change (new
+ * grunt/drill, refreshed perf, edited info), never just to bump the date. The
+ * merge keeps entry key order stable across runs, so a plain JSON compare of
+ * the `models` objects is reliable.
+ *
+ * @param {{models?:Record<string, any>}} existing  parsed prior model_data.json
+ * @param {{models?:Record<string, any>}} snapshot  freshly built snapshot
+ * @returns {boolean}
+ */
+export function modelsChanged(existing, snapshot) {
+  const a = JSON.stringify((existing && existing.models) || {});
+  const b = JSON.stringify((snapshot && snapshot.models) || {});
+  return a !== b;
+}
+
+/**
  * Read and parse a model_data.json file. Returns null if absent/unreadable —
  * callers fall back to the raw benchmarks snapshot.
  *

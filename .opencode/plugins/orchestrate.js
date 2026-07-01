@@ -19,7 +19,12 @@ import { fileURLToPath } from "node:url";
 import { agentDefinitions } from "../../src/agents.js";
 import { formatInventory } from "../../src/inventory.js";
 import { formatBench } from "../../src/benchmarks.js";
-import { readModelData, formatPerf } from "../../src/model-data.js";
+import {
+  readModelData,
+  formatPerf,
+  buildModelData,
+  modelsChanged,
+} from "../../src/model-data.js";
 import { buildBootstrap, BOOTSTRAP_MARKER } from "../../src/bootstrap.js";
 import {
   estimateContextTokens,
@@ -99,6 +104,32 @@ function buildPerfLookup() {
   };
 }
 
+// Startup auto-regen of the GLOBAL model_data.json: rescan the squad, refresh
+// perf from benchmarks, MERGE (preserving hand-written `info`), and write ONLY
+// when the models actually changed — so a new grunt/drill or fresh benchmarks
+// land automatically without clobbering edits or churning the file every boot.
+// Best-effort: any failure is swallowed so it can never break startup. No-op
+// when there is no squad yet (0 models). Only the global agent dir is scanned;
+// a project's .opencode/model_data.json stays fully manual (via the script's
+// --dir). Runs before the inventory cache is built, so the fresh file is read.
+function ensureGlobalModelDataFresh() {
+  try {
+    const benchmarks = loadBenchmarks();
+    if (!benchmarks) return;
+    const configDir = path.join(os.homedir(), ".config", "opencode");
+    const agentDir = path.join(configDir, "agent");
+    const file = path.join(configDir, "model_data.json");
+    const existing = readModelData(file) || {};
+    const generated = new Date().toISOString().slice(0, 10);
+    const snapshot = buildModelData(agentDir, benchmarks, existing, generated);
+    if (Object.keys(snapshot.models).length === 0) return; // no squad -> nothing
+    if (!modelsChanged(existing, snapshot)) return; // unchanged -> no write
+    fs.writeFileSync(file, JSON.stringify(snapshot, null, 2) + "\n");
+  } catch {
+    // Best-effort; the inventory falls back to benchmarks.json regardless.
+  }
+}
+
 // Configured orchestrator model, captured from config (fallback for turn 1,
 // before any assistant message reveals the actual model).
 let _orchestratorModel = null;
@@ -108,6 +139,10 @@ let _limitMap; // undefined = not loaded
 
 /** @type {import("@opencode-ai/plugin").Plugin} */
 export const OrchestratePlugin = async ({ client }) => {
+  // Refresh the global model_data.json once at plugin load (opencode startup),
+  // before anything reads it. Cheap and best-effort; see the function comment.
+  ensureGlobalModelDataFresh();
+
   const getInventory = async () => {
     if (_inventoryCache !== undefined) return _inventoryCache;
     _inventoryCache = "(no subagents available)";

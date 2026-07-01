@@ -10,6 +10,7 @@ import {
   buildModelData,
   formatPerf,
   readModelData,
+  modelsChanged,
 } from "../src/model-data.js";
 
 // Minimal AA-shaped snapshot for deterministic perf lookups.
@@ -125,6 +126,24 @@ test("formatPerf with only a note (no AA match) still surfaces it", () => {
 test("formatPerf returns null for an empty entry", () => {
   expect(formatPerf({ intelligence: null, info: "" })).toBeNull();
   expect(formatPerf(null)).toBeNull();
+});
+
+test("modelsChanged detects real model diffs and ignores rebuild churn", () => {
+  const dir = tmpdir();
+  fs.writeFileSync(path.join(dir, "grunt-openai-gpt-5-5.md"), "---\nmodel: openai/gpt-5.5\n---\n");
+  const first = buildModelData(dir, BENCH, {}, "2026-06-30");
+  // rebuild on a later date over the prior output: same models -> no change,
+  // so the startup auto-regen must NOT rewrite just because the date moved.
+  const second = buildModelData(dir, BENCH, first, "2026-07-15");
+  expect(modelsChanged(first, second)).toBe(false);
+  // a hand-edited info IS a change worth persisting
+  const edited = { models: { ...first.models } };
+  edited.models["openai/gpt-5.5"] = { ...edited.models["openai/gpt-5.5"], info: "new note" };
+  expect(modelsChanged(first, edited)).toBe(true);
+  // a new squad member is a change
+  fs.writeFileSync(path.join(dir, "grunt-anthropic-x.md"), "---\nmodel: anthropic/x\n---\n");
+  const third = buildModelData(dir, BENCH, second, "2026-07-15");
+  expect(modelsChanged(second, third)).toBe(true);
 });
 
 test("readModelData round-trips a written file and tolerates a missing one", () => {
