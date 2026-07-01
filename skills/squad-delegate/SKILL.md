@@ -29,6 +29,15 @@ your name. Delegation moves the work off your plate, not the responsibility.
 When a user-defined specialized subagent (see the inventory) fits the task
 better than the generic `grunt`, prefer it.
 
+**Never dispatch to `general` unless the user explicitly asks for it.** The
+catch-all `general` agent carries no `model:` of its own, so it inherits *your*
+(orchestrator's) model — usually your expensive primary. A read-only dig sent to
+`general` silently runs your top-tier model for grunt work, and the inventory
+shows it as `model: inherited` with no price, so the cost is invisible at the
+point of choice. For read-only investigation use `explore` (pinned to a cheap
+fast model); for actual work route to a per-model `grunt`. `general` is a
+deliberate last resort, never a default.
+
 ## 1a. Match the delegate to the task (capability & risk)
 
 The inventory lists each subagent's model. Delegation is only a win if the

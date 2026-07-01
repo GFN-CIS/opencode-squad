@@ -28,6 +28,13 @@ test("tells a weak orchestrator to escalate capability UP", () => {
   expect(out).toContain("up"); // delegate up / consult up
 });
 
+test("forbids `general` unless explicitly asked (it inherits the primary model)", () => {
+  const out = buildBootstrap("(no subagents available)");
+  expect(out).toContain("`general`");
+  expect(out.toLowerCase()).toContain("unless the user explicitly");
+  expect(out).toContain("`explore`"); // steer read-only to explore instead
+});
+
 test("keeps the stall trigger inline and points to the squad-stall skill", () => {
   const out = buildBootstrap("(no subagents available)").toLowerCase();
   expect(out).toContain("stall");
