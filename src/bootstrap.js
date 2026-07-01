@@ -32,7 +32,11 @@ On every request, state one explicit verdict before acting:
   default for real work. Route by capability — each subagent's model is in the
   inventory, yours is above; don't send high-cognition work (analysis,
   architecture) to a weak model, and never hand an unsupervised production write
-  to the cheap grunt.
+  to the cheap grunt. **Never dispatch to \`general\` unless the user explicitly
+  asks for it** — it has no model of its own, so it inherits *yours* (your
+  expensive primary), silently burning top-tier tokens on grunt work. For
+  read-only investigation use \`explore\`; for real work route to a per-model
+  grunt.
 
 Capability cuts both ways — the weak model in the loop can be **you**. If a task,
 or a pivotal call inside it, is beyond your OWN model's depth and the inventory
