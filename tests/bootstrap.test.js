@@ -69,6 +69,24 @@ test("omits the facts block when no facts are provided", () => {
   expect(out).not.toContain("You are running on");
 });
 
+test("tells the orchestrator to send the user to squad-draft when no squad is drafted", () => {
+  const out = buildBootstrap("(no subagents available)", { hasSquad: false });
+  expect(out).toContain("squad-draft");
+  expect(out.toLowerCase()).toContain("no squad drafted yet");
+  expect(out.toLowerCase()).toContain("don't invent");
+});
+
+test("omits the no-squad warning once a squad exists", () => {
+  const inv = "- `grunt-anthropic-claude-sonnet-5`: worker (model: anthropic/claude-sonnet-5)";
+  const out = buildBootstrap(inv, { hasSquad: true });
+  expect(out.toLowerCase()).not.toContain("no squad drafted");
+});
+
+test("omits the no-squad warning when hasSquad is not passed (back-compat)", () => {
+  const out = buildBootstrap("(no subagents available)");
+  expect(out.toLowerCase()).not.toContain("no squad drafted");
+});
+
 test("marker is the exact stable string the injection guard relies on", () => {
   // Pinned: the plugin's double-injection guard does
   // `text.includes(BOOTSTRAP_MARKER)`. Changing this value silently breaks

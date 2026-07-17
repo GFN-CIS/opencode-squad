@@ -2,13 +2,14 @@
  * opencode-squad plugin entry.
  *
  * Responsibilities:
- *   1. Register the bundled grunt (worker) / drill (reviewer) subagents (only
- *      if the user has not already defined an agent with that name).
- *   2. Register the bundled skills directory so squad-delegate is
+ *   1. Register the bundled skills directory so squad-delegate is
  *      discoverable.
- *   3. Inject a hidden orchestrator bootstrap (with a live subagent inventory)
+ *   2. Inject a hidden orchestrator bootstrap (with a live subagent inventory)
  *      into the latest user message every turn, so it survives a context
- *      compaction instead of being lost with the original first message.
+ *      compaction instead of being lost with the original first message. When
+ *      no grunt-/drill- agent has been drafted yet, the bootstrap tells the
+ *      orchestrator to send the user to squad-draft instead of routing to a
+ *      subagent that doesn't exist — there is no bundled fallback agent.
  */
 
 import path from "node:path";
@@ -16,8 +17,7 @@ import os from "node:os";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { agentDefinitions } from "../../src/agents.js";
-import { formatInventory } from "../../src/inventory.js";
+import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { formatBench } from "../../src/benchmarks.js";
 import {
   readModelData,
@@ -37,17 +37,17 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
-const PROMPTS_DIR = path.join(PACKAGE_ROOT, "prompts");
 const SKILLS_DIR = path.join(PACKAGE_ROOT, "skills");
 
 // The primary agent that acts as the orchestrator. Injection targets only this
 // agent's sessions (verified via message.info.agent in the Task 0 spike).
 const ORCHESTRATOR_AGENT = "build";
 
-// Cache the subagent inventory string per process (it does not change at
-// runtime). The bootstrap itself is assembled per injection so the live facts
-// (current time, current model) stay fresh.
+// Cache the subagent inventory string (and whether a squad has been drafted)
+// per process — neither changes at runtime. The bootstrap itself is assembled
+// per injection so the live facts (current time, current model) stay fresh.
 let _inventoryCache; // undefined = not loaded
+let _hasSquadCache; // undefined = not loaded
 
 // Static AA benchmark snapshot (models object), read once. null if missing.
 let _benchCache; // undefined = not loaded
@@ -146,13 +146,12 @@ export const OrchestratePlugin = async ({ client }) => {
   const getInventory = async () => {
     if (_inventoryCache !== undefined) return _inventoryCache;
     _inventoryCache = "(no subagents available)";
+    _hasSquadCache = false;
     try {
       const res = await client.app.agents();
-      _inventoryCache = formatInventory(
-        res?.data ?? [],
-        buildPerfLookup(),
-        await getLimitMap(),
-      );
+      const agents = res?.data ?? [];
+      _hasSquadCache = hasSquad(agents);
+      _inventoryCache = formatInventory(agents, buildPerfLookup(), await getLimitMap());
     } catch {
       // Inventory is best-effort; the bootstrap still works without it.
     }
@@ -185,15 +184,6 @@ export const OrchestratePlugin = async ({ client }) => {
         cfg.skills.paths = cfg.skills.paths || [];
         if (!cfg.skills.paths.includes(SKILLS_DIR)) {
           cfg.skills.paths.push(SKILLS_DIR);
-        }
-      }
-
-      // Define bundled subagents only if the user has not defined them.
-      config.agent = config.agent || {};
-      const defs = agentDefinitions(PROMPTS_DIR);
-      for (const [name, def] of Object.entries(defs)) {
-        if (!config.agent[name]) {
-          config.agent[name] = def;
         }
       }
     },
@@ -249,7 +239,11 @@ export const OrchestratePlugin = async ({ client }) => {
         );
         const modelText =
           resolveOrchestratorModel(msgs) ?? _orchestratorModel ?? null;
-        const bootstrap = buildBootstrap(inventory, { nowText, modelText });
+        const bootstrap = buildBootstrap(inventory, {
+          nowText,
+          modelText,
+          hasSquad: _hasSquadCache,
+        });
         lastUser.parts.unshift({ ...refPart, type: "text", text: bootstrap });
       }
 
