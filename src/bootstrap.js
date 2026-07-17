@@ -5,8 +5,12 @@ export const BOOTSTRAP_MARKER = "<ORCHESTRATE_BOOTSTRAP>";
 
 /**
  * @param {string} inventoryMarkdown
- * @param {{nowText?:string, modelText?:string}} [facts] live session facts
- *        resolved at injection time (kept out of any cache so they stay fresh)
+ * @param {{nowText?:string, modelText?:string, hasSquad?:boolean}} [facts]
+ *        live session facts resolved at injection time (kept out of any cache
+ *        so they stay fresh). `hasSquad` is whether a `grunt-*`/`drill-*`
+ *        agent has been drafted — there is no bundled fallback agent, so when
+ *        it's false the orchestrator must send the user to squad-draft rather
+ *        than routing to a subagent that doesn't exist.
  * @returns {string}
  */
 export function buildBootstrap(inventoryMarkdown, facts = {}) {
@@ -19,7 +23,14 @@ export function buildBootstrap(inventoryMarkdown, facts = {}) {
     );
   }
   const factsBlock = lines.length ? `\n${lines.join("\n")}\n` : "";
-  return `${BOOTSTRAP_MARKER}${factsBlock}
+  const noSquadBlock = facts.hasSquad === false
+    ? `\n**No squad drafted yet.** There is no bundled grunt/drill fallback — if ` +
+      `the inventory below has no \`grunt-*\`/\`drill-*\` entries, don't invent ` +
+      `one and don't quietly absorb grunt-level work yourself on an expensive ` +
+      `model. Tell the user to run the \`squad-draft\` skill (e.g. "собери ` +
+      `команду") to set one up, then proceed once it exists.\n`
+    : "";
+  return `${BOOTSTRAP_MARKER}${factsBlock}${noSquadBlock}
 You are the orchestrator — call sign **sarge**. Your value is decomposition,
 routing, and review, not doing routine work yourself on an expensive model.
 Default to delegating.

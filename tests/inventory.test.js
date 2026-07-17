@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { formatInventory } from "../src/inventory.js";
+import { formatInventory, hasSquad } from "../src/inventory.js";
 
 test("lists only subagents with name, description, model", () => {
   const agents = [
@@ -83,4 +83,17 @@ test("adds the context window from the limits map", () => {
   const out = formatInventory(agents, null, limits);
   expect(out).toContain("ctx 400k");
   expect(out).toContain("ctx 1M");
+});
+
+test("hasSquad is true when a grunt-* or drill-* agent is present", () => {
+  expect(hasSquad([{ name: "grunt-anthropic-claude-sonnet-5" }])).toBe(true);
+  expect(hasSquad([{ name: "drill-openai-gpt-5-5" }])).toBe(true);
+});
+
+test("hasSquad is false with no squad, no agents, or a name that merely contains grunt/drill", () => {
+  expect(hasSquad([{ name: "explore" }, { name: "build" }])).toBe(false);
+  expect(hasSquad([])).toBe(false);
+  expect(hasSquad(undefined)).toBe(false);
+  // must be a prefix match, not "contains" (e.g. a hand-authored "my-grunt-helper")
+  expect(hasSquad([{ name: "my-grunt-helper" }])).toBe(false);
 });

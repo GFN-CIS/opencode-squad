@@ -1,6 +1,6 @@
 # opencode-squad
 
-An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator. On every request it states an explicit `SELF`/`DELEGATE` verdict: trivial work it does itself; real work it hands to a `grunt` subagent — routing changes through a `drill` (the Deming check), and investigations straight back to itself. A live context-usage signal feeds the decision so a heavy task isn't burned into an already-full context.
+An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator. On every request it states an explicit `SELF`/`DELEGATE` verdict: trivial work it does itself; real work it hands to a per-model `grunt-*` subagent — routing changes through the matching `drill-*` (the Deming check), and investigations straight back to itself. A live context-usage signal feeds the decision so a heavy task isn't burned into an already-full context.
 
 ---
 
@@ -14,7 +14,7 @@ Add one line to `~/.config/opencode/opencode.json`:
 }
 ```
 
-That is all. On next start, OpenCode registers everything automatically.
+That is all. On next start, OpenCode registers the skills and bootstrap automatically. There is no bundled grunt/drill agent — run the `squad-draft` skill once to generate the per-model squad the orchestrator delegates to.
 
 ---
 
@@ -22,8 +22,6 @@ That is all. On next start, OpenCode registers everything automatically.
 
 | Component | Type | Notes |
 |---|---|---|
-| `grunt` | hidden subagent | Executes delegated tasks |
-| `drill` | hidden subagent | Reviews grunt output, returns a strict JSON verdict |
 | `squad-delegate` | skill | The orchestrator's delegation protocol — loaded on demand when it decides to delegate (shapes, PDCA, risk gate) |
 | `squad-stall` | skill | The orchestrator's stall-breaking ladder — loaded on demand when it recognizes it's stuck (kept separate so a stall doesn't pull in the whole delegation protocol) |
 | `squad-draft` | skill | Scaffolds the per-model squad — discovers available models, proposes a tiered set, asks what to add/remove, then generates a hidden `grunt-<provider>-<model>` (executor) **and** `drill-<provider>-<model>` (reviewer) for each, giving the orchestrator a menu of models for both roles |
@@ -73,7 +71,9 @@ openai/gpt-5.5  →  grunt-openai-gpt-5-5   (executor: edit/bash)
                 →  drill-openai-gpt-5-5   (reviewer: read-only)
 ```
 
-Each generated agent shares the bundled grunt/drill prompt and permissions, differs only in `model`, and is `hidden` (dispatched via `task`, not in the `@`-menu). They appear in the orchestrator's inventory **with their models and capability summary**, which makes the routing concrete — analysis/architecture to a strong model, mechanical work to a cheap one, and reviews on a model strong enough to actually catch problems. Re-running syncs the set (prunes generated grunts/drills no longer listed; never touches hand-authored agents). Reload opencode to pick up new agents. The generic `grunt` / `drill` remain as the default.
+Each generated agent shares the bundled grunt/drill prompt and permissions, differs only in `model`, and is `hidden` (dispatched via `task`, not in the `@`-menu). They appear in the orchestrator's inventory **with their models and capability summary**, which makes the routing concrete — analysis/architecture to a strong model, mechanical work to a cheap one, and reviews on a model strong enough to actually catch problems. Re-running syncs the set (prunes generated grunts/drills no longer listed; never touches hand-authored agents). Reload opencode to pick up new agents.
+
+There is no bundled fallback agent — if no `grunt-*`/`drill-*` exists yet, the orchestrator tells you to run `squad-draft` instead of inventing a subagent or quietly doing the work itself.
 
 ---
 
@@ -97,18 +97,18 @@ It picks **SELF** only for: pure Q&A / explanation, a single trivial read, or wh
 
 Once it delegates, the shape depends on the task:
 
-- **Read-only / investigation** (status checks, "why is X", log/metric digs) → delegate execution to `grunt` (or a specialized read agent like `Explore`) with **no drill** — there is no artifact to review. The orchestrator sanity-checks the findings itself, then reports.
+- **Read-only / investigation** (status checks, "why is X", log/metric digs) → delegate execution to a per-model `grunt-*` (or a specialized read agent like `Explore`) with **no drill** — there is no artifact to review. The orchestrator sanity-checks the findings itself, then reports.
 - **Changes** (code / docs / config) → the full PDCA loop:
-  1. **Plan / Do** — calls `grunt` with the brief, definition of done, context, and (from iteration 2 onward) the drill's feedback.
-  2. **Check** — calls `drill` with the brief and the grunt's output. The drill returns a strict JSON verdict: `{"verdict": "PASS"|"FAIL", "checks": [...], "issues": [...], "suggested_fixes": [...], "blocking": <bool>}`.
+  1. **Plan / Do** — calls a `grunt-*` with the brief, definition of done, context, and (from iteration 2 onward) the drill's feedback.
+  2. **Check** — calls the matching `drill-*` with the brief and the grunt's output. The drill returns a strict JSON verdict: `{"verdict": "PASS"|"FAIL", "checks": [...], "issues": [...], "suggested_fixes": [...], "blocking": <bool>}`.
   3. **Act** — on `PASS`, the orchestrator runs a final sanity-check (e.g. tests/lint) and delivers the result. On `FAIL`, it retries — up to **3 iterations total**, then escalates to the user rather than retrying blindly.
 
 ### Matching the delegate (capability & risk)
 
 Delegating only helps if the delegate is actually fit for the task. The injected inventory lists each subagent's model, and the orchestrator weighs two things before handing work over:
 
-- **Capability** — the orchestrator routes by what the *specific* models involved are good and bad at as of the current date (its own model and each subagent's model are in the bootstrap/inventory), rather than from fixed rules. High-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheap default `grunt`, where a weak model would produce confident nonsense — it picks a strong-model delegate or keeps the task itself. **This cuts both ways:** when the orchestrator itself runs on a mid/cheap model and a task (or a pivotal call inside it) is beyond its depth, it escalates *up* — delegating the whole task to a stronger grunt, or consulting one for a second opinion before committing (advisor-style), rather than guessing.
-- **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheap `grunt` (its broad `bash`/`edit` permissions would execute it without a second opinion).
+- **Capability** — the orchestrator routes by what the *specific* models involved are good and bad at as of the current date (its own model and each subagent's model are in the bootstrap/inventory), rather than from fixed rules. High-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheapest drafted `grunt-*`, where a weak model would produce confident nonsense — it picks a strong-model delegate or keeps the task itself. **This cuts both ways:** when the orchestrator itself runs on a mid/cheap model and a task (or a pivotal call inside it) is beyond its depth, it escalates *up* — delegating the whole task to a stronger grunt, or consulting one for a second opinion before committing (advisor-style), rather than guessing.
+- **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheapest `grunt-*` (its broad `bash`/`edit` permissions would execute it without a second opinion).
 
 For full routing rules, escape hatches, and edge-case handling see [skills/squad-delegate/SKILL.md](skills/squad-delegate/SKILL.md).
 
@@ -120,7 +120,7 @@ The verdict is the model's call, but you steer it directly:
 
 - **Force SELF** — say *"do it yourself"* (or "делай сам") in your request. This is a first-class override: the orchestrator skips delegation entirely.
 - **Force DELEGATE** — just say *"delegate this"* / *"делегируй"*. The orchestrator follows the instruction even when a task would otherwise look trivial.
-- **Force a specific subagent** — name it: *"delegate to `Explore`"*, *"use the grunt"*. If a specialized subagent fits better than the generic `grunt`, the orchestrator prefers it on its own, but naming one is decisive.
+- **Force a specific subagent** — name it: *"delegate to `Explore`"*, *"use `grunt-anthropic-claude-sonnet-5`"*. Naming one is decisive.
 - **Skip the drill** — frame the task as read-only / investigation, or say so outright ("just investigate, no review"). Changes always default to the full PDCA loop.
 
 You can confirm the orchestrator is in the right mode by reading its first line — it prints `SELF: …` or `DELEGATE: …` with its reasoning before acting.
@@ -148,7 +148,11 @@ Check the OpenCode log for a line referencing `orchestrate.js` or `opencode-squa
 
 **Subagents are hidden — that is intentional**
 
-`grunt` and `drill` do not appear in the `@` mention menu because they are registered with `hidden: true`. They are invoked internally by the orchestrator. If you need to verify they are registered, use a one-off session and ask the model to list available subagents (it can introspect the session state).
+`grunt-*` and `drill-*` do not appear in the `@` mention menu because they are registered with `hidden: true`. They are invoked internally by the orchestrator. If you need to verify they are registered, use a one-off session and ask the model to list available subagents (it can introspect the session state).
+
+**Orchestrator says there's no squad**
+
+There is no bundled grunt/drill fallback agent — if `~/.config/opencode/agent/` (or a project's `.opencode/agent/`) has no `grunt-*`/`drill-*` files, the bootstrap tells sarge to send you to the `squad-draft` skill instead of delegating. Run it once and reload.
 
 **Check which mode it chose**
 
@@ -164,7 +168,7 @@ A full PDCA iteration (the *changes* branch) fires two LLM calls (grunt + drill)
 
 ```bash
 bun install
-bun test          # runs the unit suite (bootstrap, inventory, agents, context, benchmarks, model-data)
+bun test          # runs the unit suite (bootstrap, inventory, context, benchmarks, model-data, workers)
 ```
 
 ---

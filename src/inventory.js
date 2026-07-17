@@ -43,3 +43,16 @@ export function formatInventory(agents, perf, limits) {
     })
     .join("\n");
 }
+
+/**
+ * Whether a per-model squad has actually been drafted (squad-draft has run at
+ * least once). There is no bundled grunt/drill fallback — if this is false,
+ * the bootstrap must tell the user to draft one instead of routing to a
+ * subagent that doesn't exist.
+ *
+ * @param {Array<{name:string}>} agents
+ * @returns {boolean}
+ */
+export function hasSquad(agents) {
+  return (agents || []).some((a) => a && /^(?:grunt|drill)-/.test(a.name));
+}
