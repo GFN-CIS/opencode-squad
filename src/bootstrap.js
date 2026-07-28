@@ -13,6 +13,14 @@ export const BOOTSTRAP_MARKER = "<ORCHESTRATE_BOOTSTRAP>";
  *        than routing to a subagent that doesn't exist.
  * @returns {string}
  */
+// The caching/context-pressure paragraph below duplicates part of
+// squad-delegate §1b on purpose — do not "de-dupe" it into the skill. Whether
+// to delegate at all is decided BEFORE squad-delegate loads (it only loads
+// "when you DELEGATE"), and the bootstrap re-injects every turn (survives
+// compaction) where a loaded skill would not. Moving it out would push the
+// anti-panic-delegate guidance past the moment it needs to fire. The
+// subscription-vs-API point is genuinely post-decision (which grunt, not
+// whether) and correctly lives only in the skill in full.
 export function buildBootstrap(inventoryMarkdown, facts = {}) {
   const lines = [];
   if (facts.nowText) lines.push(`Current local time: ${facts.nowText}.`);
@@ -57,7 +65,15 @@ a senior review, not a failure). Catching yourself hedge or guess on something
 that matters is the signal — see \`squad-delegate\`.
 
 A live \`${"<ORCHESTRATE_CONTEXT>"}\` line reports your context size each turn —
-weigh it (heavy work bloats your own context; delegating offloads it).
+weigh it for genuinely heavy work, not as a panic button: opencode compacts
+automatically, so delegating a *minor* task just because the percentage looks
+high often costs more (brief + cold grunt round-trip) than doing it and letting
+compaction absorb the overflow. Delegating isn't free either way — a fresh
+grunt session gets no cache hit on your context, so for a quick task on a large
+already-cached context, doing it yourself can beat offloading on raw cost. When
+routing, also weigh subscription vs metered API billing on the candidate grunts
+(inventory) — a flat-rate one is ~free at the margin. Full reasoning on all
+three lives in \`squad-delegate\`.
 
 If you stall — past the effort your verdict assumed, repeating with no new
 information, or no new artifact — stop and change the frame (re-decide; usually

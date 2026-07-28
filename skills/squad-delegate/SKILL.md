@@ -91,6 +91,44 @@ you lean to quality — a strong-model grunt, or do it yourself — even at high
 cost and lower speed; a wrong answer there is far more expensive than the tokens.
 Cheap-and-fast is for low-stakes, well-specified, reversible work.
 
+## 1b. Weigh real cost: caching, subscriptions, context pressure
+
+"Delegate" is not automatically the cheap option. Three factors can flip the
+math — check them before defaulting to offload:
+
+**Prompt/KV caching.** Delegating starts a grunt in a brand-new session with no
+cache hit on anything — it pays full price to ingest whatever context you hand
+it. Continuing the task yourself, on a provider with prompt/KV caching (check
+the bootstrap for which one you're on), reuses your already-accumulated context
+at a steep cache-read discount. For a small, quick task sitting on top of a
+large context you've already built up, doing it yourself can be cheaper than
+paying full price to re-establish that context cold in a grunt — even though
+"offload it" sounds like the frugal move. Weigh the actual marginal cost of
+each path, not just "which one gets it off my plate."
+
+**Subscription vs API billing.** The inventory may show a grunt's `billing` as
+`subscription` (flat-rate — Claude Pro/Max, GitHub Copilot, ChatGPT Plus, etc.,
+set by the user in `model_data.json`) versus nothing, which means ordinary
+metered API billing. A subscription-covered grunt costs the user ~$0 marginally
+regardless of how many tokens it burns; an API-billed grunt's cost scales with
+usage same as your own tokens do. When two candidates are roughly comparable on
+capability, prefer the subscription-covered one — it's free at the margin. Don't
+let that push you into using a subscription model *outside* its competence
+though: capability and risk (§1a) still gate the choice; billing only breaks
+ties between comparably-fit candidates, or nudges you to route more volume to
+the flat-rate option when both would do.
+
+**Context pressure is not a panic button.** The live `<ORCHESTRATE_CONTEXT>`
+line exists so you weigh genuinely heavy work — something that would ingest or
+generate a lot of raw material — against offloading it. It is not a trigger to
+delegate every minor task the moment usage looks high. opencode compacts your
+context automatically; for a small, quick task the overhead of writing a task
+brief, spinning up a grunt cold (see caching above), and reading its result back
+usually costs *more* than just doing the task and letting compaction reclaim the
+space afterward. Reserve context-driven delegation for tasks that would actually
+bloat your context a lot — not as a reflex whenever the percentage looks
+uncomfortable.
+
 **Risk / blast radius.** For high-risk actions — production writes, destructive
 operations, schema/data migrations:
 

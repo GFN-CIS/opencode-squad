@@ -42,6 +42,19 @@ test("keeps the stall trigger inline and points to the squad-stall skill", () =>
   expect(out).toContain("squad-stall"); // full ladder is a separate skill
 });
 
+test("warns that context pressure is not a panic button (compaction exists)", () => {
+  const out = buildBootstrap("(no subagents available)").toLowerCase();
+  expect(out).toContain("panic button");
+  expect(out).toContain("compact");
+});
+
+test("mentions caching cost and subscription-vs-api billing, pointing to squad-delegate", () => {
+  const out = buildBootstrap("(no subagents available)").toLowerCase();
+  expect(out).toContain("cache hit");
+  expect(out).toContain("subscription");
+  expect(out).toContain("squad-delegate");
+});
+
 test("tells the orchestrator not to reload a skill already in context", () => {
   // collapse whitespace so a line wrap inside the phrase doesn't matter
   const out = buildBootstrap("(no subagents available)")
