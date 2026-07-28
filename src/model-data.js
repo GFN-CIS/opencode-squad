@@ -149,17 +149,32 @@ export function buildModelData(dir, benchmarksModels, existing, generated) {
  * Format one model_data entry for the inventory line: the AA indices plus the
  * hand-written `info` note (so the orchestrator sees routing guidance inline).
  *
+ * `billing` is an optional hand-added field (like `info`, never touched by the
+ * perf refresh) marking a model as `"subscription"` — flat-rate, so its
+ * marginal per-token cost to the user is ~0 regardless of `price_blended`.
+ * When set, it's surfaced instead of the API list price so the orchestrator
+ * doesn't read a subscription-covered model as expensive.
+ *
  * @param {any} entry  a model_data `models` entry (precomputed indices + info)
  * @returns {string|null}  e.g. "AA intel 55 · code 75 · agentic 85 · $11.25/M · note: good for coding"
  */
 export function formatPerf(entry) {
   if (!entry) return null;
+  const isSubscription = entry.billing === "subscription";
   const parts = [];
   if (typeof entry.intelligence === "number") parts.push(`intel ${entry.intelligence}`);
   if (typeof entry.coding === "number") parts.push(`code ${entry.coding}`);
   if (typeof entry.agentic === "number") parts.push(`agentic ${entry.agentic}`);
-  if (typeof entry.price_blended === "number") parts.push(`$${entry.price_blended}/M`);
-  let s = parts.length ? `AA ${parts.join(" · ")}` : null;
+  // price_blended is AA-sourced, so it belongs inside the "AA ..." group; the
+  // billing note is not an AA metric, so it's appended outside that group —
+  // otherwise a subscription-only entry (no AA match at all) would render the
+  // nonsensical "AA billing: subscription ...".
+  if (!isSubscription && typeof entry.price_blended === "number") {
+    parts.push(`$${entry.price_blended}/M`);
+  }
+  const aa = parts.length ? `AA ${parts.join(" · ")}` : null;
+  const billing = isSubscription ? "billing: subscription (flat-rate, ~$0 marginal)" : null;
+  let s = [aa, billing].filter(Boolean).join(" · ") || null;
   const info = entry.info && String(entry.info).trim();
   if (info) s = s ? `${s} · note: ${info}` : `note: ${info}`;
   return s;

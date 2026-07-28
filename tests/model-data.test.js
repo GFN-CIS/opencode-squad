@@ -123,6 +123,29 @@ test("formatPerf with only a note (no AA match) still surfaces it", () => {
   expect(formatPerf({ intelligence: null, info: "local model" })).toBe("note: local model");
 });
 
+test("formatPerf surfaces subscription billing instead of the API price", () => {
+  const s = formatPerf({
+    intelligence: 55,
+    price_blended: 11.25,
+    billing: "subscription",
+  });
+  expect(s).toBe("AA intel 55 · billing: subscription (flat-rate, ~$0 marginal)");
+  expect(s).not.toContain("$11.25/M");
+});
+
+test("formatPerf keeps the API price when billing is unset or not subscription", () => {
+  expect(formatPerf({ price_blended: 11.25 })).toBe("AA $11.25/M");
+  expect(formatPerf({ price_blended: 11.25, billing: "api" })).toBe("AA $11.25/M");
+});
+
+test("formatPerf doesn't mislabel billing as an AA metric when there's no AA match", () => {
+  // No intelligence/coding/agentic/price at all — just billing. Must not read
+  // "AA billing: ..." since billing isn't an AA-sourced number.
+  expect(formatPerf({ billing: "subscription" })).toBe(
+    "billing: subscription (flat-rate, ~$0 marginal)",
+  );
+});
+
 test("formatPerf returns null for an empty entry", () => {
   expect(formatPerf({ intelligence: null, info: "" })).toBeNull();
   expect(formatPerf(null)).toBeNull();
