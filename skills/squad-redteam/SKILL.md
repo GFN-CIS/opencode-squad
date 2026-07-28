@@ -19,31 +19,59 @@ review the artifact yourself in this pass (that's what the drills are for),
 and you do not silently trust a majority — 3 drills agreeing on a hallucination
 is still a hallucination if none of them show real evidence.
 
+<CRITICAL>
+The moment this skill is loaded, you are in redteam mode until dispatch. Until
+step 3's `task` calls are sent:
+- You MUST NOT use `read`, `grep`, `glob`, `bash`, `webfetch`, `mcpproxy_*`, or
+  any other investigation tool to look at the artifact yourself. That is the
+  drills' job, not yours — self-investigating here defeats the entire point of
+  a cross-model check and is exactly the failure mode this skill exists to
+  prevent.
+- You MUST NOT invent or assume what's being reviewed. If it isn't already
+  unambiguous from the conversation (a diff/file/claim explicitly in view),
+  **ask the user what to red-team before doing anything else.** Do not fall
+  back to "whatever seems to be the current task" — a wrong guess here means
+  every drill reviews the wrong thing.
+- The only tools you may use before dispatch are the discovery commands in
+  step 1 (listing agent files, reading model_data/benchmarks) and the
+  multi-select question tool.
+</CRITICAL>
+
 ## 0. Prerequisite
 
-This needs an existing `drill-*` squad. If the live inventory (in your
-bootstrap) has no `drill-*` entries, tell the user to run `squad-draft` first
-— do not fall back to the single generic `drill`, that defeats the point of a
-cross-model check.
+This needs an existing `drill-*` squad. Check for one yourself (see step 1's
+discovery) rather than trusting a live inventory that may not have reached you
+this turn. If there are no `drill-*` agents, tell the user to run `squad-draft`
+first — do not fall back to the single generic `drill`, that defeats the point
+of a cross-model check.
 
 ## 1. Pick the panel
 
-1. Read the live inventory in your bootstrap and filter to `drill-*` agents.
-   Group them by provider (the segment right after `drill-`, e.g.
-   `drill-openai-gpt-5-5` → provider `openai`).
-2. Within each provider group, pick the **default**: the single drill with the
-   highest `AA intel` score in the inventory's capability tail (fall back to
-   `AA code` if intel is missing, then to any drill in that group if neither is
-   present). This is your pre-checked default — one strongest drill per
-   provider, not the whole roster.
+1. **Discover the drills yourself — don't rely on the bootstrap inventory
+   having arrived this turn.** Read the source of truth directly:
+   ```bash
+   ls ~/.config/opencode/agent/drill-*.md .opencode/agent/drill-*.md 2>/dev/null
+   ```
+   Each file's frontmatter has a `model:` line (`provider/model`). Group the
+   drills by the provider segment of the filename (`drill-<provider>-...`).
+2. Within each provider group, rank by AA intelligence. Check, in order:
+   - `.opencode/model_data.json` (project) or `~/.config/opencode/model_data.json`
+     (global) — `.models["<provider/model>"].intelligence`;
+   - else the plugin's static AA snapshot:
+     `find ~/.cache/opencode/packages -path '*node_modules/opencode-squad/src/benchmarks.json'`
+     (or the repo's own `src/benchmarks.json` if you're running from a checkout).
+   Pick the highest-intelligence drill per provider as the pre-checked default
+   — one strongest drill per provider, not the whole roster. If neither source
+   is available, default to any one drill per provider and say the ranking is
+   unavailable.
 3. **Ask, don't assume.** Present all available drills as a multi-select
    question (use the built-in interactive question tool — checkboxes,
-   `multiple: true`), each drill labeled with its model and a one-line
-   capability hint (intel/code/agentic/$), with the per-provider defaults
-   above pre-checked. Let the user add or remove any drill freely (e.g. run
-   every drill from one provider, or add a cheap one for a fast/rough pass).
-   Do not skip this ask even when the default looks obviously right — panel
-   composition is the user's call.
+   `multiple: true`), each drill labeled with its model and, if you have it,
+   a one-line capability hint (intel/code/agentic/$), with the per-provider
+   defaults above pre-checked. Let the user add or remove any drill freely
+   (e.g. run every drill from one provider, or add a cheap one for a
+   fast/rough pass). Do not skip this ask even when the default looks
+   obviously right — panel composition is the user's call.
 4. If the user picks zero drills, fall back to the computed defaults and say
    so; do not abort.
 
@@ -51,9 +79,10 @@ cross-model check.
 
 Confirm the exact artifact or question in one line before dispatching — a
 diff, a design/plan, a specific claim, an investigation's conclusion, a piece
-of code. If it's ambiguous (e.g. "redteam this" with nothing in view), ask
-once. Do not paraphrase or trim it before sending — every drill gets the
-identical brief so their verdicts are actually comparable.
+of code. **If it's ambiguous, you MUST ask — never guess or substitute your
+own idea of "the current task."** Do not paraphrase or trim it before sending;
+every drill gets the identical brief so their verdicts are actually
+comparable.
 
 ## 3. Dispatch (parallel, identical brief)
 
