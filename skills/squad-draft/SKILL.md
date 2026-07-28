@@ -1,6 +1,6 @@
 ---
 name: squad-draft
-description: Use when the user wants to draft, set up, or refresh the per-model squad — a grunt (worker) AND a drill (reviewer) per model — from one model list, so the sarge orchestrator can pick an executor or a reviewer by model capability. When invoked, DRIVE it — discover the available models, propose a curated roster, ask what to add or remove, then generate. Triggers: "draft squad", "set up grunts/drills", "model squad", "набери сквад", "сделай агентов по моделям".
+description: Use when the user wants to draft, set up, or refresh the per-model squad — a grunt (worker) AND a drill (reviewer) per model — from one model list, so the sarge orchestrator can pick an executor or a reviewer by model capability. When invoked, DRIVE it — discover the available models, propose a curated roster, ask what to add or remove, then generate. Triggers — "draft squad", "set up grunts/drills", "model squad", "набери сквад", "сделай агентов по моделям".
 license: MIT
 ---
 
