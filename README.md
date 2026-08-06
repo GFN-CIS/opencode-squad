@@ -80,6 +80,34 @@ There is no bundled fallback agent — if no `grunt-*`/`drill-*` exists yet, the
 
 ---
 
+## Rate-limit guard
+
+opencode's own retry policy retries a rate-limited/overloaded provider call **forever** — it honors the provider's `retry-after` header up to ~24.8 days, or backs off (capped at 30s) when there's no header. There is no config for this in opencode core. For a subagent dispatched via `task`, that leaves the orchestrator blocked with no idea it could just pick a different model.
+
+This plugin watches subagent sessions for retry activity and steps in once either of two thresholds is crossed:
+
+```json
+{
+  "plugin": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"],
+  "rate_limit_guard": {
+    "enabled": true,
+    "retry_on_errors": [429],
+    "retryable_error_patterns": ["rate.?limit", "usage.?limit", "quota"],
+    "max_wait_seconds": 3600,
+    "max_cumulative_seconds": 3600
+  }
+}
+```
+
+- `max_wait_seconds` — a **single** announced wait longer than this (e.g. a provider saying "resets in 7 days") aborts immediately. Don't wait at all.
+- `max_cumulative_seconds` — no single wait was long, but retries keep accumulating (repeated short backoffs) past this total — abort once the sum crosses it.
+- `retry_on_errors` / `retryable_error_patterns` — same idea as [`@renjfk/opencode-model-fallback`](https://github.com/renjfk/opencode-model-fallback)'s options: only intervene on retries that actually look like a rate/usage limit (matched against opencode's own retry message, or a cached HTTP status code), not on ordinary transient 5xx blips — those are left to opencode's normal backoff.
+- Only ever applies to **subagent** sessions (anything with a parent) — a top-level/human chat session is left alone; run `opencode-model-fallback` alongside this if you want that case covered too.
+
+When it triggers, the plugin aborts the stuck subagent. The `task` tool's own error text for that is opencode's hardcoded `"Task cancelled"` (there's no API to set custom text there — confirmed empirically, not a limitation this plugin can route around). To actually carry the reason and the "switch models" instruction, once the orchestrator's turn goes idle again the guard sends it a plain follow-up message explaining what happened and telling it to pick a different grunt/drill and retry — verified live: the orchestrator reads it and reroutes on its own, without being told which model to use.
+
+---
+
 ## How it works
 
 On **every** request the orchestrator must state one explicit verdict before acting — `SELF: <reason>` or `DELEGATE: <reason>`. This is the core mechanic: it forces a conscious choice instead of silently doing the work itself (the failure mode this plugin was built to fix). The default leans toward delegating — an expensive primary model's value is decomposition and review, not routine work.

@@ -10,6 +10,16 @@
  *      no grunt-/drill- agent has been drafted yet, the bootstrap tells the
  *      orchestrator to send the user to squad-draft instead of routing to a
  *      subagent that doesn't exist — there is no bundled fallback agent.
+ *   3. Rate-limit guard: opencode's own retry policy retries a rate-limited
+ *      subagent FOREVER (honoring the provider's retry-after header up to
+ *      ~24.8 days, or a 30s-capped backoff without one) — there is no config
+ *      for this in opencode core. For a subagent dispatched via the `task`
+ *      tool, that leaves the orchestrator blocked with no signal that it
+ *      could just pick a different model. This plugin watches `session.status`
+ *      retry events on SUBAGENT sessions and, once a configured threshold is
+ *      crossed, aborts the stuck session and — once the orchestrator's turn
+ *      goes idle — sends it a plain-language note explaining why and telling
+ *      it to reroute to a different grunt/drill. See src/rate-limit-guard.js.
  */
 
 import path from "node:path";
@@ -34,6 +44,12 @@ import {
   resolveOrchestratorModel,
   formatLocalDateTime,
 } from "../../src/context.js";
+import {
+  normalizeGuardConfig,
+  initGuardState,
+  evaluateRetry,
+  formatGuardNote,
+} from "../../src/rate-limit-guard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
@@ -137,8 +153,26 @@ let _orchestratorModel = null;
 // Model context-window lookup, resolved once from the provider list.
 let _limitMap; // undefined = not loaded
 
+// --- Rate-limit guard state (see src/rate-limit-guard.js for the decision
+// logic; everything here is plumbing: caches + the actual SDK calls). ---
+let _guardConfig; // normalized once from config.rate_limit_guard
+const _guardStates = new Map(); // sessionID -> GuardState (cumulativeMs, guarded)
+const _sessionInfoCache = new Map(); // sessionID -> {parentID, agent} | null (null = not a subagent / lookup failed)
+const _lastStatusCode = new Map(); // sessionID -> last seen HTTP status code from session.error/message.updated
+let _agentsCache; // undefined = not loaded; Map<agentName, {providerID, modelID}>
+const _idleWaiters = new Map(); // sessionID -> Array<() => void>, resolved on the next session.status idle for that id
+
+function extractStatusCode(error) {
+  if (!error || typeof error !== "object") return undefined;
+  const data = /** @type {any} */ (error).data ?? error;
+  const value = data?.statusCode ?? data?.status ?? data?.code;
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return undefined;
+}
+
 /** @type {import("@opencode-ai/plugin").Plugin} */
-export const OrchestratePlugin = async ({ client }) => {
+export const OrchestratePlugin = async ({ client, directory }) => {
   // Refresh the global model_data.json once at plugin load (opencode startup),
   // before anything reads it. Cheap and best-effort; see the function comment.
   ensureGlobalModelDataFresh();
@@ -170,6 +204,107 @@ export const OrchestratePlugin = async ({ client }) => {
     return _limitMap;
   };
 
+  // --- Rate-limit guard plumbing ---
+
+  // {parentID, agent} for a session, or null if it has no parent (top-level —
+  // never guarded) or the lookup failed. Cached forever: a session's parent
+  // and agent never change after creation.
+  const getSessionInfo = async (sessionID) => {
+    if (_sessionInfoCache.has(sessionID)) return _sessionInfoCache.get(sessionID);
+    let info = null;
+    try {
+      const res = await client.session.get({ path: { id: sessionID } });
+      const s = res?.data;
+      if (s?.parentID) info = { parentID: s.parentID, agent: s.agent ?? null };
+    } catch {
+      // Best-effort; treat as "not a subagent" so we never guard by mistake.
+    }
+    _sessionInfoCache.set(sessionID, info);
+    return info;
+  };
+
+  const getAgentModel = async (agentName) => {
+    if (!agentName) return null;
+    if (_agentsCache === undefined) {
+      _agentsCache = new Map();
+      try {
+        const res = await client.app.agents();
+        for (const a of res?.data ?? []) {
+          if (a?.name && a.model) _agentsCache.set(a.name, a.model);
+        }
+      } catch {
+        // Best-effort; the guard note just says "unknown" model on failure.
+      }
+    }
+    return _agentsCache.get(agentName) ?? null;
+  };
+
+  const waitForIdle = (sessionID, timeoutMs = 20_000) =>
+    new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        const waiters = _idleWaiters.get(sessionID);
+        if (waiters) {
+          const idx = waiters.indexOf(finish);
+          if (idx !== -1) waiters.splice(idx, 1);
+          if (waiters.length === 0) _idleWaiters.delete(sessionID);
+        }
+        resolve();
+      };
+      const waiters = _idleWaiters.get(sessionID) ?? [];
+      waiters.push(finish);
+      _idleWaiters.set(sessionID, waiters);
+      setTimeout(finish, timeoutMs);
+    });
+
+  // Abort the stuck subagent session, then — once its parent (the
+  // orchestrator turn that dispatched it) is idle again — send a plain-
+  // language note explaining why and telling it to reroute. Best-effort at
+  // every step: a failure here must never take down the session.
+  const guardAbort = async (sessionID, parentID, agentName, result) => {
+    try {
+      await client.session.abort({ path: { id: sessionID } });
+    } catch {
+      // Best-effort; if abort fails the native retry just continues, no worse
+      // off than without this guard.
+    }
+    try {
+      await client.tui?.showToast?.({
+        body: {
+          title: "Rate limit guard",
+          message: `Aborted a stuck subagent (${agentName ?? sessionID}) — ${result.reason}`,
+          variant: "warning",
+          duration: 5000,
+        },
+      });
+    } catch {
+      // Toast is a nice-to-have.
+    }
+
+    const model = await getAgentModel(agentName);
+    const note = formatGuardNote({
+      model: model ? `${model.providerID}/${model.modelID}` : (agentName ?? "unknown model"),
+      provider: model?.providerID ?? "unknown",
+      reason: result.reason,
+      waitMs: result.waitMs,
+      cumulativeMs: result.cumulativeMs,
+    });
+
+    await waitForIdle(parentID);
+    try {
+      await client.session.promptAsync({
+        path: { id: parentID },
+        query: { directory },
+        body: { parts: [{ type: "text", synthetic: true, text: note }] },
+      });
+    } catch {
+      // Best-effort — worst case the orchestrator only sees the generic
+      // "Task cancelled" tool error and figures it out on its own.
+    }
+  };
+
   return {
     config: async (config) => {
       // Capture the orchestrator's configured model as a turn-1 fallback
@@ -184,6 +319,77 @@ export const OrchestratePlugin = async ({ client }) => {
         cfg.skills.paths = cfg.skills.paths || [];
         if (!cfg.skills.paths.includes(SKILLS_DIR)) {
           cfg.skills.paths.push(SKILLS_DIR);
+        }
+      }
+
+      // Rate-limit guard config lives as a top-level `rate_limit_guard` field
+      // in opencode.json (same convention as the existing `agent.grunt.model`
+      // override below) — read via this hook rather than plugin-tuple options
+      // so it works regardless of how the plugin spec is written (git URL,
+      // npm name, …).
+      _guardConfig = normalizeGuardConfig(
+        /** @type {any} */ (config).rate_limit_guard,
+      );
+    },
+
+    event: async ({ event }) => {
+      const props = /** @type {any} */ (event.properties);
+
+      if (event.type === "session.deleted") {
+        const id = props?.info?.id;
+        if (id) {
+          _guardStates.delete(id);
+          _sessionInfoCache.delete(id);
+          _lastStatusCode.delete(id);
+          _idleWaiters.delete(id);
+        }
+        return;
+      }
+
+      if (event.type === "session.status") {
+        const sessionID = props?.sessionID;
+        const status = props?.status;
+        if (!sessionID || !status) return;
+
+        if (status.type === "idle") {
+          const waiters = _idleWaiters.get(sessionID);
+          if (waiters) for (const finish of [...waiters]) finish();
+          return;
+        }
+
+        if (status.type !== "retry" || !_guardConfig?.enabled) return;
+
+        const info = await getSessionInfo(sessionID);
+        if (!info) return; // top-level session (or lookup failed) — never guarded
+
+        const state = _guardStates.get(sessionID) ?? initGuardState();
+        _guardStates.set(sessionID, state);
+
+        const result = evaluateRetry(
+          state,
+          status,
+          _guardConfig,
+          _lastStatusCode.get(sessionID),
+          Date.now(),
+        );
+        if (result.trigger) {
+          state.guarded = true;
+          await guardAbort(sessionID, info.parentID, info.agent, result);
+        }
+        return;
+      }
+
+      if (event.type === "session.error") {
+        const code = extractStatusCode(props?.error);
+        if (props?.sessionID && code !== undefined) _lastStatusCode.set(props.sessionID, code);
+        return;
+      }
+
+      if (event.type === "message.updated") {
+        const msgInfo = props?.info;
+        if (msgInfo?.role === "assistant" && msgInfo?.error && msgInfo?.sessionID) {
+          const code = extractStatusCode(msgInfo.error);
+          if (code !== undefined) _lastStatusCode.set(msgInfo.sessionID, code);
         }
       }
     },
