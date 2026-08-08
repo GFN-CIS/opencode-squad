@@ -86,25 +86,37 @@ opencode's own retry policy retries a rate-limited/overloaded provider call **fo
 
 This plugin watches subagent sessions for retry activity and steps in once either of two thresholds is crossed:
 
+Config is passed as **plugin-tuple options**, not a top-level `opencode.json` field — `opencode.json` is strictly schema-validated and an unrecognized top-level key is a hard error that blocks the entire config from loading (confirmed live). The tuple's second element is opencode's own explicitly-unvalidated escape hatch for plugin options:
+
 ```json
 {
-  "plugin": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"],
-  "rate_limit_guard": {
-    "enabled": true,
-    "retry_on_errors": [429],
-    "retryable_error_patterns": ["rate.?limit", "usage.?limit", "quota"],
-    "max_wait_seconds": 3600,
-    "max_cumulative_seconds": 3600
-  }
+  "plugin": [
+    ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git", {
+      "rate_limit_guard": {
+        "enabled": true,
+        "retry_on_errors": [429],
+        "retryable_error_patterns": ["rate.?limit", "usage.?limit", "quota"],
+        "max_wait_seconds": 3600,
+        "max_cumulative_seconds": 3600
+      }
+    }]
+  ]
 }
 ```
+
+All fields are optional — the values above are also the defaults, so omitting `rate_limit_guard` entirely (or using the plain-string plugin form) behaves the same.
 
 - `max_wait_seconds` — a **single** announced wait longer than this (e.g. a provider saying "resets in 7 days") aborts immediately. Don't wait at all.
 - `max_cumulative_seconds` — no single wait was long, but retries keep accumulating (repeated short backoffs) past this total — abort once the sum crosses it.
 - `retry_on_errors` / `retryable_error_patterns` — same idea as [`@renjfk/opencode-model-fallback`](https://github.com/renjfk/opencode-model-fallback)'s options: only intervene on retries that actually look like a rate/usage limit (matched against opencode's own retry message, or a cached HTTP status code), not on ordinary transient 5xx blips — those are left to opencode's normal backoff.
 - Only ever applies to **subagent** sessions (anything with a parent) — a top-level/human chat session is left alone; run `opencode-model-fallback` alongside this if you want that case covered too.
 
-When it triggers, the plugin aborts the stuck subagent. The `task` tool's own error text for that is opencode's hardcoded `"Task cancelled"` (there's no API to set custom text there — confirmed empirically, not a limitation this plugin can route around). To actually carry the reason and the "switch models" instruction, once the orchestrator's turn goes idle again the guard sends it a plain follow-up message explaining what happened and telling it to pick a different grunt/drill and retry — verified live: the orchestrator reads it and reroutes on its own, without being told which model to use.
+Two independent signals feed the guard, so it also catches failures that never look like a retry to opencode itself:
+
+1. **`session.status` retry events** — the abort path. Once a threshold trips, the plugin aborts the stuck subagent. The `task` tool's own error text for that is opencode's hardcoded `"Task cancelled"` (there's no API to set custom text there — confirmed empirically). To actually carry the reason and the "switch models" instruction, once the orchestrator's turn goes idle again the guard sends it a plain follow-up message explaining what happened and telling it to pick a different grunt/drill and retry.
+2. **Terminal `session.error`/`message.updated` failures** — not every limit produces a retry signal. A real provider error like `"Your token-plan quota has been exhausted"` matches none of opencode's own built-in retryable-message patterns, so opencode never schedules a retry for it at all and the call just fails outright with no warning. The guard also matches these directly against the same patterns and sends the same explanatory note, even though there was nothing for it to abort.
+
+Verified live end-to-end against a genuinely quota-exhausted model: the guard caught the limit, told the orchestrator, and the orchestrator switched to a different grunt on its own — then, when that one turned out to share the same exhausted account, switched again to a different provider entirely, all without being told which model to pick.
 
 ---
 
