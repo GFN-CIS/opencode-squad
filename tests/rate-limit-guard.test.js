@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import {
   normalizeGuardConfig,
   isGuardedRetry,
+  isGuardedTerminalError,
   initGuardState,
   evaluateRetry,
   formatGuardNote,
@@ -161,4 +162,36 @@ test("formatGuardNote: cumulative reason names accumulated wait, not a single an
   });
   expect(text).toContain("accumulated");
   expect(text).toContain("1h");
+});
+
+// Real-world case: opencode's own retryable() never classifies "token-plan
+// quota has been exhausted" as retryable (it matches none of opencode's
+// RETRYABLE_MESSAGE_PATTERNS), so no session.status retry event ever fires —
+// the call just fails/gets cancelled on the spot with no warning signal at
+// all. isGuardedTerminalError is what catches this case after the fact.
+test("isGuardedTerminalError matches a real quota-exhausted provider message", () => {
+  const cfg = normalizeGuardConfig();
+  expect(isGuardedTerminalError("AI_APICallError: Your token-plan quota has been exhausted.", cfg)).toBe(true);
+  expect(isGuardedTerminalError("AI_APICallError: connection reset", cfg)).toBe(false);
+});
+
+test("isGuardedTerminalError matches on cached status code even if the text doesn't match", () => {
+  const cfg = normalizeGuardConfig();
+  expect(isGuardedTerminalError("some opaque provider error", cfg, 429)).toBe(true);
+  expect(isGuardedTerminalError("some opaque provider error", cfg, 500)).toBe(false);
+});
+
+test("formatGuardNote: terminal_error reason explains a failure the guard never had a chance to abort", () => {
+  const text = formatGuardNote({
+    model: "alibaba-token-plan/qwen3.8-max",
+    provider: "alibaba-token-plan",
+    reason: "terminal_error",
+    errorText: "Your token-plan quota has been exhausted.",
+    description: "Recon tunstrap issue 14 fix",
+  });
+  expect(text).toContain("RATE LIMIT GUARD");
+  expect(text).toContain("alibaba-token-plan/qwen3.8-max");
+  expect(text).toContain("quota has been exhausted");
+  expect(text).toContain("Recon tunstrap issue 14 fix");
+  expect(text).toContain("Pick a different grunt/drill");
 });

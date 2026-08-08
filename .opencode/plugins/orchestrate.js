@@ -48,6 +48,7 @@ import {
   normalizeGuardConfig,
   initGuardState,
   evaluateRetry,
+  isGuardedTerminalError,
   formatGuardNote,
 } from "../../src/rate-limit-guard.js";
 
@@ -171,11 +172,37 @@ function extractStatusCode(error) {
   return undefined;
 }
 
+function extractErrorText(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  const data = /** @type {any} */ (error).data ?? error;
+  const parts = [error.name, data?.message, error.message].filter(
+    (v) => typeof v === "string" && v,
+  );
+  return parts.join(": ");
+}
+
 /** @type {import("@opencode-ai/plugin").Plugin} */
-export const OrchestratePlugin = async ({ client, directory }) => {
+export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   // Refresh the global model_data.json once at plugin load (opencode startup),
   // before anything reads it. Cheap and best-effort; see the function comment.
   ensureGlobalModelDataFresh();
+
+  // Rate-limit guard config comes from the plugin-tuple options
+  // (["opencode-squad@...", { rate_limit_guard: {...} }]) — NOT a top-level
+  // opencode.json field. Confirmed live: opencode.json is strictly schema-
+  // validated (Schema.Struct, unrecognized top-level keys are a hard
+  // ConfigInvalidError that blocks the ENTIRE config, not just the unknown
+  // key) — an earlier version of this guard put the config there and it
+  // broke config loading outright. The plugin options slot
+  // (ConfigPluginV1.Options = Schema.Record(String, Unknown)) is the
+  // officially open, unvalidated escape hatch, and opencode's plugin loader
+  // (packages/opencode/src/plugin/index.ts) passes it as this function's
+  // second argument regardless of whether the plugin spec is a git URL or an
+  // npm name — verified by reading that loader, not assumed.
+  _guardConfig = normalizeGuardConfig(
+    /** @type {any} */ (rawOptions)?.rate_limit_guard,
+  );
 
   const getInventory = async () => {
     if (_inventoryCache !== undefined) return _inventoryCache;
@@ -259,22 +286,16 @@ export const OrchestratePlugin = async ({ client, directory }) => {
       setTimeout(finish, timeoutMs);
     });
 
-  // Abort the stuck subagent session, then — once its parent (the
-  // orchestrator turn that dispatched it) is idle again — send a plain-
-  // language note explaining why and telling it to reroute. Best-effort at
-  // every step: a failure here must never take down the session.
-  const guardAbort = async (sessionID, parentID, agentName, result) => {
-    try {
-      await client.session.abort({ sessionID, directory });
-    } catch {
-      // Best-effort; if abort fails the native retry just continues, no worse
-      // off than without this guard.
-    }
+  // Once the parent (the orchestrator turn that dispatched the guarded
+  // subagent) is idle again, send it a plain-language note explaining why
+  // and telling it to reroute. Best-effort at every step: a failure here
+  // must never take down the session.
+  const sendGuardNote = async (parentID, agentName, result) => {
     try {
       await client.tui?.showToast?.({
         directory,
         title: "Rate limit guard",
-        message: `Aborted a stuck subagent (${agentName ?? sessionID}) — ${result.reason}`,
+        message: `Subagent ${agentName ?? "?"} hit a limit (${result.reason}) — told the orchestrator to switch models`,
         variant: "warning",
         duration: 5000,
       });
@@ -289,6 +310,7 @@ export const OrchestratePlugin = async ({ client, directory }) => {
       reason: result.reason,
       waitMs: result.waitMs,
       cumulativeMs: result.cumulativeMs,
+      errorText: result.errorText,
     });
 
     await waitForIdle(parentID);
@@ -300,8 +322,42 @@ export const OrchestratePlugin = async ({ client, directory }) => {
       });
     } catch {
       // Best-effort — worst case the orchestrator only sees the generic
-      // "Task cancelled" tool error and figures it out on its own.
+      // "Task cancelled" tool error (or the bare provider error) and figures
+      // it out on its own.
     }
+  };
+
+  // Abort a subagent session whose retry wait crossed a threshold, then send
+  // the explanatory note.
+  const guardAbort = async (sessionID, parentID, agentName, result) => {
+    try {
+      await client.session.abort({ sessionID, directory });
+    } catch {
+      // Best-effort; if abort fails the native retry just continues, no worse
+      // off than without this guard.
+    }
+    await sendGuardNote(parentID, agentName, result);
+  };
+
+  // Terminal-failure path: the subagent's call already ended (error or
+  // cancelled) with NO session.status retry ever seen — e.g. an error whose
+  // message opencode's own retryable() doesn't recognize (verified live: a
+  // real "token-plan quota has been exhausted" provider error never produces
+  // a single retry event, so guardAbort above never runs). Nothing to abort
+  // here; just recognize the failure as limit-shaped and explain it.
+  const handleTerminalError = async (sessionID, error) => {
+    if (!_guardConfig?.enabled) return;
+    const state = _guardStates.get(sessionID);
+    if (state?.guarded) return; // already handled via the retry path
+    const info = await getSessionInfo(sessionID);
+    if (!info) return; // not a subagent
+
+    const statusCode = extractStatusCode(error);
+    const errorText = extractErrorText(error);
+    if (!isGuardedTerminalError(errorText, _guardConfig, statusCode)) return;
+
+    _guardStates.set(sessionID, { ...(state ?? initGuardState()), guarded: true });
+    await sendGuardNote(info.parentID, info.agent, { reason: "terminal_error", errorText });
   };
 
   return {
@@ -320,15 +376,6 @@ export const OrchestratePlugin = async ({ client, directory }) => {
           cfg.skills.paths.push(SKILLS_DIR);
         }
       }
-
-      // Rate-limit guard config lives as a top-level `rate_limit_guard` field
-      // in opencode.json (same convention as the existing `agent.grunt.model`
-      // override below) — read via this hook rather than plugin-tuple options
-      // so it works regardless of how the plugin spec is written (git URL,
-      // npm name, …).
-      _guardConfig = normalizeGuardConfig(
-        /** @type {any} */ (config).rate_limit_guard,
-      );
     },
 
     event: async ({ event }) => {
@@ -382,8 +429,10 @@ export const OrchestratePlugin = async ({ client, directory }) => {
       }
 
       if (event.type === "session.error") {
+        const sessionID = props?.sessionID;
         const code = extractStatusCode(props?.error);
-        if (props?.sessionID && code !== undefined) _lastStatusCode.set(props.sessionID, code);
+        if (sessionID && code !== undefined) _lastStatusCode.set(sessionID, code);
+        if (sessionID && props?.error) await handleTerminalError(sessionID, props.error);
         return;
       }
 
@@ -392,6 +441,7 @@ export const OrchestratePlugin = async ({ client, directory }) => {
         if (msgInfo?.role === "assistant" && msgInfo?.error && msgInfo?.sessionID) {
           const code = extractStatusCode(msgInfo.error);
           if (code !== undefined) _lastStatusCode.set(msgInfo.sessionID, code);
+          await handleTerminalError(msgInfo.sessionID, msgInfo.error);
         }
       }
     },
