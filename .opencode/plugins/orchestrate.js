@@ -240,7 +240,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     if (_sessionInfoCache.has(sessionID)) return _sessionInfoCache.get(sessionID);
     let info = null;
     try {
-      const res = await client.session.get({ sessionID, directory });
+      const res = await client.session.get({ path: { id: sessionID }, query: { directory } });
       const s = res?.data;
       if (s?.parentID) info = { parentID: s.parentID, agent: s.agent ?? null };
     } catch {
@@ -293,11 +293,13 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   const sendGuardNote = async (parentID, agentName, result) => {
     try {
       await client.tui?.showToast?.({
-        directory,
-        title: "Rate limit guard",
-        message: `Subagent ${agentName ?? "?"} hit a limit (${result.reason}) — told the orchestrator to switch models`,
-        variant: "warning",
-        duration: 5000,
+        query: { directory },
+        body: {
+          title: "Rate limit guard",
+          message: `Subagent ${agentName ?? "?"} hit a limit (${result.reason}) — told the orchestrator to switch models`,
+          variant: "warning",
+          duration: 5000,
+        },
       });
     } catch {
       // Toast is a nice-to-have.
@@ -316,9 +318,9 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     await waitForIdle(parentID);
     try {
       await client.session.promptAsync({
-        sessionID: parentID,
-        directory,
-        parts: [{ type: "text", synthetic: true, text: note }],
+        path: { id: parentID },
+        query: { directory },
+        body: { parts: [{ type: "text", synthetic: true, text: note }] },
       });
     } catch {
       // Best-effort — worst case the orchestrator only sees the generic
@@ -331,7 +333,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   // the explanatory note.
   const guardAbort = async (sessionID, parentID, agentName, result) => {
     try {
-      await client.session.abort({ sessionID, directory });
+      await client.session.abort({ path: { id: sessionID }, query: { directory } });
     } catch {
       // Best-effort; if abort fails the native retry just continues, no worse
       // off than without this guard.
