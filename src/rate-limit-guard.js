@@ -87,6 +87,27 @@ export function isGuardedRetry(status, config, lastStatusCode) {
 }
 
 /**
+ * Whether a TERMINAL failure (a subagent's message ended with `.error` set,
+ * with no `session.status` retry ever seen for it) looks like a rate/usage
+ * limit. This covers failures opencode's own `retryable()` never classified
+ * as retryable in the first place — e.g. a provider error whose message is
+ * "Your token-plan quota has been exhausted", which matches none of
+ * opencode's built-in RETRYABLE_MESSAGE_PATTERNS, so no retry schedule ever
+ * engages and the whole thing fails (or gets cancelled) on the very first
+ * attempt with no `session.status` signal at all. Without this check, the
+ * orchestrator only ever sees the task tool's generic "Task cancelled" text
+ * and has no way to know it was actually a limit.
+ *
+ * @param {string} errorText raw error message/text (whatever was available)
+ * @param {ReturnType<typeof normalizeGuardConfig>} config
+ * @param {number | undefined} statusCode
+ */
+export function isGuardedTerminalError(errorText, config, statusCode) {
+  if (statusCode !== undefined && config.retry_on_errors.includes(statusCode)) return true;
+  return matchesPattern(errorText, config.retryable_error_patterns);
+}
+
+/**
  * Per-session tracking state the caller (the plugin) owns and mutates across
  * events. Kept as a plain object so it's trivially testable without a Map.
  * @typedef {{cumulativeMs: number, guarded: boolean}} GuardState
@@ -143,11 +164,27 @@ function humanizeSeconds(seconds) {
  * to set custom text there — verified live), so this is the only channel that
  * actually carries the reason and the instruction to reroute.
  *
- * @param {{model: string, provider: string, reason: "single_wait" | "cumulative", waitMs: number, cumulativeMs: number, description?: string}} info
+ * `reason: "terminal_error"` is a different case: the subagent's call already
+ * failed/ended on its own (no `session.status` retry was ever seen — see
+ * `isGuardedTerminalError`) and this guard did NOT abort anything. It just
+ * recognized the failure text as limit-shaped and is explaining it after the
+ * fact, since the task tool's own error would otherwise just read as the
+ * bare underlying provider error (or opencode's generic "Task cancelled")
+ * with no hint that switching models would fix it.
+ *
+ * @param {{model: string, provider: string, reason: "single_wait" | "cumulative" | "terminal_error", waitMs?: number, cumulativeMs?: number, description?: string, errorText?: string}} info
  */
 export function formatGuardNote(info) {
-  const waitStr = humanizeSeconds(info.waitMs / 1000);
-  const cumulativeStr = humanizeSeconds(info.cumulativeMs / 1000);
+  if (info.reason === "terminal_error") {
+    return [
+      "[RATE LIMIT GUARD]",
+      `The task${info.description ? ` "${info.description}"` : ""} on \`${info.model}\` (${info.provider}) failed with an error matching this guard's rate/usage-limit patterns${info.errorText ? `: "${info.errorText}"` : ""}.`,
+      "This is NOT a real task failure — it never got a chance to run.",
+      "Pick a different grunt/drill (a different model/provider) from your inventory and retry the same task.",
+    ].join(" ");
+  }
+  const waitStr = humanizeSeconds((info.waitMs ?? 0) / 1000);
+  const cumulativeStr = humanizeSeconds((info.cumulativeMs ?? 0) / 1000);
   const why =
     info.reason === "single_wait"
       ? `the provider reported a wait of ~${waitStr} before it would retry`
