@@ -398,7 +398,6 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         const sessionID = props?.sessionID;
         const status = props?.status;
         if (!sessionID || !status) return;
-        console.error("[GUARD-DEBUG] session.status", status.type, sessionID, status.message ?? "");
 
         if (status.type === "idle") {
           const waiters = _idleWaiters.get(sessionID);
@@ -409,7 +408,6 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         if (status.type !== "retry" || !_guardConfig?.enabled) return;
 
         const info = await getSessionInfo(sessionID);
-        console.error("[GUARD-DEBUG] sessionInfo", sessionID, JSON.stringify(info));
         if (!info) return; // top-level session (or lookup failed) — never guarded
 
         const state = _guardStates.get(sessionID) ?? initGuardState();
@@ -422,7 +420,6 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
           _lastStatusCode.get(sessionID),
           Date.now(),
         );
-        console.error("[GUARD-DEBUG] evaluateRetry result", JSON.stringify(result));
         if (result.trigger) {
           state.guarded = true;
           await guardAbort(sessionID, info.parentID, info.agent, result);
