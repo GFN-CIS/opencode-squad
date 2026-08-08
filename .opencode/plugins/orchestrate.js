@@ -213,7 +213,7 @@ export const OrchestratePlugin = async ({ client, directory }) => {
     if (_sessionInfoCache.has(sessionID)) return _sessionInfoCache.get(sessionID);
     let info = null;
     try {
-      const res = await client.session.get({ path: { id: sessionID } });
+      const res = await client.session.get({ sessionID, directory });
       const s = res?.data;
       if (s?.parentID) info = { parentID: s.parentID, agent: s.agent ?? null };
     } catch {
@@ -265,19 +265,18 @@ export const OrchestratePlugin = async ({ client, directory }) => {
   // every step: a failure here must never take down the session.
   const guardAbort = async (sessionID, parentID, agentName, result) => {
     try {
-      await client.session.abort({ path: { id: sessionID } });
+      await client.session.abort({ sessionID, directory });
     } catch {
       // Best-effort; if abort fails the native retry just continues, no worse
       // off than without this guard.
     }
     try {
       await client.tui?.showToast?.({
-        body: {
-          title: "Rate limit guard",
-          message: `Aborted a stuck subagent (${agentName ?? sessionID}) — ${result.reason}`,
-          variant: "warning",
-          duration: 5000,
-        },
+        directory,
+        title: "Rate limit guard",
+        message: `Aborted a stuck subagent (${agentName ?? sessionID}) — ${result.reason}`,
+        variant: "warning",
+        duration: 5000,
       });
     } catch {
       // Toast is a nice-to-have.
@@ -295,9 +294,9 @@ export const OrchestratePlugin = async ({ client, directory }) => {
     await waitForIdle(parentID);
     try {
       await client.session.promptAsync({
-        path: { id: parentID },
-        query: { directory },
-        body: { parts: [{ type: "text", synthetic: true, text: note }] },
+        sessionID: parentID,
+        directory,
+        parts: [{ type: "text", synthetic: true, text: note }],
       });
     } catch {
       // Best-effort — worst case the orchestrator only sees the generic
@@ -350,6 +349,7 @@ export const OrchestratePlugin = async ({ client, directory }) => {
         const sessionID = props?.sessionID;
         const status = props?.status;
         if (!sessionID || !status) return;
+        console.error("[GUARD-DEBUG] session.status", status.type, sessionID, status.message ?? "");
 
         if (status.type === "idle") {
           const waiters = _idleWaiters.get(sessionID);
@@ -360,6 +360,7 @@ export const OrchestratePlugin = async ({ client, directory }) => {
         if (status.type !== "retry" || !_guardConfig?.enabled) return;
 
         const info = await getSessionInfo(sessionID);
+        console.error("[GUARD-DEBUG] sessionInfo", sessionID, JSON.stringify(info));
         if (!info) return; // top-level session (or lookup failed) — never guarded
 
         const state = _guardStates.get(sessionID) ?? initGuardState();
@@ -372,6 +373,7 @@ export const OrchestratePlugin = async ({ client, directory }) => {
           _lastStatusCode.get(sessionID),
           Date.now(),
         );
+        console.error("[GUARD-DEBUG] evaluateRetry result", JSON.stringify(result));
         if (result.trigger) {
           state.guarded = true;
           await guardAbort(sessionID, info.parentID, info.agent, result);
