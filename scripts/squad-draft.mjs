@@ -74,7 +74,7 @@ function main() {
       if (!/^(?:grunt|drill|worker)-.*\.md$/.test(f)) continue;
       if (wanted.has(f.replace(/\.md$/, ""))) continue;
       const full = path.join(dir, f);
-      let txt = "";
+      let txt;
       try {
         txt = fs.readFileSync(full, "utf8");
       } catch {

@@ -1,0 +1,76 @@
+1,2,13,1,1,"add@24-24@src/benchmarks.js","src/benchmarks.js","add","add ( s )",24,24
+8,1,65,1,8,"variants@25-32@src/benchmarks.js","src/benchmarks.js","variants","variants ( s )",25,32
+7,4,49,2,7,"lookupBenchmark@47-53@src/benchmarks.js","src/benchmarks.js","lookupBenchmark","lookupBenchmark ( modelId , models )",47,53
+2,1,6,0,2,"(anonymous)@67-68@src/benchmarks.js","src/benchmarks.js","(anonymous)","(anonymous)",67,68
+1,1,6,0,1,"(anonymous)@70-70@src/benchmarks.js","src/benchmarks.js","(anonymous)","(anonymous)",70,70
+7,2,69,1,8,"agenticScore@64-71@src/benchmarks.js","src/benchmarks.js","agenticScore","agenticScore ( data )",64,71
+12,7,142,2,12,"formatBench@82-93@src/benchmarks.js","src/benchmarks.js","formatBench","formatBench ( modelId , models )",82,93
+22,4,162,1,69,"slugCandidates@14-82@src/benchmarks.js","src/benchmarks.js","slugCandidates","slugCandidates ( modelId )",14,82
+21,6,113,1,21,"discoverSquadModels@42-62@src/model-data.js","src/model-data.js","discoverSquadModels","discoverSquadModels ( dir )",42,62
+22,7,140,2,22,"perfFromBenchmark@74-95@src/model-data.js","src/model-data.js","perfFromBenchmark","perfFromBenchmark ( modelId , benchmarksModels )",74,95
+9,2,70,3,9,"mergeModelData@111-119@src/model-data.js","src/model-data.js","mergeModelData","mergeModelData ( modelIds , benchmarksModels , existing )",111,119
+17,3,69,4,17,"buildModelData@130-146@src/model-data.js","src/model-data.js","buildModelData","buildModelData ( dir , benchmarksModels , existing , generated )",130,146
+17,13,210,1,21,"formatPerf@161-181@src/model-data.js","src/model-data.js","formatPerf","formatPerf ( entry )",161,181
+5,5,50,2,5,"modelsChanged@194-198@src/model-data.js","src/model-data.js","modelsChanged","modelsChanged ( existing , snapshot )",194,198
+8,4,42,1,8,"readModelData@207-214@src/model-data.js","src/model-data.js","readModelData","readModelData ( file )",207,214
+14,3,85,1,182,"extractModelId@26-207@src/model-data.js","src/model-data.js","extractModelId","extractModelId ( content )",26,207
+8,1,48,2,8,"slugForModel@48-55@src/workers.js","src/workers.js","slugForModel","slugForModel ( modelId , role )",48,55
+20,2,117,3,20,"agentMarkdown@66-85@src/workers.js","src/workers.js","agentMarkdown","agentMarkdown ( role , modelId , promptBody )",66,85
+69,5,194,2,69,"buildBootstrap@24-92@src/bootstrap.js","src/bootstrap.js","buildBootstrap","buildBootstrap ( inventoryMarkdown , facts )",24,92
+22,15,168,1,22,"estimateContextTokens@29-50@src/context.js","src/context.js","estimateContextTokens","estimateContextTokens ( messages )",29,50
+10,7,85,1,10,"resolveOrchestratorModel@60-69@src/context.js","src/context.js","resolveOrchestratorModel","resolveOrchestratorModel ( messages )",60,69
+12,3,61,2,12,"formatLocalDateTime@80-91@src/context.js","src/context.js","formatLocalDateTime","formatLocalDateTime ( date , timeZone )",80,91
+1,1,11,1,1,"k@93-93@src/context.js","src/context.js","k","k ( n )",93,93
+14,7,116,2,14,"formatContextLine@105-118@src/context.js","src/context.js","formatContextLine","formatContextLine ( used , limit )",105,118
+17,14,146,1,18,"buildLimitMap@130-147@src/context.js","src/context.js","buildLimitMap","buildLimitMap ( providers )",130,147
+2,1,5,1,2,"fmtCtx@5-6@src/inventory.js","src/inventory.js","fmtCtx","fmtCtx ( n )",5,6
+1,2,8,0,1,"(anonymous)@21-21@src/inventory.js","src/inventory.js","(anonymous)","(anonymous)",21,21
+20,13,151,0,20,"(anonymous)@24-43@src/inventory.js","src/inventory.js","(anonymous)","(anonymous)",24,43
+7,2,49,3,26,"formatInventory@20-45@src/inventory.js","src/inventory.js","formatInventory","formatInventory ( agents , perf , limits )",20,45
+1,3,21,0,1,"(anonymous)@57-57@src/inventory.js","src/inventory.js","(anonymous)","(anonymous)",57,57
+3,2,21,1,3,"hasSquad@56-58@src/inventory.js","src/inventory.js","hasSquad","hasSquad ( agents )",56,58
+12,3,53,1,12,"normalizeGuardConfig@37-48@src/rate-limit-guard.js","src/rate-limit-guard.js","normalizeGuardConfig","normalizeGuardConfig ( raw )",37,48
+7,2,37,0,7,"(anonymous)@60-66@src/rate-limit-guard.js","src/rate-limit-guard.js","(anonymous)","(anonymous)",60,66
+5,2,36,2,11,"matchesPattern@57-67@src/rate-limit-guard.js","src/rate-limit-guard.js","matchesPattern","matchesPattern ( text , patterns )",57,67
+7,3,68,3,7,"isGuardedRetry@81-87@src/rate-limit-guard.js","src/rate-limit-guard.js","isGuardedRetry","isGuardedRetry ( status , config , lastStatusCode )",81,87
+4,3,37,3,4,"isGuardedTerminalError@105-108@src/rate-limit-guard.js","src/rate-limit-guard.js","isGuardedTerminalError","isGuardedTerminalError ( errorText , config , statusCode )",105,108
+3,1,15,0,3,"initGuardState@117-119@src/rate-limit-guard.js","src/rate-limit-guard.js","initGuardState","initGuardState ( )",117,119
+13,5,138,5,15,"evaluateRetry@133-147@src/rate-limit-guard.js","src/rate-limit-guard.js","evaluateRetry","evaluateRetry ( state , status , config , lastStatusCode , now )",133,147
+10,6,141,1,10,"humanizeSeconds@149-158@src/rate-limit-guard.js","src/rate-limit-guard.js","humanizeSeconds","humanizeSeconds ( seconds )",149,158
+9,2,58,1,9,"formatGuardNote@177-185@src/rate-limit-guard.js","src/rate-limit-guard.js","formatGuardNote","formatGuardNote ( info )",177,185
+13,5,62,0,14,"loadBenchmarks@71-84@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","loadBenchmarks","loadBenchmarks ( )",71,84
+19,5,122,0,20,"loadModelData@91-110@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","loadModelData","loadModelData ( )",91,110
+5,4,34,0,5,"(anonymous)@117-121@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","(anonymous)","(anonymous)",117,121
+5,1,25,0,9,"buildPerfLookup@114-122@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","buildPerfLookup","buildPerfLookup ( )",114,122
+16,6,159,0,17,"ensureGlobalModelDataFresh@132-148@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","ensureGlobalModelDataFresh","ensureGlobalModelDataFresh ( )",132,148
+8,12,83,1,8,"extractStatusCode@166-173@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","extractStatusCode","extractStatusCode ( error )",166,173
+2,2,8,0,2,"(anonymous)@180-181@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","(anonymous)","(anonymous)",180,181
+8,5,65,1,9,"extractErrorText@175-183@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","extractErrorText","extractErrorText ( error )",175,183
+13,5,77,0,14,"getInventory@207-220@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","getInventory","getInventory ( )",207,220
+10,5,55,0,11,"getLimitMap@222-232@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","getLimitMap","getLimitMap ( )",222,232
+12,6,105,1,13,"getSessionInfo@239-251@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","getSessionInfo","getSessionInfo ( sessionID )",239,251
+14,11,96,1,15,"getAgentModel@253-267@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","getAgentModel","getAgentModel ( agentName )",253,267
+11,5,76,0,11,"finish@272-282@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","finish","finish ( )",272,282
+8,3,49,0,18,"(anonymous)@270-287@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","(anonymous)","(anonymous)",270,287
+2,1,18,2,19,"waitForIdle@269-287@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","waitForIdle","waitForIdle ( sessionID , timeoutMs )",269,287
+12,1,61,3,12,"sendGuardNote@293-304@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","sendGuardNote","sendGuardNote ( parentID , agentName , result )",293,304
+31,9,196,3,145,"OrchestratePlugin@186-330@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","OrchestratePlugin","OrchestratePlugin ( client , directory , rawOptions )",186,330
+7,2,52,4,9,"guardAbort@334-342@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","guardAbort","guardAbort ( sessionID , parentID , agentName , result )",334,342
+12,5,117,2,14,"handleTerminalError@350-363@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","handleTerminalError","handleTerminalError ( sessionID , error )",350,363
+12,10,95,1,16,"config@366-381@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","config","config ( config )",366,381
+55,25,392,1,64,"event@383-446@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","event","event ( event )",383,446
+1,1,8,0,1,"(anonymous)@459-459@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","(anonymous)","(anonymous)",459,459
+1,2,14,0,1,"(anonymous)@467-467@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","(anonymous)","(anonymous)",467,467
+2,2,14,0,2,"(anonymous)@475-476@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","(anonymous)","(anonymous)",475,476
+2,3,20,0,2,"(anonymous)@489-490@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","(anonymous)","(anonymous)",489,490
+47,21,324,0,71,"(anonymous)@448-518@.opencode/plugins/orchestrate.js",".opencode/plugins/orchestrate.js","(anonymous)","(anonymous)",448,518
+15,5,140,1,17,"parseArgs@29-45@scripts/squad-file-performance.mjs","scripts/squad-file-performance.mjs","parseArgs","parseArgs ( argv )",29,45
+1,1,11,0,1,"(anonymous)@74-74@scripts/squad-file-performance.mjs","scripts/squad-file-performance.mjs","(anonymous)","(anonymous)",74,74
+42,8,360,0,47,"main@47-93@scripts/squad-file-performance.mjs","scripts/squad-file-performance.mjs","main","main ( )",47,93
+1,2,15,1,1,"num@22-22@scripts/refresh-benchmarks.mjs","scripts/refresh-benchmarks.mjs","num","num ( v )",22,22
+43,9,307,1,49,"transform@24-72@scripts/refresh-benchmarks.mjs","scripts/refresh-benchmarks.mjs","transform","transform ( rawData )",24,72
+20,4,138,1,20,"loadRaw@74-93@scripts/refresh-benchmarks.mjs","scripts/refresh-benchmarks.mjs","loadRaw","loadRaw ( argv )",74,93
+17,2,125,0,17,"main@95-111@scripts/refresh-benchmarks.mjs","scripts/refresh-benchmarks.mjs","main","main ( )",95,111
+15,5,135,1,15,"parseArgs@28-42@scripts/squad-draft.mjs","scripts/squad-draft.mjs","parseArgs","parseArgs ( argv )",28,42
+1,1,16,0,1,"(anonymous)@54-54@scripts/squad-draft.mjs","scripts/squad-draft.mjs","(anonymous)","(anonymous)",54,54
+50,12,369,0,56,"main@44-99@scripts/squad-draft.mjs","scripts/squad-draft.mjs","main","main ( )",44,99

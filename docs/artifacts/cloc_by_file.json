@@ -1,0 +1,68 @@
+{"header" : {
+  "cloc_url"           : "github.com/AlDanial/cloc",
+  "cloc_version"       : "2.06",
+  "elapsed_seconds"    : 0.0279078483581543,
+  "n_files"            : 11,
+  "n_lines"            : 1718,
+  "files_per_second"   : 394.154356109146,
+  "lines_per_second"   : 61559.7439814103},
+".opencode/plugins/orchestrate.js" :{
+  "blank": 49,
+  "comment": 111,
+  "code": 362,
+  "language": "JavaScript"},
+"src/model-data.js" :{
+  "blank": 10,
+  "comment": 95,
+  "code": 109,
+  "language": "JavaScript"},
+"scripts/refresh-benchmarks.mjs" :{
+  "blank": 7,
+  "comment": 17,
+  "code": 89,
+  "language": "JavaScript"},
+"src/rate-limit-guard.js" :{
+  "blank": 12,
+  "comment": 97,
+  "code": 89,
+  "language": "JavaScript"},
+"scripts/squad-draft.mjs" :{
+  "blank": 10,
+  "comment": 12,
+  "code": 79,
+  "language": "JavaScript"},
+"src/context.js" :{
+  "blank": 8,
+  "comment": 61,
+  "code": 78,
+  "language": "JavaScript"},
+"scripts/squad-file-performance.mjs" :{
+  "blank": 11,
+  "comment": 17,
+  "code": 67,
+  "language": "JavaScript"},
+"src/bootstrap.js" :{
+  "blank": 8,
+  "comment": 20,
+  "code": 64,
+  "language": "JavaScript"},
+"src/benchmarks.js" :{
+  "blank": 4,
+  "comment": 36,
+  "code": 53,
+  "language": "JavaScript"},
+"src/workers.js" :{
+  "blank": 4,
+  "comment": 34,
+  "code": 47,
+  "language": "JavaScript"},
+"src/inventory.js" :{
+  "blank": 4,
+  "comment": 22,
+  "code": 32,
+  "language": "JavaScript"},
+"SUM": {
+  "blank": 127,
+  "comment": 522,
+  "code": 1069,
+  "nFiles": 11} }

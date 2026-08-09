@@ -1,0 +1,28 @@
+{
+  ".opencode/plugins/orchestrate.js": [
+    "src/benchmarks.js",
+    "src/bootstrap.js",
+    "src/context.js",
+    "src/inventory.js",
+    "src/model-data.js",
+    "src/rate-limit-guard.js"
+  ],
+  "scripts/refresh-benchmarks.mjs": [],
+  "scripts/squad-draft.mjs": [
+    "src/workers.js"
+  ],
+  "scripts/squad-file-performance.mjs": [
+    "src/model-data.js"
+  ],
+  "src/benchmarks.js": [],
+  "src/bootstrap.js": [],
+  "src/context.js": [],
+  "src/inventory.js": [
+    "src/benchmarks.js"
+  ],
+  "src/model-data.js": [
+    "src/benchmarks.js"
+  ],
+  "src/rate-limit-guard.js": [],
+  "src/workers.js": []
+}
