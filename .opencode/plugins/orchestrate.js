@@ -20,6 +20,12 @@
  *      crossed, aborts the stuck session and — once the orchestrator's turn
  *      goes idle — sends it a plain-language note explaining why and telling
  *      it to reroute to a different grunt/drill. See src/rate-limit-guard.js.
+ *
+ * The bootstrap/context-budget injection logic itself lives in
+ * src/message-transform.js (pure + directly unit-tested); this file wires it
+ * to the actual client calls. Likewise the `event` hook below is a thin
+ * switch dispatching to one small handler per event.type — see
+ * docs/artifacts/code-health-report-20260808.md for why.
  */
 
 import path from "node:path";
@@ -35,15 +41,7 @@ import {
   buildModelData,
   modelsChanged,
 } from "../../src/model-data.js";
-import { buildBootstrap, BOOTSTRAP_MARKER } from "../../src/bootstrap.js";
-import {
-  estimateContextTokens,
-  formatContextLine,
-  buildLimitMap,
-  DEFAULT_LIMIT,
-  resolveOrchestratorModel,
-  formatLocalDateTime,
-} from "../../src/context.js";
+import { buildLimitMap } from "../../src/context.js";
 import {
   normalizeGuardConfig,
   initGuardState,
@@ -51,6 +49,7 @@ import {
   isGuardedTerminalError,
   formatGuardNote,
 } from "../../src/rate-limit-guard.js";
+import { applyOrchestratorTransform } from "../../src/message-transform.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
@@ -362,6 +361,66 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     await sendGuardNote(info.parentID, info.agent, { reason: "terminal_error", errorText });
   };
 
+  // --- Event dispatch: one small function per event.type, so no single
+  // function carries the combined branching of all four (previously a single
+  // 25-CC handler — see docs/artifacts/code-health-report-20260808.md). ---
+
+  const handleSessionDeleted = (props) => {
+    const id = props?.info?.id;
+    if (!id) return;
+    _guardStates.delete(id);
+    _sessionInfoCache.delete(id);
+    _lastStatusCode.delete(id);
+    _idleWaiters.delete(id);
+  };
+
+  const handleSessionStatus = async (props) => {
+    const sessionID = props?.sessionID;
+    const status = props?.status;
+    if (!sessionID || !status) return;
+
+    if (status.type === "idle") {
+      const waiters = _idleWaiters.get(sessionID);
+      if (waiters) for (const finish of [...waiters]) finish();
+      return;
+    }
+
+    if (status.type !== "retry" || !_guardConfig?.enabled) return;
+
+    const info = await getSessionInfo(sessionID);
+    if (!info) return; // top-level session (or lookup failed) — never guarded
+
+    const state = _guardStates.get(sessionID) ?? initGuardState();
+    _guardStates.set(sessionID, state);
+
+    const result = evaluateRetry(
+      state,
+      status,
+      _guardConfig,
+      _lastStatusCode.get(sessionID),
+      Date.now(),
+    );
+    if (result.trigger) {
+      state.guarded = true;
+      await guardAbort(sessionID, info.parentID, info.agent, result);
+    }
+  };
+
+  const handleSessionErrorEvent = async (props) => {
+    const sessionID = props?.sessionID;
+    const code = extractStatusCode(props?.error);
+    if (sessionID && code !== undefined) _lastStatusCode.set(sessionID, code);
+    if (sessionID && props?.error) await handleTerminalError(sessionID, props.error);
+  };
+
+  const handleMessageUpdatedEvent = async (props) => {
+    const msgInfo = props?.info;
+    if (msgInfo?.role !== "assistant" || !msgInfo?.error || !msgInfo?.sessionID) return;
+    const code = extractStatusCode(msgInfo.error);
+    if (code !== undefined) _lastStatusCode.set(msgInfo.sessionID, code);
+    await handleTerminalError(msgInfo.sessionID, msgInfo.error);
+  };
+
   return {
     config: async (config) => {
       // Capture the orchestrator's configured model as a turn-1 fallback
@@ -382,139 +441,26 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
 
     event: async ({ event }) => {
       const props = /** @type {any} */ (event.properties);
-
-      if (event.type === "session.deleted") {
-        const id = props?.info?.id;
-        if (id) {
-          _guardStates.delete(id);
-          _sessionInfoCache.delete(id);
-          _lastStatusCode.delete(id);
-          _idleWaiters.delete(id);
-        }
-        return;
-      }
-
-      if (event.type === "session.status") {
-        const sessionID = props?.sessionID;
-        const status = props?.status;
-        if (!sessionID || !status) return;
-
-        if (status.type === "idle") {
-          const waiters = _idleWaiters.get(sessionID);
-          if (waiters) for (const finish of [...waiters]) finish();
-          return;
-        }
-
-        if (status.type !== "retry" || !_guardConfig?.enabled) return;
-
-        const info = await getSessionInfo(sessionID);
-        if (!info) return; // top-level session (or lookup failed) — never guarded
-
-        const state = _guardStates.get(sessionID) ?? initGuardState();
-        _guardStates.set(sessionID, state);
-
-        const result = evaluateRetry(
-          state,
-          status,
-          _guardConfig,
-          _lastStatusCode.get(sessionID),
-          Date.now(),
-        );
-        if (result.trigger) {
-          state.guarded = true;
-          await guardAbort(sessionID, info.parentID, info.agent, result);
-        }
-        return;
-      }
-
-      if (event.type === "session.error") {
-        const sessionID = props?.sessionID;
-        const code = extractStatusCode(props?.error);
-        if (sessionID && code !== undefined) _lastStatusCode.set(sessionID, code);
-        if (sessionID && props?.error) await handleTerminalError(sessionID, props.error);
-        return;
-      }
-
-      if (event.type === "message.updated") {
-        const msgInfo = props?.info;
-        if (msgInfo?.role === "assistant" && msgInfo?.error && msgInfo?.sessionID) {
-          const code = extractStatusCode(msgInfo.error);
-          if (code !== undefined) _lastStatusCode.set(msgInfo.sessionID, code);
-          await handleTerminalError(msgInfo.sessionID, msgInfo.error);
-        }
+      switch (event.type) {
+        case "session.deleted":
+          return handleSessionDeleted(props);
+        case "session.status":
+          return handleSessionStatus(props);
+        case "session.error":
+          return handleSessionErrorEvent(props);
+        case "message.updated":
+          return handleMessageUpdatedEvent(props);
       }
     },
 
     "experimental.chat.messages.transform": async (_input, output) => {
-      const msgs = output.messages;
-      if (!msgs || msgs.length === 0) return;
-
-      // Only the orchestrator (build) session. Gate on whether ANY message is
-      // tagged with the orchestrator agent — robust across a compaction, where
-      // the leading message becomes a summary (agent="compaction") and a
-      // partless synthetic user marker can head the payload. Gating on the
-      // first user message's agent (as before) silently dropped the injection
-      // after every compaction. Subagent (grunt/drill) sessions carry their own
-      // agent, never "build", so they are still skipped.
-      if (!msgs.some((m) => m?.info?.agent === ORCHESTRATOR_AGENT)) return;
-
-      // Inject into the LATEST user message that has parts — that's the current
-      // turn, always present and re-sent, so the bootstrap survives compaction
-      // (which drops/summarizes the original first message). The bootstrap is
-      // not persisted, so this re-establishes it every turn.
-      const lastUser = [...msgs]
-        .reverse()
-        .find((m) => m?.info?.role === "user" && m.parts?.length);
-      if (!lastUser) return;
-
-      // Never inject into opencode's own internal generations (title / summary /
-      // compaction): that payload is a synthetic prompt, and our text would
-      // pollute the produced title or summary.
-      const leadText =
-        lastUser.parts.find(
-          (p) => p?.type === "text" && typeof p.text === "string",
-        )?.text || "";
-      if (
-        /^\s*Generate a title for this conversation/.test(leadText) ||
-        /^\s*Summarize what was done in this conversation/.test(leadText)
-      ) {
-        return;
-      }
-
-      const refPart = lastUser.parts[0];
-
-      // Bootstrap — ensure it is present this turn (idempotent within the call).
-      if (
-        !lastUser.parts.some(
-          (p) => p?.type === "text" && p.text && p.text.includes(BOOTSTRAP_MARKER),
-        )
-      ) {
-        const inventory = await getInventory();
-        const nowText = formatLocalDateTime(
-          new Date(),
-          Intl.DateTimeFormat().resolvedOptions().timeZone,
-        );
-        const modelText =
-          resolveOrchestratorModel(msgs) ?? _orchestratorModel ?? null;
-        const bootstrap = buildBootstrap(inventory, {
-          nowText,
-          modelText,
-          hasSquad: _hasSquadCache,
-        });
-        lastUser.parts.unshift({ ...refPart, type: "text", text: bootstrap });
-      }
-
-      // Live context-budget line on the same latest user message.
-      const ctx = estimateContextTokens(msgs);
-      if (ctx) {
-        const limits = await getLimitMap();
-        const limit =
-          limits[`${ctx.providerID}/${ctx.modelID}`] ??
-          limits[ctx.modelID] ??
-          DEFAULT_LIMIT;
-        const line = formatContextLine(ctx.used, limit);
-        if (line) lastUser.parts.push({ ...refPart, type: "text", text: line });
-      }
+      await applyOrchestratorTransform(output.messages, {
+        orchestratorAgent: ORCHESTRATOR_AGENT,
+        getInventory,
+        getLimitMap,
+        getHasSquad: () => _hasSquadCache,
+        orchestratorModel: _orchestratorModel,
+      });
     },
   };
 };
