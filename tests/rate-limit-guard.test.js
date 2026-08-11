@@ -3,6 +3,7 @@ import {
   normalizeGuardConfig,
   isGuardedRetry,
   isGuardedTerminalError,
+  isSilentHang,
   initGuardState,
   evaluateRetry,
   formatGuardNote,
@@ -64,7 +65,13 @@ test("evaluateRetry: single wait past threshold triggers immediately, no waiting
     undefined,
     now,
   );
-  expect(result).toEqual({ trigger: true, reason: "single_wait", waitMs: weekMs, cumulativeMs: weekMs });
+  expect(result).toEqual({
+    trigger: true,
+    reason: "single_wait",
+    waitMs: weekMs,
+    cumulativeMs: weekMs,
+    until: now + weekMs,
+  });
 });
 
 test("evaluateRetry: short waits accumulate until cumulative threshold trips", () => {
@@ -106,6 +113,7 @@ test("evaluateRetry: short waits accumulate until cumulative threshold trips", (
   );
   expect(r7.trigger).toBe(true);
   expect(r7.reason).toBe("cumulative");
+  expect(r7.until).toBe(now + tenMinMs); // last announced retry-after, not a guaranteed deadline
 });
 
 test("evaluateRetry: non-matching retry (e.g. plain 503 overload) is left alone entirely", () => {
@@ -136,32 +144,40 @@ test("evaluateRetry: once guarded, further retry events on the same session are 
 });
 
 test("formatGuardNote: single_wait reason names the announced wait and instructs a model switch", () => {
+  const now = 1_000_000;
+  const weekMs = 7 * 24 * 3600 * 1000;
   const text = formatGuardNote({
     model: "openai/gpt-5.5",
     provider: "openai",
     reason: "single_wait",
-    waitMs: 7 * 24 * 3600 * 1000,
-    cumulativeMs: 7 * 24 * 3600 * 1000,
+    waitMs: weekMs,
+    cumulativeMs: weekMs,
+    until: now + weekMs,
     description: "audit MR 88",
   });
   expect(text).toContain("RATE LIMIT GUARD");
   expect(text).toContain("openai/gpt-5.5");
   expect(text).toContain("audit MR 88");
   expect(text).toContain("7d");
+  expect(text).toContain(`Rate limited till ${new Date(now + weekMs).toISOString()}`);
   expect(text).toContain("Pick a different grunt/drill");
   expect(text.toLowerCase()).not.toContain("task failed"); // must not read like a hard failure
 });
 
 test("formatGuardNote: cumulative reason names accumulated wait, not a single announced one", () => {
+  const now = 1_000_000;
   const text = formatGuardNote({
     model: "openai/gpt-5.3-codex",
     provider: "openai",
     reason: "cumulative",
     waitMs: 30_000,
     cumulativeMs: 65 * 60 * 1000,
+    until: now + 30_000,
   });
   expect(text).toContain("accumulated");
   expect(text).toContain("1h");
+  expect(text).toContain(`Rate limited till ${new Date(now + 30_000).toISOString()}`);
+  expect(text).toContain("may extend this on the next retry");
 });
 
 // Real-world case: opencode's own retryable() never classifies "token-plan
@@ -193,5 +209,35 @@ test("formatGuardNote: terminal_error reason explains a failure the guard never 
   expect(text).toContain("alibaba-token-plan/qwen3.8-max");
   expect(text).toContain("quota has been exhausted");
   expect(text).toContain("Recon tunstrap issue 14 fix");
+  expect(text).toContain("Rate limited till unknown"); // never saw a retry event — no deadline to report
+  expect(text).toContain("Pick a different grunt/drill");
+});
+
+// Real-world case, found via a live run against an actually-broken provider
+// (alibaba-token-plan, quota exhausted): opencode's ai-sdk layer retried the
+// call internally for 10+ minutes and never emitted a single session.status
+// or session.error event — neither isGuardedRetry nor isGuardedTerminalError
+// ever gets a chance to fire because both require an event that never
+// arrives. isSilentHang is the polling-based backstop for exactly this.
+test("isSilentHang: false while under the threshold, true once it's exceeded", () => {
+  const cfg = normalizeGuardConfig({ max_silence_seconds: 600 });
+  const lastActivity = 1_000_000;
+  expect(isSilentHang(lastActivity, cfg, lastActivity + 599_000)).toBe(false);
+  expect(isSilentHang(lastActivity, cfg, lastActivity + 601_000)).toBe(true);
+});
+
+test("formatGuardNote: silent_hang reason explains a session that never produced a single event", () => {
+  const text = formatGuardNote({
+    model: "alibaba-token-plan/qwen3.7-max",
+    provider: "alibaba-token-plan",
+    reason: "silent_hang",
+    silentMs: 10 * 60 * 1000,
+    description: "List src/ files",
+  });
+  expect(text).toContain("RATE LIMIT GUARD");
+  expect(text).toContain("alibaba-token-plan/qwen3.7-max");
+  expect(text).toContain("List src/ files");
+  expect(text).toContain("no activity at all for ~10m");
+  expect(text).toContain("Rate limited till unknown"); // no retry-after was ever observed
   expect(text).toContain("Pick a different grunt/drill");
 });

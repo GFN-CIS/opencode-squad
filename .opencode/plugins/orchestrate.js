@@ -47,6 +47,7 @@ import {
   initGuardState,
   evaluateRetry,
   isGuardedTerminalError,
+  isSilentHang,
   formatGuardNote,
 } from "../../src/rate-limit-guard.js";
 import { applyOrchestratorTransform } from "../../src/message-transform.js";
@@ -161,6 +162,13 @@ const _sessionInfoCache = new Map(); // sessionID -> {parentID, agent} | null (n
 const _lastStatusCode = new Map(); // sessionID -> last seen HTTP status code from session.error/message.updated
 let _agentsCache; // undefined = not loaded; Map<agentName, {providerID, modelID}>
 const _idleWaiters = new Map(); // sessionID -> Array<() => void>, resolved on the next session.status idle for that id
+
+// Polling backstop (see isSilentHang in src/rate-limit-guard.js): catches a
+// guarded subagent that never produces a single event of any kind, which
+// neither the retry path nor the terminal-error path can see since both are
+// purely event-driven.
+const _lastActivityTime = new Map(); // sessionID -> epoch ms of the last message/part event seen for it
+const _pollTimers = new Map(); // sessionID -> setInterval handle, one per subagent session being watched
 
 function extractStatusCode(error) {
   if (!error || typeof error !== "object") return undefined;
@@ -311,6 +319,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       reason: result.reason,
       waitMs: result.waitMs,
       cumulativeMs: result.cumulativeMs,
+      until: result.until,
       errorText: result.errorText,
     });
 
@@ -337,7 +346,43 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       // Best-effort; if abort fails the native retry just continues, no worse
       // off than without this guard.
     }
+    stopSilenceWatch(sessionID);
     await sendGuardNote(parentID, agentName, result);
+  };
+
+  // --- Silence-polling backstop (isSilentHang) ---
+
+  const stopSilenceWatch = (sessionID) => {
+    const timer = _pollTimers.get(sessionID);
+    if (timer) {
+      clearInterval(timer);
+      _pollTimers.delete(sessionID);
+    }
+  };
+
+  // One setInterval per subagent session, started when it's created. Ticks
+  // independently of any opencode event — this is the whole point: it's the
+  // only path that still catches a session that never emits a single event.
+  const startSilenceWatch = (sessionID) => {
+    if (_pollTimers.has(sessionID) || !_guardConfig?.enabled) return;
+    const timer = setInterval(async () => {
+      if (!_guardConfig?.enabled) return stopSilenceWatch(sessionID);
+      const state = _guardStates.get(sessionID);
+      if (state?.guarded) return stopSilenceWatch(sessionID); // handled via another path already
+
+      const last = _lastActivityTime.get(sessionID);
+      if (last === undefined || !isSilentHang(last, _guardConfig, Date.now())) return;
+
+      const info = await getSessionInfo(sessionID);
+      if (!info) return stopSilenceWatch(sessionID); // not a subagent (or lookup failed) — never guard it
+
+      _guardStates.set(sessionID, { ...(state ?? initGuardState()), guarded: true });
+      await guardAbort(sessionID, info.parentID, info.agent, {
+        reason: "silent_hang",
+        silentMs: Date.now() - last,
+      });
+    }, _guardConfig.poll_interval_seconds * 1000);
+    _pollTimers.set(sessionID, timer);
   };
 
   // Terminal-failure path: the subagent's call already ended (error or
@@ -372,6 +417,21 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     _sessionInfoCache.delete(id);
     _lastStatusCode.delete(id);
     _idleWaiters.delete(id);
+    _lastActivityTime.delete(id);
+    stopSilenceWatch(id);
+  };
+
+  // A new subagent session just got created — start the silence-polling
+  // backstop for it. Top-level sessions (no parentID) are never watched.
+  const handleSessionCreated = (props) => {
+    const info = props?.info;
+    const id = info?.id;
+    if (!id || !info?.parentID) return;
+    if (!_sessionInfoCache.has(id)) {
+      _sessionInfoCache.set(id, { parentID: info.parentID, agent: info.agent ?? null });
+    }
+    _lastActivityTime.set(id, Date.now());
+    startSilenceWatch(id);
   };
 
   const handleSessionStatus = async (props) => {
@@ -380,6 +440,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     if (!sessionID || !status) return;
 
     if (status.type === "idle") {
+      stopSilenceWatch(sessionID); // finished cleanly — no need to keep polling it
       const waiters = _idleWaiters.get(sessionID);
       if (waiters) for (const finish of [...waiters]) finish();
       return;
@@ -441,7 +502,21 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
 
     event: async ({ event }) => {
       const props = /** @type {any} */ (event.properties);
+
+      // Activity touch for the silence-polling backstop: ANY event that
+      // references a session counts as proof-of-life for it, regardless of
+      // event.type — this is deliberately broad (message/part updates,
+      // status changes, errors all count) so a genuinely busy subagent never
+      // gets false-positived just because we didn't special-case its event.
+      const activeSessionID =
+        props?.sessionID ?? props?.info?.sessionID ?? props?.info?.id ?? props?.part?.sessionID;
+      if (activeSessionID && _pollTimers.has(activeSessionID)) {
+        _lastActivityTime.set(activeSessionID, Date.now());
+      }
+
       switch (event.type) {
+        case "session.created":
+          return handleSessionCreated(props);
         case "session.deleted":
           return handleSessionDeleted(props);
         case "session.status":
