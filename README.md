@@ -97,7 +97,8 @@ Config is passed as **plugin-tuple options**, not a top-level `opencode.json` fi
         "retry_on_errors": [429],
         "retryable_error_patterns": ["rate.?limit", "usage.?limit", "quota"],
         "max_wait_seconds": 3600,
-        "max_cumulative_seconds": 3600
+        "max_cumulative_seconds": 3600,
+        "max_silence_seconds": 600
       }
     }]
   ]
@@ -108,15 +109,17 @@ All fields are optional — the values above are also the defaults, so omitting 
 
 - `max_wait_seconds` — a **single** announced wait longer than this (e.g. a provider saying "resets in 7 days") aborts immediately. Don't wait at all.
 - `max_cumulative_seconds` — no single wait was long, but retries keep accumulating (repeated short backoffs) past this total — abort once the sum crosses it.
+- `max_silence_seconds` — abort a guarded subagent that has produced **zero activity at all** for this long, regardless of whether opencode ever surfaced a retry or error event for it (see signal 3 below). 10 minutes by default: long enough that a legitimately slow first token (heavy reasoning models can take a couple minutes before streaming anything) won't false-positive, short enough that it doesn't cost the orchestrator the better part of an hour before it finds out.
 - `retry_on_errors` / `retryable_error_patterns` — same idea as [`@renjfk/opencode-model-fallback`](https://github.com/renjfk/opencode-model-fallback)'s options: only intervene on retries that actually look like a rate/usage limit (matched against opencode's own retry message, or a cached HTTP status code), not on ordinary transient 5xx blips — those are left to opencode's normal backoff.
 - Only ever applies to **subagent** sessions (anything with a parent) — a top-level/human chat session is left alone; run `opencode-model-fallback` alongside this if you want that case covered too.
 
-Two independent signals feed the guard, so it also catches failures that never look like a retry to opencode itself:
+Three independent signals feed the guard, so it also catches failures that never look like a retry to opencode itself:
 
-1. **`session.status` retry events** — the abort path. Once a threshold trips, the plugin aborts the stuck subagent. The `task` tool's own error text for that is opencode's hardcoded `"Task cancelled"` (there's no API to set custom text there — confirmed empirically). To actually carry the reason and the "switch models" instruction, once the orchestrator's turn goes idle again the guard sends it a plain follow-up message explaining what happened and telling it to pick a different grunt/drill and retry.
+1. **`session.status` retry events** — the abort path. Once a threshold trips, the plugin aborts the stuck subagent. The `task` tool's own error text for that is opencode's hardcoded `"Task cancelled"` (there's no API to set custom text there — confirmed empirically). To actually carry the reason and the "switch models" instruction, once the orchestrator's turn goes idle again the guard sends it a plain follow-up message explaining what happened and telling it to pick a different grunt/drill and retry — including an absolute `Rate limited till <ISO datetime>` deadline when the provider announced one, or `unknown` when it didn't (never a vague "wait a bit").
 2. **Terminal `session.error`/`message.updated` failures** — not every limit produces a retry signal. A real provider error like `"Your token-plan quota has been exhausted"` matches none of opencode's own built-in retryable-message patterns, so opencode never schedules a retry for it at all and the call just fails outright with no warning. The guard also matches these directly against the same patterns and sends the same explanatory note, even though there was nothing for it to abort.
+3. **Silence polling backstop** — the other two signals both require opencode to emit a specific event. Verified live against a real quota-exhausted provider: opencode's ai-sdk layer retried the call *internally* for 10+ minutes without ever emitting a `session.status:retry` or `session.error` — neither of the two paths above ever gets a chance to fire. The guard runs an independent timer per subagent session, polling for any message/part activity; if a guarded session goes completely silent past `max_silence_seconds`, it's aborted on the wall clock alone, no event required.
 
-Verified live end-to-end against a genuinely quota-exhausted model: the guard caught the limit, told the orchestrator, and the orchestrator switched to a different grunt on its own — then, when that one turned out to share the same exhausted account, switched again to a different provider entirely, all without being told which model to pick.
+Verified live end-to-end against a genuinely quota-exhausted model, on two separate occasions: the guard caught the limit, told the orchestrator, and the orchestrator switched to a different grunt on its own — then, when that one turned out to share the same exhausted account, switched again to a different provider entirely, all without being told which model to pick. The silence backstop specifically was confirmed against a live subagent that produced zero events for over 10 minutes.
 
 ---
 
@@ -218,9 +221,15 @@ A full PDCA iteration (the *changes* branch) fires two LLM calls (grunt + drill)
 ## Development
 
 ```bash
-bun install
-bun test          # runs the unit suite (bootstrap, inventory, context, benchmarks, model-data, workers)
+npm install
+npm test          # vitest — unit suite for src/ (bootstrap, inventory, context, benchmarks, model-data, workers, rate-limit-guard)
+npm run coverage  # vitest + @vitest/coverage-v8, scoped to src/**; CI-gated at 80% (statements/branches/functions/lines)
+npm run lint      # biome check — formatting + lint
+npm run lint:fix  # biome check --write
+npm run knip      # unused files/exports/dependencies
 ```
+
+Coverage is scoped to `src/**` on purpose — that's the pure decision-logic layer the codebase deliberately separates from `.opencode/plugins/orchestrate.js`'s SDK-client/event plumbing (see that file's header comment). Unit-testing the plugin file itself would mean mocking the whole opencode SDK client.
 
 ---
 
