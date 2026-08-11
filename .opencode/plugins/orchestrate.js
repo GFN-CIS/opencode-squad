@@ -350,6 +350,11 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     if (timer) {
       clearInterval(timer);
       _pollTimers.delete(sessionID);
+      // TEMP DEBUG (2026-08): see startSilenceWatch's comment. Remove once
+      // confirmed.
+      console.error(
+        `[SILENCE_WATCH_DEBUG] watch stopped session=${sessionID} now=${new Date().toISOString()}`,
+      );
     }
   };
 
@@ -358,17 +363,32 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   // only path that still catches a session that never emits a single event.
   const startSilenceWatch = (sessionID) => {
     if (_pollTimers.has(sessionID) || !_guardConfig?.enabled) return;
+    // TEMP DEBUG (2026-08): see the comment on the retry-event log above —
+    // one line per tick, per watched session, so ticks can be lined up
+    // against retry-event timestamps to confirm the timer is firing on
+    // schedule (every SILENCE_POLL_INTERVAL_MS) and not being starved.
+    // Remove once confirmed.
+    console.error(
+      `[SILENCE_WATCH_DEBUG] watch started session=${sessionID} now=${new Date().toISOString()}`,
+    );
     const timer = setInterval(async () => {
       if (!_guardConfig?.enabled) return stopSilenceWatch(sessionID);
       const state = _guardStates.get(sessionID);
       if (state?.guarded) return stopSilenceWatch(sessionID); // handled via another path already
 
       const last = _lastActivityTime.get(sessionID);
+      const silentForMs = last === undefined ? undefined : Date.now() - last;
+      console.error(
+        `[SILENCE_WATCH_DEBUG] tick session=${sessionID} now=${new Date().toISOString()} lastActivity=${last === undefined ? "none" : new Date(last).toISOString()} silentForMs=${silentForMs}`,
+      );
       if (last === undefined || !isSilentHang(last, _guardConfig, Date.now())) return;
 
       const info = await getSessionInfo(sessionID);
       if (!info) return stopSilenceWatch(sessionID); // not a subagent (or lookup failed) — never guard it
 
+      console.error(
+        `[SILENCE_WATCH_DEBUG] triggering silent_hang abort session=${sessionID} silentForMs=${silentForMs}`,
+      );
       _guardStates.set(sessionID, { ...(state ?? initGuardState()), guarded: true });
       await guardAbort(sessionID, info.parentID, info.agent, {
         reason: "silent_hang",
@@ -440,6 +460,17 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     }
 
     if (status.type !== "retry" || !_guardConfig?.enabled) return;
+
+    // TEMP DEBUG (2026-08): investigating a live silent_hang trigger that
+    // fired later than expected on the desktop app. Confirms/denies whether
+    // session.status:retry events are actually arriving (they aren't
+    // persisted to opencode's own `event` DB table, so querying storage
+    // gave a false "zero events" reading last time) and lets us see the
+    // real attempt/wait sequence side by side with the silence-watch ticks
+    // below. Remove once confirmed.
+    console.error(
+      `[SILENCE_WATCH_DEBUG] retry-event session=${sessionID} attempt=${status.attempt} next=${status.next} waitMs=${Math.max(0, status.next - Date.now())} message=${JSON.stringify(status.message)}`,
+    );
 
     const info = await getSessionInfo(sessionID);
     if (!info) return; // top-level session (or lookup failed) — never guarded
