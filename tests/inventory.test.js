@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { expect, test } from "vitest";
 import { formatInventory, hasSquad } from "../src/inventory.js";
 
 test("lists only subagents with name, description, model", () => {
@@ -25,14 +25,13 @@ test("lists only subagents with name, description, model", () => {
 });
 
 test("returns placeholder when no subagents", () => {
-  expect(formatInventory([{ name: "build", mode: "primary", builtIn: true }]))
-    .toBe("(no subagents available)");
+  expect(formatInventory([{ name: "build", mode: "primary", builtIn: true }])).toBe(
+    "(no subagents available)",
+  );
 });
 
 test("handles missing description", () => {
-  const out = formatInventory([
-    { name: "x", mode: "subagent", builtIn: false },
-  ]);
+  const out = formatInventory([{ name: "x", mode: "subagent", builtIn: false }]);
   expect(out).toContain("- `x`: (no description) (model: inherited)");
 });
 
@@ -68,16 +67,25 @@ test("uses a perf lookup function when given one (model_data path)", () => {
       model: { providerID: "openai", modelID: "gpt-5.5" },
     },
   ];
-  const lookup = (id) =>
-    id === "openai/gpt-5.5" ? "AA intel 55 · note: good for coding" : null;
+  const lookup = (id) => (id === "openai/gpt-5.5" ? "AA intel 55 · note: good for coding" : null);
   const out = formatInventory(agents, lookup);
   expect(out).toContain("— AA intel 55 · note: good for coding");
 });
 
 test("adds the context window from the limits map", () => {
   const agents = [
-    { name: "g1", mode: "subagent", description: "x", model: { providerID: "openai", modelID: "gpt-5.5" } },
-    { name: "g2", mode: "subagent", description: "x", model: { providerID: "anthropic", modelID: "claude-opus-4-8" } },
+    {
+      name: "g1",
+      mode: "subagent",
+      description: "x",
+      model: { providerID: "openai", modelID: "gpt-5.5" },
+    },
+    {
+      name: "g2",
+      mode: "subagent",
+      description: "x",
+      model: { providerID: "anthropic", modelID: "claude-opus-4-8" },
+    },
   ];
   const limits = { "openai/gpt-5.5": 400000, "anthropic/claude-opus-4-8": 1000000 };
   const out = formatInventory(agents, null, limits);
