@@ -31,6 +31,19 @@ const DEFAULT_CONFIG = {
   retryable_error_patterns: ["rate.?limit", "usage.?limit", "quota"],
   max_wait_seconds: 3600,
   max_cumulative_seconds: 3600,
+  // Polling backstop (see isSilentHang below): independent of both event
+  // paths above, catches a subagent that has gone completely silent — no
+  // message/part activity at all — because the provider/SDK is retrying
+  // internally without ever surfacing a session.status:retry or a terminal
+  // message.updated error. Verified live: a real "token-plan quota
+  // exhausted" AI_APICallError produced ZERO such events for 10+ minutes
+  // while opencode kept retrying under the hood. 10 minutes is a deliberate
+  // middle ground — long enough that a legitimately slow first-token (heavy
+  // reasoning models can take a couple minutes before streaming anything)
+  // won't false-positive, short enough that it doesn't cost the orchestrator
+  // the better part of an hour before it finds out.
+  max_silence_seconds: 600,
+  poll_interval_seconds: 15,
 };
 
 /** @param {Partial<typeof DEFAULT_CONFIG>} [raw] */
@@ -108,6 +121,26 @@ export function isGuardedTerminalError(errorText, config, statusCode) {
 }
 
 /**
+ * Third detection path, orthogonal to the two event-driven ones above
+ * (`isGuardedRetry` / `isGuardedTerminalError`). Both of those require
+ * opencode to emit a specific event — a `session.status:retry`, or a
+ * terminal `message.updated`/`session.error`. Neither fires for a subagent
+ * whose provider call is being retried internally by the SDK/provider layer
+ * with no event surfaced at all (verified live — see max_silence_seconds
+ * above). This is a pure wall-clock check meant to be called on a timer by
+ * the caller (polling), not from an event handler.
+ *
+ * @param {number} lastActivityMs epoch ms of the last observed message/part
+ *        activity for the session (or its creation time if nothing has
+ *        happened yet)
+ * @param {ReturnType<typeof normalizeGuardConfig>} config
+ * @param {number} now epoch ms (injected for testability)
+ */
+export function isSilentHang(lastActivityMs, config, now) {
+  return now - lastActivityMs > config.max_silence_seconds * 1000;
+}
+
+/**
  * Per-session tracking state the caller (the plugin) owns and mutates across
  * events. Kept as a plain object so it's trivially testable without a Map.
  * @typedef {{cumulativeMs: number, guarded: boolean}} GuardState
@@ -128,7 +161,7 @@ export function initGuardState() {
  * @param {ReturnType<typeof normalizeGuardConfig>} config
  * @param {number | undefined} lastStatusCode
  * @param {number} now epoch ms (injected for testability)
- * @returns {{trigger: false} | {trigger: true, reason: "single_wait" | "cumulative", waitMs: number, cumulativeMs: number}}
+ * @returns {{trigger: false} | {trigger: true, reason: "single_wait" | "cumulative", waitMs: number, cumulativeMs: number, until: number}}
  */
 export function evaluateRetry(state, status, config, lastStatusCode, now) {
   if (state.guarded) return { trigger: false };
@@ -136,12 +169,18 @@ export function evaluateRetry(state, status, config, lastStatusCode, now) {
 
   const waitMs = Math.max(0, status.next - now);
   state.cumulativeMs += waitMs;
+  // `status.next` is the provider's own announced wake-up time for THIS retry
+  // (absolute epoch ms) — the only "until" we actually have. For `cumulative`
+  // it's not a guarantee (the provider may announce a new, later wait on the
+  // very next retry), but it's still the best honest lower bound we can give
+  // the orchestrator instead of silence.
+  const until = status.next;
 
   if (waitMs > config.max_wait_seconds * 1000) {
-    return { trigger: true, reason: "single_wait", waitMs, cumulativeMs: state.cumulativeMs };
+    return { trigger: true, reason: "single_wait", waitMs, cumulativeMs: state.cumulativeMs, until };
   }
   if (state.cumulativeMs > config.max_cumulative_seconds * 1000) {
-    return { trigger: true, reason: "cumulative", waitMs, cumulativeMs: state.cumulativeMs };
+    return { trigger: true, reason: "cumulative", waitMs, cumulativeMs: state.cumulativeMs, until };
   }
   return { trigger: false };
 }
@@ -172,13 +211,35 @@ function humanizeSeconds(seconds) {
  * bare underlying provider error (or opencode's generic "Task cancelled")
  * with no hint that switching models would fix it.
  *
- * @param {{model: string, provider: string, reason: "single_wait" | "cumulative" | "terminal_error", waitMs?: number, cumulativeMs?: number, description?: string, errorText?: string}} info
+ * `reason: "silent_hang"` is the third case, from the polling backstop
+ * (`isSilentHang`): no event of any kind was ever seen for the subagent —
+ * this guard abort it purely because the wall clock ran out, so there is no
+ * error text and no retry-after to report at all.
+ *
+ * @param {{model: string, provider: string, reason: "single_wait" | "cumulative" | "terminal_error" | "silent_hang", waitMs?: number, cumulativeMs?: number, until?: number, silentMs?: number, description?: string, errorText?: string}} info
  */
 export function formatGuardNote(info) {
+  // `until` is an absolute epoch ms (from the provider's own retry-after
+  // signal) when we have one; otherwise honestly say "unknown" instead of
+  // implying a deadline that doesn't exist (e.g. terminal_error/silent_hang
+  // never saw a retry event at all, so there's nothing to base a deadline on).
+  const untilStr = info.until ? new Date(info.until).toISOString() : "unknown";
+
   if (info.reason === "terminal_error") {
     return [
       "[RATE LIMIT GUARD]",
       `The task${info.description ? ` "${info.description}"` : ""} on \`${info.model}\` (${info.provider}) failed with an error matching this guard's rate/usage-limit patterns${info.errorText ? `: "${info.errorText}"` : ""}.`,
+      `Rate limited till ${untilStr}.`,
+      "This is NOT a real task failure — it never got a chance to run.",
+      "Pick a different grunt/drill (a different model/provider) from your inventory and retry the same task.",
+    ].join(" ");
+  }
+  if (info.reason === "silent_hang") {
+    const silentStr = humanizeSeconds((info.silentMs ?? 0) / 1000);
+    return [
+      "[RATE LIMIT GUARD]",
+      `The task${info.description ? ` "${info.description}"` : ""} on \`${info.model}\` (${info.provider}) produced no activity at all for ~${silentStr} and was aborted — likely a provider/SDK-internal retry loop that never surfaced as a visible error or retry signal.`,
+      `Rate limited till ${untilStr}.`,
       "This is NOT a real task failure — it never got a chance to run.",
       "Pick a different grunt/drill (a different model/provider) from your inventory and retry the same task.",
     ].join(" ");
@@ -192,6 +253,7 @@ export function formatGuardNote(info) {
   return [
     "[RATE LIMIT GUARD]",
     `The task${info.description ? ` "${info.description}"` : ""} on \`${info.model}\` (${info.provider}) was cancelled because ${why} — past this guard's configured threshold.`,
+    `Rate limited till ${untilStr}${info.reason === "cumulative" ? " (last announced wait — the provider may extend this on the next retry)" : ""}.`,
     "This is NOT a real task failure. Do not wait for this model to recover.",
     "Pick a different grunt/drill (a different model/provider) from your inventory and retry the same task.",
   ].join(" ");
