@@ -42,8 +42,12 @@ const DEFAULT_CONFIG = {
   // reasoning models can take a couple minutes before streaming anything)
   // won't false-positive, short enough that it doesn't cost the orchestrator
   // the better part of an hour before it finds out.
+  //
+  // How OFTEN we poll (the setInterval tick) is a plumbing detail nobody has
+  // asked to tune, not a decision the caller needs to make — that constant
+  // lives next to the setInterval call in the plugin, not here (YAGNI: don't
+  // expose a config knob before someone needs it).
   max_silence_seconds: 600,
-  poll_interval_seconds: 15,
 };
 
 /** @param {Partial<typeof DEFAULT_CONFIG>} [raw] */
@@ -177,7 +181,13 @@ export function evaluateRetry(state, status, config, lastStatusCode, now) {
   const until = status.next;
 
   if (waitMs > config.max_wait_seconds * 1000) {
-    return { trigger: true, reason: "single_wait", waitMs, cumulativeMs: state.cumulativeMs, until };
+    return {
+      trigger: true,
+      reason: "single_wait",
+      waitMs,
+      cumulativeMs: state.cumulativeMs,
+      until,
+    };
   }
   if (state.cumulativeMs > config.max_cumulative_seconds * 1000) {
     return { trigger: true, reason: "cumulative", waitMs, cumulativeMs: state.cumulativeMs, until };
