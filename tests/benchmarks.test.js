@@ -1,8 +1,8 @@
-import { test, expect } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { slugCandidates, lookupBenchmark, agenticScore, formatBench } from "../src/benchmarks.js";
+import { expect, test } from "vitest";
+import { agenticScore, formatBench, lookupBenchmark, slugCandidates } from "../src/benchmarks.js";
 
 const snapshot = JSON.parse(
   fs.readFileSync(

@@ -1,5 +1,5 @@
-import { test, expect } from "bun:test";
-import { slugForModel, agentMarkdown, GENERATED_MARKER } from "../src/workers.js";
+import { expect, test } from "vitest";
+import { agentMarkdown, GENERATED_MARKER, slugForModel } from "../src/workers.js";
 
 test("slug collapses provider/model and punctuation, prefixed by role", () => {
   expect(slugForModel("openai/gpt-5.5")).toBe("grunt-openai-gpt-5-5"); // default role
@@ -18,11 +18,7 @@ test("slug is stable and trimmed (no leading/trailing/doubled dashes)", () => {
 
 test("grunt markdown: edit/bash allowed, frontmatter, model, marker, body", () => {
   const body = "You are grunt, a worker subagent.";
-  const { slug, filename, content } = agentMarkdown(
-    "grunt",
-    "anthropic/claude-opus-4-7",
-    body,
-  );
+  const { slug, filename, content } = agentMarkdown("grunt", "anthropic/claude-opus-4-7", body);
   expect(slug).toBe("grunt-anthropic-claude-opus-4-7");
   expect(filename).toBe("grunt-anthropic-claude-opus-4-7.md");
   expect(content.startsWith("---\n")).toBe(true);

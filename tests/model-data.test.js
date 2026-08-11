@@ -1,16 +1,16 @@
-import { test, expect } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { expect, test } from "vitest";
 import {
-  extractModelId,
-  discoverSquadModels,
-  perfFromBenchmark,
-  mergeModelData,
   buildModelData,
+  discoverSquadModels,
+  extractModelId,
   formatPerf,
-  readModelData,
+  mergeModelData,
   modelsChanged,
+  perfFromBenchmark,
+  readModelData,
 } from "../src/model-data.js";
 
 // Minimal AA-shaped snapshot for deterministic perf lookups.

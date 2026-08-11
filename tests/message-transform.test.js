@@ -1,12 +1,12 @@
-import { test, expect } from "bun:test";
-import {
-  isInternalGeneration,
-  findInjectionTarget,
-  hasBootstrapMarker,
-  applyOrchestratorTransform,
-} from "../src/message-transform.js";
+import { expect, test } from "vitest";
 import { BOOTSTRAP_MARKER } from "../src/bootstrap.js";
 import { CONTEXT_MARKER } from "../src/context.js";
+import {
+  applyOrchestratorTransform,
+  findInjectionTarget,
+  hasBootstrapMarker,
+  isInternalGeneration,
+} from "../src/message-transform.js";
 
 const ORCH = "build";
 
@@ -34,10 +34,7 @@ test("findInjectionTarget returns null when there's no user message with parts",
 });
 
 test("findInjectionTarget skips opencode's own internal generation prompts", () => {
-  const messages = [
-    assistantMsg({}),
-    userMsg({ text: "Generate a title for this conversation" }),
-  ];
+  const messages = [assistantMsg({}), userMsg({ text: "Generate a title for this conversation" })];
   expect(findInjectionTarget(messages, ORCH)).toBe(null);
 });
 
@@ -78,7 +75,10 @@ test("applyOrchestratorTransform injects the bootstrap once, unshifted before th
 });
 
 test("applyOrchestratorTransform is idempotent within a call — skips re-injecting if the marker is already present", async () => {
-  const target = { info: { role: "user", agent: ORCH }, parts: [{ type: "text", text: `${BOOTSTRAP_MARKER} already here` }] };
+  const target = {
+    info: { role: "user", agent: ORCH },
+    parts: [{ type: "text", text: `${BOOTSTRAP_MARKER} already here` }],
+  };
   const messages = [target];
   let inventoryCalls = 0;
   await applyOrchestratorTransform(messages, {
@@ -98,7 +98,11 @@ test("applyOrchestratorTransform is idempotent within a call — skips re-inject
 test("applyOrchestratorTransform appends a context-budget line when usage is estimable, using the real model's limit", async () => {
   const target = userMsg({ text: "continue" });
   const messages = [
-    assistantMsg({ modelID: "claude-opus-4-7", providerID: "anthropic", tokens: { total: 500_000 } }),
+    assistantMsg({
+      modelID: "claude-opus-4-7",
+      providerID: "anthropic",
+      tokens: { total: 500_000 },
+    }),
     target,
   ];
   await applyOrchestratorTransform(messages, {

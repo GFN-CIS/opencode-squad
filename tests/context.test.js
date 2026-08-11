@@ -1,17 +1,15 @@
-import { test, expect } from "bun:test";
+import { expect, test } from "vitest";
 import {
+  buildLimitMap,
+  CONTEXT_MARKER,
   estimateContextTokens,
   formatContextLine,
-  buildLimitMap,
-  resolveOrchestratorModel,
   formatLocalDateTime,
-  CONTEXT_MARKER,
+  resolveOrchestratorModel,
 } from "../src/context.js";
 
 test("estimate returns null before any assistant reply", () => {
-  expect(estimateContextTokens([{ info: { role: "user" }, parts: [] }])).toBe(
-    null,
-  );
+  expect(estimateContextTokens([{ info: { role: "user" }, parts: [] }])).toBe(null);
   expect(estimateContextTokens([])).toBe(null);
   expect(estimateContextTokens(undefined)).toBe(null);
 });
@@ -26,7 +24,13 @@ test("estimate prefers the live `total` field (which already sums cache)", () =>
         role: "assistant",
         modelID: "claude-opus-4-7",
         providerID: "anthropic",
-        tokens: { total: 20507, input: 3, output: 30, reasoning: 0, cache: { read: 0, write: 20474 } },
+        tokens: {
+          total: 20507,
+          input: 3,
+          output: 30,
+          reasoning: 0,
+          cache: { read: 0, write: 20474 },
+        },
       },
     },
     { info: { role: "user" } },

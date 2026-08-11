@@ -1,5 +1,5 @@
-import { test, expect } from "bun:test";
-import { buildBootstrap, BOOTSTRAP_MARKER } from "../src/bootstrap.js";
+import { expect, test } from "vitest";
+import { BOOTSTRAP_MARKER, buildBootstrap } from "../src/bootstrap.js";
 
 test("block starts with the marker and embeds inventory", () => {
   const inv = "- `worker`: Generic executor (model: anthropic/claude-sonnet-4-6)";
@@ -57,9 +57,7 @@ test("mentions caching cost and subscription-vs-api billing, pointing to squad-d
 
 test("tells the orchestrator not to reload a skill already in context", () => {
   // collapse whitespace so a line wrap inside the phrase doesn't matter
-  const out = buildBootstrap("(no subagents available)")
-    .toLowerCase()
-    .replace(/\s+/g, " ");
+  const out = buildBootstrap("(no subagents available)").toLowerCase().replace(/\s+/g, " ");
   expect(out).toContain("already in your context");
   expect(out).toContain("don't reload it every turn");
 });
