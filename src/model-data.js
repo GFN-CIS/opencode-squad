@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { lookupBenchmark, agenticScore } from "./benchmarks.js";
+import { agenticScore, lookupBenchmark } from "./benchmarks.js";
 
 /**
  * Pull the model id out of an agent markdown file's YAML frontmatter.
@@ -109,7 +109,7 @@ export function perfFromBenchmark(modelId, benchmarksModels) {
  * @returns {Record<string, any>}  the `models` object keyed by opencode id
  */
 export function mergeModelData(modelIds, benchmarksModels, existing = {}) {
-  const prev = (existing && existing.models) || {};
+  const prev = existing?.models || {};
   const out = {};
   for (const id of [...modelIds].sort()) {
     const fresh = perfFromBenchmark(id, benchmarksModels);
@@ -192,8 +192,8 @@ export function formatPerf(entry) {
  * @returns {boolean}
  */
 export function modelsChanged(existing, snapshot) {
-  const a = JSON.stringify((existing && existing.models) || {});
-  const b = JSON.stringify((snapshot && snapshot.models) || {});
+  const a = JSON.stringify(existing?.models || {});
+  const b = JSON.stringify(snapshot?.models || {});
   return a !== b;
 }
 
@@ -207,7 +207,7 @@ export function modelsChanged(existing, snapshot) {
 export function readModelData(file) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return parsed && parsed.models ? parsed : null;
+    return parsed?.models ? parsed : null;
   } catch {
     return null;
   }

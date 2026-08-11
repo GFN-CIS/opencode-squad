@@ -16,8 +16,8 @@
 // fields (info, …) survive the merge.
 
 import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildModelData, readModelData } from "../src/model-data.js";
@@ -69,7 +69,7 @@ function main() {
   }
 
   fs.mkdirSync(path.dirname(out), { recursive: true });
-  fs.writeFileSync(out, JSON.stringify(snapshot, null, 2) + "\n");
+  fs.writeFileSync(out, `${JSON.stringify(snapshot, null, 2)}\n`);
 
   const unmatched = ids.filter((id) => snapshot.models[id].intelligence == null);
   console.log(`Agent dir: ${dir}`);

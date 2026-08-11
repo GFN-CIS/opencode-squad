@@ -3,13 +3,13 @@
 // (previously this lived inline in .opencode/plugins/orchestrate.js as a single
 // 21-CC anonymous function with zero direct test coverage).
 
-import { buildBootstrap, BOOTSTRAP_MARKER } from "./bootstrap.js";
+import { BOOTSTRAP_MARKER, buildBootstrap } from "./bootstrap.js";
 import {
+  DEFAULT_LIMIT,
   estimateContextTokens,
   formatContextLine,
-  DEFAULT_LIMIT,
-  resolveOrchestratorModel,
   formatLocalDateTime,
+  resolveOrchestratorModel,
 } from "./context.js";
 
 /**
@@ -49,14 +49,11 @@ export function findInjectionTarget(messages, orchestratorAgent) {
   // The LATEST user message with parts is the current turn — always present
   // and re-sent, so injections survive compaction (which drops/summarizes
   // the original first message).
-  const lastUser = [...messages]
-    .reverse()
-    .find((m) => m?.info?.role === "user" && m.parts?.length);
+  const lastUser = [...messages].reverse().find((m) => m?.info?.role === "user" && m.parts?.length);
   if (!lastUser) return null;
 
   const leadText =
-    lastUser.parts.find((p) => p?.type === "text" && typeof p.text === "string")
-      ?.text || "";
+    lastUser.parts.find((p) => p?.type === "text" && typeof p.text === "string")?.text || "";
   if (isInternalGeneration(leadText)) return null;
 
   return lastUser;

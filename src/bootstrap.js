@@ -31,13 +31,14 @@ export function buildBootstrap(inventoryMarkdown, facts = {}) {
     );
   }
   const factsBlock = lines.length ? `\n${lines.join("\n")}\n` : "";
-  const noSquadBlock = facts.hasSquad === false
-    ? `\n**No squad drafted yet.** There is no bundled grunt/drill fallback — if ` +
-      `the inventory below has no \`grunt-*\`/\`drill-*\` entries, don't invent ` +
-      `one and don't quietly absorb grunt-level work yourself on an expensive ` +
-      `model. Tell the user to run the \`squad-draft\` skill (e.g. "собери ` +
-      `команду") to set one up, then proceed once it exists.\n`
-    : "";
+  const noSquadBlock =
+    facts.hasSquad === false
+      ? `\n**No squad drafted yet.** There is no bundled grunt/drill fallback — if ` +
+        `the inventory below has no \`grunt-*\`/\`drill-*\` entries, don't invent ` +
+        `one and don't quietly absorb grunt-level work yourself on an expensive ` +
+        `model. Tell the user to run the \`squad-draft\` skill (e.g. "собери ` +
+        `команду") to set one up, then proceed once it exists.\n`
+      : "";
   return `${BOOTSTRAP_MARKER}${factsBlock}${noSquadBlock}
 You are the orchestrator — call sign **sarge**. Your value is decomposition,
 routing, and review, not doing routine work yourself on an expensive model.

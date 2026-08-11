@@ -11,8 +11,8 @@
 // Hand-authored agents are never touched.
 
 import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { agentMarkdown, GENERATED_MARKER_DETECT } from "../src/workers.js";
@@ -50,9 +50,7 @@ function main() {
     process.exit(2);
   }
 
-  const body = Object.fromEntries(
-    ROLES.map((r) => [r, fs.readFileSync(PROMPTS[r], "utf8")]),
-  );
+  const body = Object.fromEntries(ROLES.map((r) => [r, fs.readFileSync(PROMPTS[r], "utf8")]));
   fs.mkdirSync(dir, { recursive: true });
 
   const written = [];
@@ -93,9 +91,7 @@ function main() {
   console.log(
     `\n${models.length} model(s) -> ${written.length} agents (grunt + drill), ${pruned.length} pruned.`,
   );
-  console.log(
-    "Reload opencode (restart the TUI / start a new run) to pick up the new agents.",
-  );
+  console.log("Reload opencode (restart the TUI / start a new run) to pick up the new agents.");
 }
 
 main();

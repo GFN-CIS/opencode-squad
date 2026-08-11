@@ -132,11 +132,11 @@ export function buildLimitMap(providers) {
   const map = {};
   if (!Array.isArray(providers)) return map;
   for (const p of providers) {
-    const pid = p && p.id;
-    const models = p && p.models;
+    const pid = p?.id;
+    const models = p?.models;
     if (!pid || !models || typeof models !== "object") continue;
     for (const [mid, m] of Object.entries(models)) {
-      const ctx = m && m.limit && m.limit.context;
+      const ctx = m?.limit?.context;
       if (typeof ctx === "number" && ctx > 0) {
         map[`${pid}/${mid}`] = ctx;
         if (!(mid in map)) map[mid] = ctx;

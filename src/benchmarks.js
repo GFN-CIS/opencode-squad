@@ -62,10 +62,8 @@ export function lookupBenchmark(modelId, models) {
  * @returns {number|null}
  */
 export function agenticScore(data) {
-  const a = (data && data.agentic) || {};
-  const vals = [a.tau2, a.terminalbench_v2_1].filter(
-    (v) => typeof v === "number",
-  );
+  const a = data?.agentic || {};
+  const vals = [a.tau2, a.terminalbench_v2_1].filter((v) => typeof v === "number");
   if (!vals.length) return null;
   return Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 100);
 }
