@@ -1,12 +1,12 @@
-import { test, expect } from "bun:test";
+import { expect, test } from "vitest";
 import {
-  normalizeGuardConfig,
+  evaluateRetry,
+  formatGuardNote,
+  initGuardState,
   isGuardedRetry,
   isGuardedTerminalError,
   isSilentHang,
-  initGuardState,
-  evaluateRetry,
-  formatGuardNote,
+  normalizeGuardConfig,
 } from "../src/rate-limit-guard.js";
 
 test("normalizeGuardConfig fills in defaults", () => {
@@ -37,7 +37,10 @@ test("isGuardedRetry matches on message pattern", () => {
 
 test("isGuardedRetry matches on action.reason/message when message alone doesn't match", () => {
   const cfg = normalizeGuardConfig();
-  const status = { message: "Go limit reached", action: { reason: "account_rate_limit", message: "quota exceeded" } };
+  const status = {
+    message: "Go limit reached",
+    action: { reason: "account_rate_limit", message: "quota exceeded" },
+  };
   expect(isGuardedRetry(status, cfg)).toBe(true);
 });
 
@@ -72,6 +75,30 @@ test("evaluateRetry: single wait past threshold triggers immediately, no waiting
     cumulativeMs: weekMs,
     until: now + weekMs,
   });
+});
+
+test("evaluateRetry: single wait exactly at max_wait_seconds does not trigger (strictly greater-than)", () => {
+  const cfg = normalizeGuardConfig({ max_wait_seconds: 3600 });
+  const state = initGuardState();
+  const now = 1_000_000;
+  const exactlyAtLimit = evaluateRetry(
+    state,
+    { attempt: 1, message: "usage limit reached", next: now + 3600 * 1000 },
+    cfg,
+    undefined,
+    now,
+  );
+  expect(exactlyAtLimit.trigger).toBe(false); // exactly at the cap, still under the cumulative cap too
+
+  const oneMsOver = evaluateRetry(
+    state,
+    { attempt: 2, message: "usage limit reached", next: now + 3600 * 1000 + 1 },
+    cfg,
+    undefined,
+    now,
+  );
+  expect(oneMsOver.trigger).toBe(true);
+  expect(oneMsOver.reason).toBe("single_wait");
 });
 
 test("evaluateRetry: short waits accumulate until cumulative threshold trips", () => {
@@ -135,11 +162,23 @@ test("evaluateRetry: once guarded, further retry events on the same session are 
   const cfg = normalizeGuardConfig({ max_wait_seconds: 10 });
   const state = initGuardState();
   const now = 1_000_000;
-  const first = evaluateRetry(state, { attempt: 1, message: "rate limit", next: now + 60_000 }, cfg, undefined, now);
+  const first = evaluateRetry(
+    state,
+    { attempt: 1, message: "rate limit", next: now + 60_000 },
+    cfg,
+    undefined,
+    now,
+  );
   expect(first.trigger).toBe(true);
   state.guarded = true; // caller marks this after acting on the trigger
 
-  const second = evaluateRetry(state, { attempt: 2, message: "rate limit", next: now + 60_000 }, cfg, undefined, now);
+  const second = evaluateRetry(
+    state,
+    { attempt: 2, message: "rate limit", next: now + 60_000 },
+    cfg,
+    undefined,
+    now,
+  );
   expect(second).toEqual({ trigger: false });
 });
 
@@ -187,7 +226,9 @@ test("formatGuardNote: cumulative reason names accumulated wait, not a single an
 // all. isGuardedTerminalError is what catches this case after the fact.
 test("isGuardedTerminalError matches a real quota-exhausted provider message", () => {
   const cfg = normalizeGuardConfig();
-  expect(isGuardedTerminalError("AI_APICallError: Your token-plan quota has been exhausted.", cfg)).toBe(true);
+  expect(
+    isGuardedTerminalError("AI_APICallError: Your token-plan quota has been exhausted.", cfg),
+  ).toBe(true);
   expect(isGuardedTerminalError("AI_APICallError: connection reset", cfg)).toBe(false);
 });
 
@@ -224,6 +265,13 @@ test("isSilentHang: false while under the threshold, true once it's exceeded", (
   const lastActivity = 1_000_000;
   expect(isSilentHang(lastActivity, cfg, lastActivity + 599_000)).toBe(false);
   expect(isSilentHang(lastActivity, cfg, lastActivity + 601_000)).toBe(true);
+});
+
+test("isSilentHang: exactly at the threshold does not trigger (strictly greater-than)", () => {
+  const cfg = normalizeGuardConfig({ max_silence_seconds: 600 });
+  const lastActivity = 1_000_000;
+  expect(isSilentHang(lastActivity, cfg, lastActivity + 600_000)).toBe(false);
+  expect(isSilentHang(lastActivity, cfg, lastActivity + 600_001)).toBe(true);
 });
 
 test("formatGuardNote: silent_hang reason explains a session that never produced a single event", () => {

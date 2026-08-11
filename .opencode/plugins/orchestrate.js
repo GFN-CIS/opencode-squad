@@ -28,29 +28,23 @@
  * docs/artifacts/code-health-report-20260808.md for why.
  */
 
-import path from "node:path";
-import os from "node:os";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { formatBench } from "../../src/benchmarks.js";
-import {
-  readModelData,
-  formatPerf,
-  buildModelData,
-  modelsChanged,
-} from "../../src/model-data.js";
 import { buildLimitMap } from "../../src/context.js";
+import { formatInventory, hasSquad } from "../../src/inventory.js";
+import { applyOrchestratorTransform } from "../../src/message-transform.js";
+import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
 import {
-  normalizeGuardConfig,
-  initGuardState,
   evaluateRetry,
+  formatGuardNote,
+  initGuardState,
   isGuardedTerminalError,
   isSilentHang,
-  formatGuardNote,
+  normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
-import { applyOrchestratorTransform } from "../../src/message-transform.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
@@ -72,10 +66,7 @@ function loadBenchmarks() {
   if (_benchCache !== undefined) return _benchCache;
   _benchCache = null;
   try {
-    const raw = fs.readFileSync(
-      path.join(PACKAGE_ROOT, "src", "benchmarks.json"),
-      "utf8",
-    );
+    const raw = fs.readFileSync(path.join(PACKAGE_ROOT, "src", "benchmarks.json"), "utf8");
     _benchCache = JSON.parse(raw).models ?? null;
   } catch {
     // Best-effort; inventory still works without benchmark numbers.
@@ -115,7 +106,7 @@ function buildPerfLookup() {
   const modelData = loadModelData();
   const benchmarks = loadBenchmarks();
   return (modelId) => {
-    const entry = modelData && modelData[modelId];
+    const entry = modelData?.[modelId];
     if (entry) return formatPerf(entry);
     return benchmarks ? formatBench(modelId, benchmarks) : null;
   };
@@ -141,7 +132,7 @@ function ensureGlobalModelDataFresh() {
     const snapshot = buildModelData(agentDir, benchmarks, existing, generated);
     if (Object.keys(snapshot.models).length === 0) return; // no squad -> nothing
     if (!modelsChanged(existing, snapshot)) return; // unchanged -> no write
-    fs.writeFileSync(file, JSON.stringify(snapshot, null, 2) + "\n");
+    fs.writeFileSync(file, `${JSON.stringify(snapshot, null, 2)}\n`);
   } catch {
     // Best-effort; the inventory falls back to benchmarks.json regardless.
   }
@@ -169,6 +160,10 @@ const _idleWaiters = new Map(); // sessionID -> Array<() => void>, resolved on t
 // purely event-driven.
 const _lastActivityTime = new Map(); // sessionID -> epoch ms of the last message/part event seen for it
 const _pollTimers = new Map(); // sessionID -> setInterval handle, one per subagent session being watched
+// How often the silence backstop ticks. Plumbing, not a decision (that's
+// max_silence_seconds, in rate-limit-guard.js's config) — nobody has asked to
+// tune this, so it's a constant rather than a config knob (YAGNI).
+const SILENCE_POLL_INTERVAL_MS = 15_000;
 
 function extractStatusCode(error) {
   if (!error || typeof error !== "object") return undefined;
@@ -207,9 +202,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   // (packages/opencode/src/plugin/index.ts) passes it as this function's
   // second argument regardless of whether the plugin spec is a git URL or an
   // npm name — verified by reading that loader, not assumed.
-  _guardConfig = normalizeGuardConfig(
-    /** @type {any} */ (rawOptions)?.rate_limit_guard,
-  );
+  _guardConfig = normalizeGuardConfig(/** @type {any} */ (rawOptions)?.rate_limit_guard);
 
   const getInventory = async () => {
     if (_inventoryCache !== undefined) return _inventoryCache;
@@ -381,7 +374,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         reason: "silent_hang",
         silentMs: Date.now() - last,
       });
-    }, _guardConfig.poll_interval_seconds * 1000);
+    }, SILENCE_POLL_INTERVAL_MS);
     _pollTimers.set(sessionID, timer);
   };
 
@@ -486,8 +479,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     config: async (config) => {
       // Capture the orchestrator's configured model as a turn-1 fallback
       // (build's own model, else the global default).
-      _orchestratorModel =
-        config.agent?.[ORCHESTRATOR_AGENT]?.model ?? config.model ?? null;
+      _orchestratorModel = config.agent?.[ORCHESTRATOR_AGENT]?.model ?? config.model ?? null;
 
       // Register bundled skills directory (runtime field, untyped).
       if (fs.existsSync(SKILLS_DIR)) {
