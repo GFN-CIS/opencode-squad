@@ -11,7 +11,7 @@
 // generator can prune its own previous output without touching hand-authored
 // agents. Detection uses this prefix (stable across renames); the full line
 // below carries the current skill name for readability.
-export const GENERATED_MARKER_PREFIX = "generated-by: opencode-squad";
+const GENERATED_MARKER_PREFIX = "generated-by: opencode-squad";
 export const GENERATED_MARKER = `${GENERATED_MARKER_PREFIX} squad-draft`;
 // Prune detection matches files from before the opencode-orchestrate -> squad
 // rename too, so regenerating cleanly migrates older generated agents.
@@ -19,20 +19,14 @@ export const GENERATED_MARKER_DETECT = "generated-by: opencode-";
 
 // Per-role config: name prefix, description, and YAML permission lines. grunt
 // executes (edit/bash); drill reviews read-only (matches the bundled agents).
-export const ROLES = {
+const ROLES = {
   grunt: {
     description: "Per-model grunt (worker) for the sarge PDCA cycle.",
     permission: ["  edit: allow", "  bash: allow", "  task:", "    '*': deny"],
   },
   drill: {
     description: "Per-model drill (reviewer) for the sarge PDCA cycle.",
-    permission: [
-      "  edit: deny",
-      "  bash: deny",
-      "  webfetch: allow",
-      "  task:",
-      "    '*': deny",
-    ],
+    permission: ["  edit: deny", "  bash: deny", "  webfetch: allow", "  task:", "    '*': deny"],
   },
 };
 

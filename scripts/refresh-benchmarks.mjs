@@ -33,7 +33,7 @@ function transform(rawData) {
     const pr = x.pricing || {};
     models[x.slug] = {
       name: x.name,
-      creator: (x.model_creator || {}).slug ?? null,
+      creator: x.model_creator?.slug ?? null,
       release_date: x.release_date ?? null,
       // headline indices
       intelligence,
@@ -79,9 +79,7 @@ async function loadRaw(argv) {
   }
   const key = process.env.AA_API_KEY;
   if (!key) {
-    console.error(
-      "No AA_API_KEY in env and no --from <file>. Set AA_API_KEY or pass a raw dump.",
-    );
+    console.error("No AA_API_KEY in env and no --from <file>. Set AA_API_KEY or pass a raw dump.");
     process.exit(2);
   }
   const res = await fetch(ENDPOINT, { headers: { "x-api-key": key } });
@@ -106,7 +104,7 @@ async function main() {
     },
     models,
   };
-  fs.writeFileSync(OUT, JSON.stringify(snapshot, null, 1) + "\n");
+  fs.writeFileSync(OUT, `${JSON.stringify(snapshot, null, 1)}\n`);
   console.log(`Wrote ${OUT}: ${scored} scored models.`);
 }
 

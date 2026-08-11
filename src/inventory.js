@@ -23,13 +23,8 @@ export function formatInventory(agents, perf, limits) {
   return subagents
     .map((a) => {
       const desc = a.description || "(no description)";
-      const model = a.model
-        ? `${a.model.providerID}/${a.model.modelID}`
-        : "inherited";
-      const ctx =
-        limits && a.model
-          ? limits[model] ?? limits[a.model.modelID]
-          : undefined;
+      const model = a.model ? `${a.model.providerID}/${a.model.modelID}` : "inherited";
+      const ctx = limits && a.model ? (limits[model] ?? limits[a.model.modelID]) : undefined;
       const ctxStr = typeof ctx === "number" && ctx > 0 ? ` · ctx ${fmtCtx(ctx)}` : "";
       const bench = !a.model
         ? null
