@@ -94,8 +94,8 @@ Config is passed as **plugin-tuple options**, not a top-level `opencode.json` fi
     ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git", {
       "rate_limit_guard": {
         "enabled": true,
-        "retry_on_errors": [429],
-        "retryable_error_patterns": ["rate.?limit", "usage.?limit", "quota"],
+        "retry_on_errors": [429, 403],
+        "retryable_error_patterns": ["rate.?limit", "usage.?limit", "quota", "blocked by a gateway or proxy"],
         "max_wait_seconds": 3600,
         "max_cumulative_seconds": 3600,
         "max_silence_seconds": 600
