@@ -12,8 +12,13 @@ import {
 test("normalizeGuardConfig fills in defaults", () => {
   const cfg = normalizeGuardConfig();
   expect(cfg.enabled).toBe(true);
-  expect(cfg.retry_on_errors).toEqual([429]);
-  expect(cfg.retryable_error_patterns).toEqual(["rate.?limit", "usage.?limit", "quota"]);
+  expect(cfg.retry_on_errors).toEqual([429, 403]);
+  expect(cfg.retryable_error_patterns).toEqual([
+    "rate.?limit",
+    "usage.?limit",
+    "quota",
+    "blocked by a gateway or proxy",
+  ]);
   expect(cfg.max_wait_seconds).toBe(3600);
   expect(cfg.max_cumulative_seconds).toBe(3600);
 });
@@ -25,7 +30,7 @@ test("normalizeGuardConfig honors overrides, ignores malformed arrays", () => {
     retryable_error_patterns: ["overloaded"],
   });
   expect(cfg.max_wait_seconds).toBe(60);
-  expect(cfg.retry_on_errors).toEqual([429]); // fell back to default
+  expect(cfg.retry_on_errors).toEqual([429, 403]); // fell back to default
   expect(cfg.retryable_error_patterns).toEqual(["overloaded"]);
 });
 
@@ -235,7 +240,24 @@ test("isGuardedTerminalError matches a real quota-exhausted provider message", (
 test("isGuardedTerminalError matches on cached status code even if the text doesn't match", () => {
   const cfg = normalizeGuardConfig();
   expect(isGuardedTerminalError("some opaque provider error", cfg, 429)).toBe(true);
+  expect(isGuardedTerminalError("some opaque provider error", cfg, 403)).toBe(true);
   expect(isGuardedTerminalError("some opaque provider error", cfg, 500)).toBe(false);
+});
+
+// Real-world case, found live: a genuine openai gpt-5.6-terra call came back
+// gateway-blocked (not a quota/rate message at all), and produced the exact
+// same silent, growing-exponential-backoff pattern as the alibaba quota case
+// — confirming this is the same "dead account/path, switch model" problem
+// class the guard exists for, just with different wording.
+test("isGuardedTerminalError matches a real gateway/proxy-blocked provider message", () => {
+  const cfg = normalizeGuardConfig();
+  expect(
+    isGuardedTerminalError(
+      "Forbidden: request was blocked by a gateway or proxy. You may not have permission to access this resource — check your account and provider settings.",
+      cfg,
+    ),
+  ).toBe(true);
+  expect(isGuardedTerminalError("Forbidden: invalid API key", cfg)).toBe(false);
 });
 
 test("formatGuardNote: terminal_error reason explains a failure the guard never had a chance to abort", () => {

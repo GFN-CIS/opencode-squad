@@ -27,8 +27,19 @@
 
 const DEFAULT_CONFIG = {
   enabled: true,
-  retry_on_errors: [429],
-  retryable_error_patterns: ["rate.?limit", "usage.?limit", "quota"],
+  retry_on_errors: [429, 403],
+  // "blocked by a gateway or proxy" — verified live: a real openai
+  // gpt-5.6-terra call came back "Forbidden: request was blocked by a
+  // gateway or proxy. You may not have permission to access this resource —
+  // check your account and provider settings." This is not a quota/rate
+  // message, but it's the same class of "this account/network path is dead,
+  // switching model/provider fixes it" problem the guard exists for.
+  retryable_error_patterns: [
+    "rate.?limit",
+    "usage.?limit",
+    "quota",
+    "blocked by a gateway or proxy",
+  ],
   max_wait_seconds: 3600,
   max_cumulative_seconds: 3600,
   // Polling backstop (see isSilentHang below): independent of both event
