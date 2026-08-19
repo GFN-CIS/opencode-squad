@@ -8,7 +8,13 @@
 //
 // It is written ONLY by `scripts/squad-file-performance.mjs` (manual run), so
 // the user can edit it freely. Re-running refreshes the perf indices from
-// benchmarks.json but preserves `info` (and any other hand-added field).
+// benchmarks.json but preserves `info` (and any other hand-added field) —
+// including `cache_ttl_seconds`, an optional hand-added number (the
+// provider's published prompt-cache TTL in seconds) that
+// src/cache-status.js reads to tell the orchestrator whether reusing a
+// task_id is still likely to hit a warm cache. Left unset for providers
+// with no published TTL (e.g. alibaba-token-plan, zai-coding-plan as of
+// 2026-08) — reported as "unknown" rather than guessed.
 
 import fs from "node:fs";
 import path from "node:path";

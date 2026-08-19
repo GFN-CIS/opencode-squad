@@ -33,6 +33,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatBench } from "../../src/benchmarks.js";
+import { formatCacheStatus } from "../../src/cache-status.js";
 import { buildLimitMap } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { applyOrchestratorTransform } from "../../src/message-transform.js";
@@ -264,6 +265,58 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       }
     }
     return _agentsCache.get(agentName) ?? null;
+  };
+
+  // --- Cache-status hint (see src/cache-status.js) ---
+
+  // The epoch ms of the last actual provider hit for a session: the most
+  // recent assistant message's request-start time. Queried fresh each time
+  // rather than tracked in memory — this only needs to be right at the one
+  // moment a `task` call just completed, not continuously.
+  const getLastProviderHit = async (sessionID) => {
+    try {
+      const res = await client.session.messages({ path: { id: sessionID }, query: { directory } });
+      const msgs = res?.data ?? [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const created = msgs[i]?.info?.time?.created;
+        if (msgs[i]?.info?.role === "assistant" && typeof created === "number") return created;
+      }
+    } catch {
+      // Best-effort; no hint is appended if we can't tell.
+    }
+    return null;
+  };
+
+  // Appends a [CACHE STATUS] line to a completed `task` call's result, so the
+  // orchestrator has what it needs to decide whether passing this task_id
+  // back in (to reuse the subagent session) still hits a warm provider
+  // cache, or whether the cache has gone cold and a fresh session is no
+  // worse. cache_ttl_seconds is a hand-editable model_data.json field (same
+  // pattern as `info`/`billing` — see src/model-data.js); left unset for
+  // providers with no published TTL, reported honestly as "unknown" rather
+  // than guessed.
+  const handleTaskToolAfter = async (input, output) => {
+    if (input?.tool !== "task") return;
+    const meta = /** @type {any} */ (output)?.metadata;
+    const taskId = meta?.sessionId;
+    const providerID = meta?.model?.providerID;
+    const modelID = meta?.model?.modelID;
+    if (!taskId || !providerID || !modelID) return;
+
+    const lastHitMs = await getLastProviderHit(taskId);
+    if (lastHitMs === null) return;
+
+    const modelData = loadModelData();
+    const ttlSeconds = modelData?.[`${providerID}/${modelID}`]?.cache_ttl_seconds;
+
+    const note = formatCacheStatus({
+      taskId,
+      providerModelId: `${providerID}/${modelID}`,
+      lastHitMs,
+      ttlSeconds: typeof ttlSeconds === "number" ? ttlSeconds : undefined,
+      now: Date.now(),
+    });
+    output.output = `${output.output}\n\n${note}`;
   };
 
   const waitForIdle = (sessionID, timeoutMs = 20_000) =>
@@ -550,6 +603,8 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
           return handleMessageUpdatedEvent(props);
       }
     },
+
+    "tool.execute.after": handleTaskToolAfter,
 
     "experimental.chat.messages.transform": async (_input, output) => {
       await applyOrchestratorTransform(output.messages, {
