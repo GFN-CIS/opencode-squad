@@ -123,6 +123,30 @@ Verified live end-to-end against a genuinely quota-exhausted model, on two separ
 
 ---
 
+## Cache-status hint
+
+The `task` tool supports resuming a prior subagent by passing back its `task_id`, so the orchestrator can either continue an existing grunt/drill session (reusing its message history *and*, if timed right, the provider's prompt cache) or start fresh. Knowing which is worth it requires knowing how long ago that session last actually hit its provider, and whether that's still inside the provider's cache TTL — both of which vary and aren't printed anywhere by default.
+
+When a `task` call completes, this plugin appends a line to its result:
+
+```
+[CACHE STATUS] task_id=ses_abc123 — last provider hit ~45s ago (anthropic/claude-sonnet-5). published cache TTL ~5m — likely still warm. Pass task_id to continue this same session if you want to reuse it.
+```
+
+The TTL number comes from an optional hand-edited `cache_ttl_seconds` field in `model_data.json` (same file and pattern as `info`/`billing` above) — nothing is hardcoded or guessed. Published TTLs as of 2026-08: Anthropic 300s (5 min, refreshed on hit; a paid 1h option exists too), OpenAI 1800s (30 min, gpt-5.6+). Alibaba (`alibaba-token-plan`) and Z.ai (`zai-coding-plan`) don't publish one at all — leave `cache_ttl_seconds` unset for those models and the hint honestly says so instead of inventing a number:
+
+```json
+{
+  "models": {
+    "anthropic/claude-sonnet-5": { "cache_ttl_seconds": 300 },
+    "openai/gpt-5.6-terra": { "cache_ttl_seconds": 1800 },
+    "alibaba-token-plan/qwen3.7-max": {}
+  }
+}
+```
+
+---
+
 ## How it works
 
 On **every** request the orchestrator must state one explicit verdict before acting — `SELF: <reason>` or `DELEGATE: <reason>`. This is the core mechanic: it forces a conscious choice instead of silently doing the work itself (the failure mode this plugin was built to fix). The default leans toward delegating — an expensive primary model's value is decomposition and review, not routine work.
