@@ -145,6 +145,8 @@ The TTL number comes from an optional hand-edited `cache_ttl_seconds` field in `
 }
 ```
 
+Verified live: dispatched a real grunt via the `task` tool with `cache_ttl_seconds` set on its model entry and confirmed the exact `[CACHE STATUS]` line landed in the actual `task_result` the orchestrator sees (queried straight from opencode's own storage, not just logs).
+
 ---
 
 ## How it works
