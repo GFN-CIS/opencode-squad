@@ -7,12 +7,23 @@
 // passing this session's task_id back in (to reuse the cache) is still worth
 // it, or whether the cache has gone cold and a fresh session is no better.
 //
-// TTL numbers are NOT hardcoded here. They come from the hand-editable
-// `cache_ttl_seconds` field in model_data.json (same file/pattern as `info`
-// and `billing` — see src/model-data.js), because published TTLs vary by
-// provider and some (alibaba-token-plan, zai-coding-plan, as of 2026-08) don't
-// publish one at all. Absent/non-numeric -> honestly reported as "unknown",
-// never guessed.
+// TTL numbers come from the hand-editable `cache_ttl_seconds` field in
+// model_data.json (same file/pattern as `info` and `billing` — see
+// src/model-data.js), because published TTLs vary by provider and some
+// (alibaba-token-plan, zai-coding-plan, as of 2026-08) don't publish one at
+// all.
+//
+// When that field is absent, `resolveCacheTtl()` below supplies a number
+// anyway. That fallback lives here (read on every completed `task` call)
+// rather than in scripts/squad-file-performance.mjs, which is manual-only by
+// design and so would leave the field unset exactly as it was before.
+//
+// Every provider gets a TTL, because the previous behaviour — "TTL isn't
+// published, judge for yourself" — was read as "no constraint", i.e. as if the
+// cache lived forever. A conservative floor is a better prior than silence.
+// What stays honest is the LABEL: a published TTL is reported as published, an
+// assumed one says so and names the floor, so the orchestrator can tell a fact
+// from a default.
 
 function humanizeSeconds(seconds) {
   const s = Math.max(0, Math.round(seconds));
@@ -22,12 +33,85 @@ function humanizeSeconds(seconds) {
   return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
 }
 
+// Published prompt-cache TTLs, keyed by opencode providerID. Consulted only
+// when model_data.json carries no `cache_ttl_seconds` for the model.
+//
+// anthropic: 300s (5 min, refreshed on hit; a paid 1h option exists but is not
+//   what these sessions use — empirically confirmed on ses_fbd96c79: a 3m45s
+//   gap came back warm, the shortest cold gap observed was 7m36s).
+// openai: 1800s (30 min, gpt-5.6+).
+const PUBLISHED_CACHE_TTL_SECONDS = {
+  anthropic: 300,
+  openai: 1800,
+};
+
+// Assumed TTL for providers that publish nothing (alibaba-token-plan,
+// zai-coding-plan as of 2026-08). 300s is the shortest TTL anyone publishes,
+// so it errs toward "cold" — the cheap direction: a false "cold" costs one
+// re-brief, a false "warm" costs a full context re-upload.
+//
+// Deliberately NOT applied on top of the published table: a flat 300 for
+// everyone would report a genuinely warm 30-min OpenAI session as cold.
+export const ASSUMED_CACHE_TTL_SECONDS = 300;
+
+/**
+ * Resolve a prompt-cache TTL for a provider, always returning a number, with
+ * `source` marking whether it's the provider's published figure or the assumed
+ * floor. Callers surface that distinction rather than passing a bare number
+ * off as fact.
+ *
+ * @param {string} [providerID]  opencode providerID, e.g. "anthropic"
+ * @returns {{seconds:number, source:"published"|"assumed"}}
+ */
+export function resolveCacheTtl(providerID) {
+  // Own-property check: a bare `[providerID]` lookup would resolve
+  // "constructor"/"toString" to Object.prototype members.
+  const published =
+    providerID && Object.hasOwn(PUBLISHED_CACHE_TTL_SECONDS, providerID)
+      ? PUBLISHED_CACHE_TTL_SECONDS[providerID]
+      : undefined;
+  if (typeof published === "number") return { seconds: published, source: "published" };
+  return { seconds: ASSUMED_CACHE_TTL_SECONDS, source: "assumed" };
+}
+
+const k = (n) => `${Math.round(n / 1000)}k`;
+
+/**
+ * Render the size clause: how big the session being offered for reuse actually
+ * is. Reuse re-reads all of it on every single step, which is the cost the
+ * orchestrator was previously blind to — it only ever saw warm/cold.
+ *
+ * Carries `estimateContextTokens`'s caveat: the figure is the last COMPLETED
+ * turn, so immediately after a compaction it still reads high for one turn.
+ * Saying so matters most in exactly the compact-then-continue flow this
+ * number exists to enable.
+ *
+ * @param {number} [contextTokens]
+ * @param {number} [contextLimit]
+ * @returns {string}  "" when there's nothing trustworthy to report
+ */
+function formatSizeClause(contextTokens, contextLimit) {
+  if (typeof contextTokens !== "number" || contextTokens <= 0) return "";
+  const pct =
+    typeof contextLimit === "number" && contextLimit > 0
+      ? ` / ${k(contextLimit)} (${Math.round((contextTokens / contextLimit) * 100)}%)`
+      : "";
+  return (
+    ` Its context is ~${k(contextTokens)}${pct} as of its last completed turn ` +
+    `(so right after a compaction this still reads high for one turn). ` +
+    `Reusing it re-reads all of that on every step; a fresh session starts from the brief.`
+  );
+}
+
 /**
  * @param {{
  *   taskId: string,
  *   providerModelId: string,
  *   lastHitMs: number,
  *   ttlSeconds?: number,
+ *   ttlSource?: "published"|"assumed",
+ *   contextTokens?: number,
+ *   contextLimit?: number,
  *   now: number,
  * }} info
  * @returns {string}
@@ -36,15 +120,21 @@ export function formatCacheStatus(info) {
   const ageSeconds = Math.max(0, (info.now - info.lastHitMs) / 1000);
   const ageStr = humanizeSeconds(ageSeconds);
 
-  const ttlLine =
+  const ttl =
     typeof info.ttlSeconds === "number"
-      ? `published cache TTL ~${humanizeSeconds(info.ttlSeconds)} — ${
-          ageSeconds < info.ttlSeconds ? "likely still warm" : "likely cold by now"
-        }`
-      : "cache TTL for this provider isn't published — judge for yourself";
+      ? { seconds: info.ttlSeconds, source: info.ttlSource ?? "published" }
+      : resolveCacheTtl(info.providerModelId?.split("/")[0]);
+
+  const verdict = ageSeconds < ttl.seconds ? "likely still warm" : "likely cold by now";
+  const ttlLine =
+    ttl.source === "published"
+      ? `published cache TTL ~${humanizeSeconds(ttl.seconds)} — ${verdict}`
+      : `no cache TTL published for this provider, assuming a conservative ` +
+        `~${humanizeSeconds(ttl.seconds)} floor — ${verdict}`;
 
   return (
     `[CACHE STATUS] task_id=${info.taskId} — last provider hit ~${ageStr} ago (${info.providerModelId}). ` +
-    `${ttlLine}. Pass task_id to continue this same session if you want to reuse it.`
+    `${ttlLine}.${formatSizeClause(info.contextTokens, info.contextLimit)} ` +
+    `Pass task_id to continue this same session if you want to reuse it.`
   );
 }

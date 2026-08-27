@@ -125,15 +125,21 @@ Verified live end-to-end against a genuinely quota-exhausted model, on two separ
 
 ## Cache-status hint
 
-The `task` tool supports resuming a prior subagent by passing back its `task_id`, so the orchestrator can either continue an existing grunt/drill session (reusing its message history *and*, if timed right, the provider's prompt cache) or start fresh. Knowing which is worth it requires knowing how long ago that session last actually hit its provider, and whether that's still inside the provider's cache TTL — both of which vary and aren't printed anywhere by default.
+The `task` tool supports resuming a prior subagent by passing back its `task_id`, so the orchestrator can either continue an existing grunt/drill session (reusing its message history *and*, if timed right, the provider's prompt cache) or start fresh. Knowing which is worth it requires knowing how long ago that session last actually hit its provider, whether that's still inside the provider's cache TTL, and how large the session has already grown — none of which is printed anywhere by default.
 
 When a `task` call completes, this plugin appends a line to its result:
 
 ```
-[CACHE STATUS] task_id=ses_abc123 — last provider hit ~45s ago (anthropic/claude-sonnet-5). published cache TTL ~5m — likely still warm. Pass task_id to continue this same session if you want to reuse it.
+[CACHE STATUS] task_id=ses_abc123 — last provider hit ~45s ago (anthropic/claude-sonnet-5). published cache TTL ~5m — likely still warm. Its context is ~120k / 200k (60%) as of its last completed turn (so right after a compaction this still reads high for one turn). Reusing it re-reads all of that on every step; a fresh session starts from the brief. Pass task_id to continue this same session if you want to reuse it.
 ```
 
-The TTL number comes from an optional hand-edited `cache_ttl_seconds` field in `model_data.json` (same file and pattern as `info`/`billing` above) — nothing is hardcoded or guessed. Published TTLs as of 2026-08: Anthropic 300s (5 min, refreshed on hit; a paid 1h option exists too), OpenAI 1800s (30 min, gpt-5.6+). Alibaba (`alibaba-token-plan`) and Z.ai (`zai-coding-plan`) don't publish one at all — leave `cache_ttl_seconds` unset for those models and the hint honestly says so instead of inventing a number:
+The line reports two things, because warm/cold alone was not enough to decide with: the cache temperature, and **how big the session being offered for reuse has grown**. Reuse re-reads that whole context on every step — the cost the orchestrator was previously blind to. The size is the last *completed* turn's usage, so it still reads high for one turn right after a compaction; the line says so rather than misleading in exactly the compact-then-continue flow it exists to support.
+
+The TTL comes from an optional hand-edited `cache_ttl_seconds` field in `model_data.json` (same file and pattern as `info`/`billing` above). When that field is absent, `resolveCacheTtl()` (`src/cache-status.js`) resolves one anyway — it lives on the read path, not in `scripts/squad-file-performance.mjs`, because that script is manual-only by design and seeding the field there leaves it unset for anyone who never re-runs it (which is how it came to be unset for every Anthropic model in the first place).
+
+Published figures: Anthropic 300s (5 min, refreshed on hit; a paid 1h option exists too), OpenAI 1800s (30 min, gpt-5.6+). Providers that publish nothing (`alibaba-token-plan`, `zai-coding-plan`) get an assumed **300s floor** — the shortest TTL anyone publishes, so it errs toward "cold", the cheap direction: a false "cold" costs one re-brief, a false "warm" costs a full context re-upload. The earlier behaviour here was to say "TTL isn't published — judge for yourself", which read as *no constraint*, i.e. as if the cache lived forever.
+
+What stays honest is the label, not the silence: a published TTL is reported as published, an assumed one names itself as assumed and states the floor. The floor is deliberately **not** applied on top of the published table — a flat 300 for everyone would misreport a genuinely warm 30-min OpenAI session as cold. An explicit `cache_ttl_seconds` always wins over both:
 
 ```json
 {
@@ -144,6 +150,8 @@ The TTL number comes from an optional hand-edited `cache_ttl_seconds` field in `
   }
 }
 ```
+
+`qwen3.7-max` above leaves the field unset on purpose: that model gets the assumed 300s floor, reported as assumed. Set the field only when you have a real published number to override it with.
 
 Verified live: dispatched a real grunt via the `task` tool with `cache_ttl_seconds` set on its model entry and confirmed the exact `[CACHE STATUS]` line landed in the actual `task_result` the orchestrator sees (queried straight from opencode's own storage, not just logs).
 

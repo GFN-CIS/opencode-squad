@@ -33,8 +33,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatBench } from "../../src/benchmarks.js";
-import { formatCacheStatus } from "../../src/cache-status.js";
-import { buildLimitMap } from "../../src/context.js";
+import { formatCacheStatus, resolveCacheTtl } from "../../src/cache-status.js";
+import { buildLimitMap, estimateContextTokens } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { applyOrchestratorTransform } from "../../src/message-transform.js";
 import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
@@ -269,22 +269,32 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
 
   // --- Cache-status hint (see src/cache-status.js) ---
 
-  // The epoch ms of the last actual provider hit for a session: the most
-  // recent assistant message's request-start time. Queried fresh each time
-  // rather than tracked in memory — this only needs to be right at the one
-  // moment a `task` call just completed, not continuously.
-  const getLastProviderHit = async (sessionID) => {
+  // Two facts about a subagent session, from one messages fetch:
+  //   lastHitMs      — the most recent assistant message's request-start time,
+  //                    i.e. when this session last actually hit its provider.
+  //   contextTokens  — how big its context grew (last completed turn).
+  // Queried fresh rather than tracked in memory: this only needs to be right
+  // at the one moment a `task` call just completed, not continuously.
+  const getSubagentUsage = async (sessionID) => {
     try {
       const res = await client.session.messages({ path: { id: sessionID }, query: { directory } });
       const msgs = res?.data ?? [];
+      let lastHitMs = null;
       for (let i = msgs.length - 1; i >= 0; i--) {
         const created = msgs[i]?.info?.time?.created;
-        if (msgs[i]?.info?.role === "assistant" && typeof created === "number") return created;
+        if (msgs[i]?.info?.role === "assistant" && typeof created === "number") {
+          lastHitMs = created;
+          break;
+        }
       }
+      // Missing usage must not suppress the cache-status line — it degrades to
+      // the note without the size clause.
+      const ctx = estimateContextTokens(msgs);
+      return { lastHitMs, contextTokens: ctx?.used };
     } catch {
       // Best-effort; no hint is appended if we can't tell.
+      return { lastHitMs: null, contextTokens: undefined };
     }
-    return null;
   };
 
   // Appends a [CACHE STATUS] line to a completed `task` call's result, so the
@@ -303,17 +313,31 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     const modelID = meta?.model?.modelID;
     if (!taskId || !providerID || !modelID) return;
 
-    const lastHitMs = await getLastProviderHit(taskId);
+    const { lastHitMs, contextTokens } = await getSubagentUsage(taskId);
     if (lastHitMs === null) return;
 
+    // model_data.json wins when the user has filled it in; otherwise resolve
+    // from the provider. Without that fallback the hint degraded to "TTL isn't
+    // published — judge for yourself" for every anthropic model, because the
+    // hand-edited field was simply never filled in.
     const modelData = loadModelData();
-    const ttlSeconds = modelData?.[`${providerID}/${modelID}`]?.cache_ttl_seconds;
+    const configuredTtl = modelData?.[`${providerID}/${modelID}`]?.cache_ttl_seconds;
+    const ttl =
+      typeof configuredTtl === "number"
+        ? { seconds: configuredTtl, source: /** @type {const} */ ("published") }
+        : resolveCacheTtl(providerID);
+
+    const limitMap = await getLimitMap();
+    const contextLimit = limitMap?.[`${providerID}/${modelID}`] ?? limitMap?.[modelID];
 
     const note = formatCacheStatus({
       taskId,
       providerModelId: `${providerID}/${modelID}`,
       lastHitMs,
-      ttlSeconds: typeof ttlSeconds === "number" ? ttlSeconds : undefined,
+      ttlSeconds: ttl.seconds,
+      ttlSource: ttl.source,
+      contextTokens,
+      contextLimit,
       now: Date.now(),
     });
     output.output = `${output.output}\n\n${note}`;

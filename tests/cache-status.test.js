@@ -1,5 +1,9 @@
 import { expect, test } from "vitest";
-import { formatCacheStatus } from "../src/cache-status.js";
+import {
+  ASSUMED_CACHE_TTL_SECONDS,
+  formatCacheStatus,
+  resolveCacheTtl,
+} from "../src/cache-status.js";
 
 test("formatCacheStatus reports still-warm when age is under the published TTL", () => {
   const now = 1_000_000;
@@ -44,18 +48,46 @@ test("formatCacheStatus: age exactly equal to TTL reads as cold, not warm (stric
   expect(s).not.toContain("likely still warm");
 });
 
-test("formatCacheStatus is honest about an unpublished TTL instead of guessing", () => {
+test("formatCacheStatus labels an assumed TTL as assumed instead of passing it off as published", () => {
+  // The honesty guarantee in its current form. A provider that publishes no
+  // TTL still gets a number (silence read as "cache lives forever"), but the
+  // wording must let the orchestrator tell a default from a fact.
   const now = 1_000_000;
   const s = formatCacheStatus({
     taskId: "ses_xyz",
     providerModelId: "alibaba-token-plan/qwen3.7-max",
     lastHitMs: now - 30_000,
-    // ttlSeconds intentionally omitted
+    // ttlSeconds intentionally omitted -> resolved from the provider
     now,
   });
-  expect(s).toContain("isn't published — judge for yourself");
-  expect(s).not.toContain("likely still warm");
-  expect(s).not.toContain("likely cold");
+  expect(s).toContain("no cache TTL published for this provider");
+  expect(s).toContain("assuming a conservative ~5m floor");
+  expect(s).toContain("likely still warm"); // 30s < 300s
+  expect(s).not.toContain("published cache TTL");
+});
+
+test("formatCacheStatus reports a published TTL as published", () => {
+  const now = 1_000_000;
+  const s = formatCacheStatus({
+    taskId: "ses_pub",
+    providerModelId: "anthropic/claude-opus-5",
+    lastHitMs: now - 30_000,
+    now,
+  });
+  expect(s).toContain("published cache TTL ~5m");
+  expect(s).not.toContain("assuming a conservative");
+});
+
+test("formatCacheStatus applies the assumed floor to an unknown provider, not silence", () => {
+  const now = 1_000_000;
+  const s = formatCacheStatus({
+    taskId: "ses_new",
+    providerModelId: "some-new-provider/some-model",
+    lastHitMs: now - 600_000, // 10 min
+    now,
+  });
+  expect(s).toContain("likely cold by now");
+  expect(s).not.toContain("judge for yourself");
 });
 
 test("formatCacheStatus never reports a negative age (clock skew safety)", () => {
@@ -68,4 +100,72 @@ test("formatCacheStatus never reports a negative age (clock skew safety)", () =>
     now,
   });
   expect(s).toContain("last provider hit ~0s ago");
+});
+
+test("resolveCacheTtl returns published figures for providers that publish one", () => {
+  expect(resolveCacheTtl("anthropic")).toEqual({ seconds: 300, source: "published" });
+  // Not flattened to 300: a flat default would call a warm 30-min OpenAI
+  // session cold.
+  expect(resolveCacheTtl("openai")).toEqual({ seconds: 1800, source: "published" });
+});
+
+test("resolveCacheTtl falls back to the assumed floor, always with a number", () => {
+  for (const p of ["alibaba-token-plan", "zai-coding-plan", "totally-unknown", undefined, ""]) {
+    expect(resolveCacheTtl(p)).toEqual({
+      seconds: ASSUMED_CACHE_TTL_SECONDS,
+      source: "assumed",
+    });
+  }
+  expect(ASSUMED_CACHE_TTL_SECONDS).toBe(300);
+});
+
+test("resolveCacheTtl is not fooled by inherited Object.prototype keys", () => {
+  expect(resolveCacheTtl("constructor")).toEqual({ seconds: 300, source: "assumed" });
+  expect(resolveCacheTtl("toString")).toEqual({ seconds: 300, source: "assumed" });
+});
+
+test("formatCacheStatus reports session size and the per-step re-read cost", () => {
+  const now = 1_000_000;
+  const s = formatCacheStatus({
+    taskId: "ses_big",
+    providerModelId: "anthropic/claude-opus-5",
+    lastHitMs: now - 60_000,
+    contextTokens: 944_633,
+    contextLimit: 1_000_000,
+    now,
+  });
+  expect(s).toContain("~945k / 1000k (94%)");
+  expect(s).toContain("re-reads all of that on every step");
+  // The estimateContextTokens caveat must travel with the number.
+  expect(s).toContain("right after a compaction this still reads high");
+});
+
+test("formatCacheStatus reports size without a percentage when the window is unknown", () => {
+  const now = 1_000_000;
+  const s = formatCacheStatus({
+    taskId: "ses_nolimit",
+    providerModelId: "anthropic/claude-opus-5",
+    lastHitMs: now - 60_000,
+    contextTokens: 120_000,
+    now,
+  });
+  expect(s).toContain("~120k as of its last completed turn");
+  expect(s).not.toContain("%)");
+});
+
+test("formatCacheStatus omits the size clause entirely when usage is unavailable", () => {
+  const now = 1_000_000;
+  for (const contextTokens of [undefined, 0, -1]) {
+    const s = formatCacheStatus({
+      taskId: "ses_nousage",
+      providerModelId: "anthropic/claude-opus-5",
+      lastHitMs: now - 60_000,
+      contextTokens,
+      now,
+    });
+    // Degrades to the plain note rather than suppressing it.
+    expect(s).toContain("[CACHE STATUS]");
+    expect(s).toContain("published cache TTL ~5m");
+    expect(s).not.toContain("Its context is");
+  }
 });
