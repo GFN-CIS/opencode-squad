@@ -34,7 +34,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatBench } from "../../src/benchmarks.js";
 import { formatCacheStatus, resolveCacheTtl } from "../../src/cache-status.js";
-import { buildLimitMap, estimateContextTokens } from "../../src/context.js";
+import { buildLimitMap, estimateContextTokens, formatLocalDateTime } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { applyOrchestratorTransform } from "../../src/message-transform.js";
 import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
@@ -334,6 +334,14 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       taskId,
       providerModelId: `${providerID}/${modelID}`,
       lastHitMs,
+      // Absolute wall clock in the same format/zone the bootstrap stamps its
+      // own "now" with, so the orchestrator can recompute the gap at the next
+      // delegation instead of trusting a stale relative age.
+      lastHitAtText:
+        formatLocalDateTime(
+          new Date(lastHitMs),
+          Intl.DateTimeFormat().resolvedOptions().timeZone,
+        ) ?? undefined,
       ttlSeconds: ttl.seconds,
       ttlSource: ttl.source,
       contextTokens,
