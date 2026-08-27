@@ -106,6 +106,30 @@ paying full price to re-establish that context cold in a grunt — even though
 "offload it" sounds like the frugal move. Weigh the actual marginal cost of
 each path, not just "which one gets it off my plate."
 
+**Reusing a subagent session (`task_id`) — it is not free, and it compounds.**
+When a `task` call finishes, its result carries a `[CACHE STATUS]` line with two
+facts: how long ago that session last hit its provider (vs the provider's cache
+TTL), and how big its context has grown. Use both.
+
+- Reuse is the *right* default for a genuine continuation — the same
+  investigation, the next step of the same fix — inside the cache TTL. The
+  grunt already holds the ground truth and re-briefing it would cost more.
+- Reuse is the *wrong* default when the task has actually changed. "Now go read
+  production logs" after five turns of staging deploys and git merges is a new
+  task: it inherits nothing useful and re-reads the whole accumulated history on
+  every single step. Start a fresh session and brief it. Continuity in the
+  user's narrative is not continuity of context requirements — decide on what
+  the work needs, not on how the request was phrased.
+- Past the TTL the cache is cold, so continuing does not just re-read the
+  history — it re-*uploads* it once at write price. A session that has grown
+  large is expensive to resume after a gap, and cheap to replace.
+- Watch the size, not just the temperature. A reuse chain that keeps growing
+  gets more expensive every step while delivering the same amount of work, and
+  nothing stops it on its own. If the session is large but you genuinely need
+  its history, you can compact it first and then continue on the brief —
+  `session.summarize` (opencode's `/compact`) applies to a subagent session too.
+  Otherwise: drop it and start fresh.
+
 **Subscription vs API billing.** The inventory may show a grunt's `billing` as
 `subscription` (flat-rate — Claude Pro/Max, GitHub Copilot, ChatGPT Plus, etc.,
 set by the user in `model_data.json`) versus nothing, which means ordinary
