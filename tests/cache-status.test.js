@@ -169,3 +169,33 @@ test("formatCacheStatus omits the size clause entirely when usage is unavailable
     expect(s).not.toContain("Its context is");
   }
 });
+
+test("formatCacheStatus renders both the relative age and the absolute wall clock", () => {
+  const now = 1_000_000;
+  const s = formatCacheStatus({
+    taskId: "ses_when",
+    providerModelId: "anthropic/claude-opus-5",
+    lastHitMs: now - 17 * 60_000,
+    lastHitAtText: "2026-08-27 13:25:16 (Europe/Moscow)",
+    now,
+  });
+  // Relative reads at completion time; absolute stays usable a turn later,
+  // when the orchestrator recomputes the gap against its bootstrap clock.
+  expect(s).toContain("last provider hit ~17m ago (2026-08-27 13:25:16 (Europe/Moscow))");
+  expect(s).toContain("model anthropic/claude-opus-5");
+});
+
+test("formatCacheStatus degrades to relative-only when the timestamp is unavailable", () => {
+  const now = 1_000_000;
+  for (const lastHitAtText of [undefined, ""]) {
+    const s = formatCacheStatus({
+      taskId: "ses_nots",
+      providerModelId: "anthropic/claude-opus-5",
+      lastHitMs: now - 17 * 60_000,
+      lastHitAtText,
+      now,
+    });
+    expect(s).toContain("last provider hit ~17m ago, model anthropic/claude-opus-5");
+    expect(s).toContain("likely cold by now");
+  }
+});

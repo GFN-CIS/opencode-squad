@@ -108,6 +108,7 @@ function formatSizeClause(contextTokens, contextLimit) {
  *   taskId: string,
  *   providerModelId: string,
  *   lastHitMs: number,
+ *   lastHitAtText?: string,
  *   ttlSeconds?: number,
  *   ttlSource?: "published"|"assumed",
  *   contextTokens?: number,
@@ -118,7 +119,15 @@ function formatSizeClause(contextTokens, contextLimit) {
  */
 export function formatCacheStatus(info) {
   const ageSeconds = Math.max(0, (info.now - info.lastHitMs) / 1000);
-  const ageStr = humanizeSeconds(ageSeconds);
+  // Both forms on purpose: the relative age is what reads at the moment the
+  // task finishes, the absolute wall-clock is what's still usable a turn later
+  // — the orchestrator has to recompute the gap against its own bootstrap
+  // "now" when it decides whether to reuse this session, and "~17m ago" is
+  // meaningless by then. Same format/zone as the bootstrap's clock so the two
+  // are directly comparable. Degrades to relative-only if unformattable.
+  const ageStr = info.lastHitAtText
+    ? `~${humanizeSeconds(ageSeconds)} ago (${info.lastHitAtText})`
+    : `~${humanizeSeconds(ageSeconds)} ago`;
 
   const ttl =
     typeof info.ttlSeconds === "number"
@@ -133,7 +142,7 @@ export function formatCacheStatus(info) {
         `~${humanizeSeconds(ttl.seconds)} floor — ${verdict}`;
 
   return (
-    `[CACHE STATUS] task_id=${info.taskId} — last provider hit ~${ageStr} ago (${info.providerModelId}). ` +
+    `[CACHE STATUS] task_id=${info.taskId} — last provider hit ${ageStr}, model ${info.providerModelId}. ` +
     `${ttlLine}.${formatSizeClause(info.contextTokens, info.contextLimit)} ` +
     `Pass task_id to continue this same session if you want to reuse it.`
   );

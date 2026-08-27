@@ -237,3 +237,32 @@ turns out to be the wrong call mid-flight. Do not dogmatically complete the loop
 
 In your final answer to the user, briefly state the delegation outcome, e.g.
 "delegated to grunt (2 iterations), drill approved".
+
+**Before every `task` call where a prior subagent session could plausibly
+continue this work, state the reuse judgement out loud — one line, before the
+call.** Not for a first-time delegation: if there is no candidate session there
+is nothing to judge, and a vacuous "no prior session — fresh" is noise. But
+whenever there IS a session you could pass `task_id` to, the decision must be
+visible, with the numbers it rests on:
+
+```
+Reuse check — ses_fbd96c79: ~945k / 1M (94%), last hit 2026-08-27 13:25:16,
+now 2026-08-27 13:46:02 → 21m gap vs ~5m TTL, cold. Fresh session.
+```
+
+The four facts and the verdict:
+
+- **size** — from that session's `[CACHE STATUS]` line (§1b);
+- **last hit** — the absolute timestamp in the same line. That is when the
+  session last *started* a provider request, not when your task finished;
+- **now** — the current time from your bootstrap. Compute the gap yourself; the
+  `~Nm ago` in the note was relative to when that task ended and is stale by
+  the time you are deciding;
+- **verdict** — which way you went AND why, naming the numbers that decided it
+  ("cold + 94% → fresh", "warm, 60k, same investigation → reuse"). A restatement
+  of the figures with no commitment is worse than nothing: reasoning purely
+  from "it already knows the context", with no cost term, is exactly how a
+  single session absorbed nine unrelated tasks and 94% of a 1M window.
+
+If you reuse a large session deliberately because you need its history, say
+that too — including whether you compacted it first (§1b).
