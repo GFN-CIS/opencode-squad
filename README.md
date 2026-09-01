@@ -175,6 +175,57 @@ Verified live: dispatched a real grunt via the `task` tool with `cache_ttl_secon
 
 ---
 
+## Provider-quota signal (parser landed, delivery unsolved)
+
+Providers report how much of their rate-limit window is already burnt **on every successful response**, and opencode keeps none of it — so the orchestrator only learns a provider is saturated by getting a 429 from it, mid-dispatch, after paying for the work so far.
+
+Verified live on 2026-09-01, `HTTP 200` in both cases:
+
+```
+POST api.anthropic.com/v1/messages
+  anthropic-ratelimit-unified-representative-claim  five_hour   <- which window binds
+  anthropic-ratelimit-unified-5h-utilization        0.07
+  anthropic-ratelimit-unified-5h-reset              1788258600
+  anthropic-ratelimit-unified-7d-utilization        0.06
+
+POST chatgpt.com/backend-api/codex/responses
+  x-codex-primary-used-percent    51    x-codex-primary-window-minutes    300
+  x-codex-secondary-used-percent  15    x-codex-secondary-window-minutes  10080
+  x-codex-credits-has-credits     True
+```
+
+Note what is reported: **used**, not remaining (Anthropic as a fraction, codex as a percent). And `primary`/`secondary` are not fixed windows — codex re-ranks them by whichever is closest to its limit, so `src/quota.js` labels windows by `window-minutes` (300 → `5h`, 10080 → `7d`) rather than by the slot they arrive in. On the Anthropic side `representative-claim` names the binding window outright.
+
+z.ai returns nothing of the kind (`alt-svc`, `ga-traceid`, `x-log-id`, plumbing), so no snapshot is recorded for it and no claim is made about it.
+
+### Not polluting the context
+
+Once something feeds it, the clause rides on the `[CACHE STATUS]` note that already exists — no extra message, no extra turn — and stays **silent** unless the binding window crossed a reporting band (60% / 80% / 95%) or sits in the top one. A flat threshold would re-print the same figure on every task result for the rest of the session; transitions carry the same information for a fraction of the tokens, and the top band keeps repeating because there the exact number changes the decision.
+
+At the utilizations actually observed above (7% and 51%) it emits nothing at all:
+
+```
+[QUOTA] anthropic: 5h 83% (binding), 7d 6% used. The 5h window resets in 2h 25m.
+
+[QUOTA] openai: 5h 97% (binding), 7d 15% used. The 5h window resets in 2h 21m.
+Credits are exhausted on this plan. Route further work to a different provider
+unless it must run here.
+```
+
+### Delivery: two measured dead ends
+
+`src/quota.js` parses and gates; **nothing currently feeds it.** Getting response headers out of opencode has no sanctioned hook — `chat.headers` is request-side, `ProviderHook` exposes only `{id, models}` (`ModelV2` is metadata, not an executable model), and the SDK has no usage/quota endpoint. Two seams were tried and measured:
+
+1. **Wrapping `globalThis.fetch`.** Installed correctly (`patched=true`, `fetch` no longer native, host regex verified) and was then called for **zero** requests. ai-sdk only falls back to `() => globalThis.fetch` when `options.fetch` is unset, and something upstream — the OAuth plugin — already sets it. Dead, not merely ugly.
+
+2. **Injecting `provider.<id>.options.fetch` from the `config` hook.** This *is* the documented ai-sdk seam (`new AY(H, {provider, url, headers, fetch: W.fetch, ...})` in the bundle) and a function can only get there from code. But at `config` time the OAuth plugin has not yet claimed the slot, so wrapping finds it empty, takes it first, and delegates to `globalThis.fetch` — dropping the token injection. Measured: a trivial session hung past a 240s timeout with the call live, and completed in **9.8s** with it disabled.
+
+The untried third option is to intercept the *later* assignment — a `defineProperty` accessor on `options` that wraps whatever the auth plugin assigns — leaving the transport theirs and reading headers on the way past. Unimplemented and unverified; a draft of the wrapper is kept out of tree.
+
+Worth weighing before building it: plugin initialisation order in opencode is undocumented and was established here only by measurement, so each attempt rests on behaviour that can change silently. A response-header hook upstream would make all of this unnecessary.
+
+---
+
 ## How it works
 
 On **every** request the orchestrator must state one explicit verdict before acting — `SELF: <reason>` or `DELEGATE: <reason>`. This is the core mechanic: it forces a conscious choice instead of silently doing the work itself (the failure mode this plugin was built to fix). The default leans toward delegating — an expensive primary model's value is decomposition and review, not routine work.
