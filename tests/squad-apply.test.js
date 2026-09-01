@@ -2,7 +2,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { ROSTER_VERSION } from "../src/roster.js";
 import { applySquad, formatApplyReport, readSquad } from "../src/squad-apply.js";
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "..");
@@ -15,157 +14,125 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const apply = (models, allowRemove = false) =>
-  applySquad({
-    roster: { version: ROSTER_VERSION, models },
-    dir,
-    allowRemove,
-    packageRoot: PACKAGE_ROOT,
-  });
+const apply = (roster, allowRemove = false) =>
+  applySquad({ roster, dir, allowRemove, packageRoot: PACKAGE_ROOT });
+const ls = () => fs.readdirSync(dir).sort();
+const read = (f) => fs.readFileSync(path.join(dir, f), "utf8");
 
 test("readSquad treats a missing agent dir as an empty squad, not an error", () => {
-  const { roster } = readSquad(path.join(dir, "does-not-exist"));
-  expect(roster).toEqual({ version: ROSTER_VERSION, models: [] });
+  expect(readSquad(path.join(dir, "nope")).roster).toEqual({ grunts: {}, drills: {} });
 });
 
-test("applySquad writes a grunt and a drill per model, and reads back identically", () => {
-  const result = apply([{ id: "zai-coding-plan/glm-5.3", variant: "high" }, { id: "a/plain" }]);
+test("applySquad writes one file per agent and reads back losslessly", () => {
+  const roster = {
+    grunts: {
+      "zai-coding-plan/glm-5.3": {
+        variant: "high",
+        description: "cheap long-context coder",
+        notes: "prefer the write tool",
+        steps: 40,
+      },
+      "openai/gpt-5.6-luna": {},
+    },
+    drills: { "anthropic/claude-opus-5": { variant: "max" } },
+  };
+  const result = apply(roster);
   expect(result.ok).toBe(true);
-  expect(result.written).toHaveLength(4);
-  expect(fs.readdirSync(dir).sort()).toEqual([
-    "drill-a-plain.md",
-    "drill-zai-coding-plan-glm-5-3.md",
-    "grunt-a-plain.md",
+  expect(ls()).toEqual([
+    "drill-anthropic-claude-opus-5.md",
+    "grunt-openai-gpt-5-6-luna.md",
     "grunt-zai-coding-plan-glm-5-3.md",
   ]);
-  // The roster is derived from the files, so a round trip must be lossless —
-  // that is what makes read-modify-write safe to build on.
-  expect(readSquad(dir).roster).toEqual({
-    version: ROSTER_VERSION,
-    models: [{ id: "a/plain" }, { id: "zai-coding-plan/glm-5.3", variant: "high" }],
+  // The round trip is what makes read-modify-write safe to build on, so every
+  // field the roster owns has to survive it — notes included.
+  expect(readSquad(dir).roster).toEqual(roster);
+});
+
+test("one model can be a grunt at one level and a drill at another", () => {
+  apply({
+    grunts: { "a/b": { variant: "high" } },
+    drills: { "a/b": { variant: "max" } },
   });
+  expect(read("grunt-a-b.md")).toContain("variant: high");
+  expect(read("drill-a-b.md")).toContain("variant: max");
 });
 
-test("applySquad refuses a removal and writes NOTHING when allowRemove is off", () => {
-  apply([{ id: "a/one" }, { id: "a/two" }]);
-  const before = fs.readdirSync(dir).sort();
+test("a model can be a grunt with no drill at all", () => {
+  apply({ grunts: { "a/weak": {} }, drills: {} });
+  expect(ls()).toEqual(["grunt-a-weak.md"]);
+});
 
-  const result = apply([{ id: "a/three" }]);
+test("applySquad refuses a deletion and writes NOTHING", () => {
+  apply({ grunts: { "a/one": {}, "a/two": {} }, drills: { "a/one": {} } });
+  const before = ls();
+
+  const result = apply({ grunts: { "a/three": {} }, drills: {} });
   expect(result.ok).toBe(false);
-  expect(result.diff.removed).toEqual(["a/one", "a/two"]);
+  expect(result.diff.removed).toEqual(["drill a/one", "grunt a/one", "grunt a/two"]);
   expect(result.written).toEqual([]);
-  expect(result.pruned).toEqual([]);
-  // The refusal must be total: no partial write of the model that WOULD be added.
-  expect(fs.readdirSync(dir).sort()).toEqual(before);
+  // Total refusal: the agent that WOULD have been added must not appear either.
+  expect(ls()).toEqual(before);
 });
 
-test("applySquad removes only when told to, and only its own files", () => {
-  apply([{ id: "a/one" }, { id: "a/two" }]);
-  fs.writeFileSync(path.join(dir, "grunt-hand-written.md"), "---\nmodel: a/mine\n---\nMINE\n");
-
-  const result = apply([{ id: "a/one" }], true);
-  expect(result.ok).toBe(true);
-  expect(result.diff.removed).toEqual(["a/two"]);
-  expect(fs.readdirSync(dir).sort()).toEqual([
-    "drill-a-one.md",
-    "grunt-a-one.md",
-    "grunt-hand-written.md",
-  ]);
-});
-
-test("a hand-authored agent is invisible to readSquad even when it looks like ours", () => {
-  fs.writeFileSync(path.join(dir, "grunt-hand-written.md"), "---\nmodel: a/mine\n---\nMINE\n");
-  expect(readSquad(dir).roster.models).toEqual([]);
-});
-
-test("retuning a variant rewrites in place and is reported as a change, not a removal", () => {
-  apply([{ id: "a/one", variant: "low" }]);
-  const result = apply([{ id: "a/one", variant: "high" }]);
-  expect(result.ok).toBe(true);
-  expect(result.diff).toMatchObject({ removed: [], added: [], changed: ["a/one: low -> high"] });
-  expect(fs.readFileSync(path.join(dir, "grunt-a-one.md"), "utf8")).toContain("variant: high");
-});
-
-test("formatApplyReport names every model a refused apply would have removed", () => {
-  apply([{ id: "a/one" }, { id: "a/two" }]);
-  const report = formatApplyReport(apply([{ id: "a/three" }]));
-  expect(report).toContain("REFUSED");
-  expect(report).toContain("- a/one");
-  expect(report).toContain("- a/two");
-  expect(report).toContain("Nothing was written");
-  expect(report).toContain("allow_remove");
-});
-
-test("formatApplyReport echoes written variants once per model, with the typo warning", () => {
-  const report = formatApplyReport(apply([{ id: "a/one", variant: "high" }, { id: "a/two" }]));
-  expect(report).toContain("Variants written");
-  expect(report).toContain("IGNORES an unrecognized variant");
-  expect(report.match(/a\/one -> high/g)).toHaveLength(1); // not once per role file
-  expect(report).not.toContain("a/two ->");
-});
-
-test("formatApplyReport omits the variant block entirely when no variant was set", () => {
-  expect(formatApplyReport(apply([{ id: "a/one" }]))).not.toContain("Variants written");
-});
-
-test("applySquad writes only the roles an entry asks for", () => {
-  const result = apply([{ id: "a/executor", roles: ["grunt"] }, { id: "a/both" }]);
-  expect(result.ok).toBe(true);
-  expect(fs.readdirSync(dir).sort()).toEqual([
-    "drill-a-both.md",
-    "grunt-a-both.md",
-    "grunt-a-executor.md",
-  ]);
-  expect(readSquad(dir).roster.models).toEqual([
-    { id: "a/both" },
-    { id: "a/executor", roles: ["grunt"] },
-  ]);
-});
-
-// Not every model deserves a reviewer: a drill that cannot review rubber-stamps
-// or invents faults. Dropping one must be possible — and must still be gated,
-// because it deletes an agent.
-test("dropping a role is refused without allowRemove, and writes nothing", () => {
-  apply([{ id: "a/weak" }]);
-  const before = fs.readdirSync(dir).sort();
-
-  const refused = apply([{ id: "a/weak", roles: ["grunt"], variant: "high" }]);
+test("dropping just a drill is a deletion too, and is gated the same way", () => {
+  apply({ grunts: { "a/weak": {} }, drills: { "a/weak": {} } });
+  const refused = apply({ grunts: { "a/weak": { variant: "high" } }, drills: {} });
   expect(refused.ok).toBe(false);
-  expect(refused.diff.removed).toEqual([]);
-  expect(refused.diff.removedRoles).toEqual([{ id: "a/weak", role: "drill" }]);
-  expect(fs.readdirSync(dir).sort()).toEqual(before);
-  // The retune that shared the call must not land either — a refusal is total.
-  expect(fs.readFileSync(path.join(dir, "grunt-a-weak.md"), "utf8")).not.toContain("variant:");
+  expect(refused.diff.removed).toEqual(["drill a/weak"]);
+  // The retune that shared the call must not land either.
+  expect(read("grunt-a-weak.md")).not.toContain("variant:");
+
+  const allowed = apply({ grunts: { "a/weak": { variant: "high" } }, drills: {} }, true);
+  expect(allowed.ok).toBe(true);
+  expect(allowed.pruned).toEqual(["drill-a-weak.md"]);
+  expect(ls()).toEqual(["grunt-a-weak.md"]);
 });
 
-test("dropping a role with allowRemove deletes just that agent", () => {
-  apply([{ id: "a/weak" }, { id: "a/keep" }]);
-  const result = apply([{ id: "a/weak", roles: ["grunt"] }, { id: "a/keep" }], true);
-  expect(result.ok).toBe(true);
-  expect(result.pruned).toEqual(["drill-a-weak.md"]);
-  expect(fs.readdirSync(dir).sort()).toEqual([
-    "drill-a-keep.md",
-    "grunt-a-keep.md",
-    "grunt-a-weak.md",
-  ]);
+test("adding a drill to an existing grunt needs no permission", () => {
+  apply({ grunts: { "a/b": {} } });
+  expect(apply({ grunts: { "a/b": {} }, drills: { "a/b": {} } }).ok).toBe(true);
+  expect(ls()).toEqual(["drill-a-b.md", "grunt-a-b.md"]);
 });
 
-test("adding a missing role to an existing model needs no permission", () => {
-  apply([{ id: "a/half", roles: ["grunt"] }]);
-  const result = apply([{ id: "a/half" }]);
-  expect(result.ok).toBe(true);
-  expect(fs.existsSync(path.join(dir, "drill-a-half.md"))).toBe(true);
+test("a hand-authored agent is invisible: never dumped, never pruned", () => {
+  fs.writeFileSync(path.join(dir, "grunt-mine.md"), "---\nmodel: a/mine\n---\nMINE\n");
+  expect(readSquad(dir).roster.grunts).toEqual({});
+  apply({ grunts: { "a/b": {} } }, true);
+  expect(ls()).toContain("grunt-mine.md");
 });
 
-test("formatApplyReport separates models leaving from roles dropped", () => {
-  apply([{ id: "a/gone" }, { id: "a/narrow" }]);
-  const refused = apply([{ id: "a/narrow", roles: ["grunt"] }]);
-  // a/gone is two files, a/narrow loses one — three agents, not "two entries".
-  expect(refused.wouldDelete).toBe(3);
-  const report = formatApplyReport(refused);
-  expect(report).toContain("would DELETE 3 agent file(s)");
-  expect(report).toContain("models leaving the squad (1):");
-  expect(report).toContain("  - a/gone");
-  expect(report).toContain("roles dropped from models that stay (1):");
-  expect(report).toContain("  - drill for a/narrow");
+test("a legacy worker- file round-trips as a grunt instead of vanishing", () => {
+  const legacy = read.bind(null);
+  apply({ grunts: { "a/b": {} } });
+  fs.renameSync(path.join(dir, "grunt-a-b.md"), path.join(dir, "worker-a-b.md"));
+  expect(readSquad(dir).roster.grunts).toEqual({ "a/b": {} });
+  expect(typeof legacy).toBe("function");
+});
+
+test("disable is written as frontmatter and survives the round trip", () => {
+  apply({ grunts: { "a/b": { disable: true } } });
+  expect(read("grunt-a-b.md")).toContain("disable: true");
+  expect(readSquad(dir).roster.grunts["a/b"]).toEqual({ disable: true });
+});
+
+test("formatApplyReport names every agent a refused apply would have deleted", () => {
+  apply({ grunts: { "a/one": {} }, drills: { "a/one": {} } });
+  const report = formatApplyReport(apply({ grunts: { "a/two": {} } }));
+  expect(report).toContain("would DELETE 2 agent(s)");
+  expect(report).toContain("- drill a/one");
+  expect(report).toContain("- grunt a/one");
+  expect(report).toContain("Nothing was written");
+});
+
+test("formatApplyReport echoes variants per agent, with the typo warning", () => {
+  const report = formatApplyReport(
+    apply({ grunts: { "a/b": { variant: "high" } }, drills: { "a/b": { variant: "max" } } }),
+  );
+  expect(report).toContain("IGNORES an unrecognized variant");
+  expect(report).toContain("grunt a/b -> high");
+  expect(report).toContain("drill a/b -> max");
+});
+
+test("formatApplyReport omits the variant block when nothing set one", () => {
+  expect(formatApplyReport(apply({ grunts: { "a/b": {} } }))).not.toContain("Variants written");
 });

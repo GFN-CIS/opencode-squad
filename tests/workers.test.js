@@ -1,5 +1,11 @@
 import { expect, test } from "vitest";
-import { agentMarkdown, GENERATED_MARKER, slugForModel } from "../src/workers.js";
+import { NOTES_CLOSE, NOTES_OPEN } from "../src/roster.js";
+import {
+  agentMarkdown,
+  defaultDescriptions,
+  GENERATED_MARKER,
+  slugForModel,
+} from "../src/workers.js";
 
 test("slug collapses provider/model and punctuation, prefixed by role", () => {
   expect(slugForModel("openai/gpt-5.5")).toBe("grunt-openai-gpt-5-5"); // default role
@@ -72,4 +78,42 @@ test("the variant does not leak into the slug — one agent per model, not per v
   const b = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", "B");
   expect(a.slug).toBe(b.slug);
   expect(a.filename).toBe(b.filename);
+});
+
+test("agentMarkdown writes the per-agent overrides, and only those that were given", () => {
+  const { content } = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", "ROLE PROMPT", {
+    variant: "high",
+    description: "cheap long-context coder",
+    notes: "prefer the write tool over bash heredocs",
+    steps: 40,
+    disable: true,
+  });
+  expect(content).toContain("description: cheap long-context coder");
+  expect(content).toContain("variant: high");
+  expect(content).toContain("steps: 40");
+  expect(content).toContain("disable: true");
+  expect(content).toContain(NOTES_OPEN);
+  expect(content).toContain("prefer the write tool over bash heredocs");
+  expect(content).toContain(NOTES_CLOSE);
+
+  const bare = agentMarkdown("grunt", "a/b", "ROLE PROMPT").content;
+  expect(bare).not.toContain("variant:");
+  expect(bare).not.toContain("steps:");
+  expect(bare).not.toContain("disable:");
+  expect(bare).not.toContain(NOTES_OPEN);
+  // Falls back to the role's generic description rather than writing nothing.
+  expect(bare).toContain(`description: ${defaultDescriptions().grunt}`);
+});
+
+test("notes are fenced so the body stays separable from the role prompt", () => {
+  const { content } = agentMarkdown("drill", "a/b", "ROLE PROMPT", { notes: "extra" });
+  const body = content.slice(content.lastIndexOf("---\n") + 4);
+  expect(body.indexOf("ROLE PROMPT")).toBeLessThan(body.indexOf(NOTES_OPEN));
+  expect(body.indexOf(NOTES_OPEN)).toBeLessThan(body.indexOf(NOTES_CLOSE));
+});
+
+test("a blank override is ignored rather than written as an empty key", () => {
+  const { content } = agentMarkdown("grunt", "a/b", "B", { variant: "  ", notes: "  " });
+  expect(content).not.toContain("variant:");
+  expect(content).not.toContain(NOTES_OPEN);
 });

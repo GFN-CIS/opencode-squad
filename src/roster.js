@@ -7,125 +7,140 @@
 // followed exactly and the squad was still wiped, because composing the right
 // invocation was the caller's job and getting it wrong was silent and total.
 //
-// So the interaction became read-modify-write: export the roster as JSON, edit
-// the field you mean, apply it back. Editing a structure is a far more reliable
-// operation than assembling flags.
+// So the interaction became read-modify-write: dump the roster, edit the entry
+// you mean, apply it back. Editing a structure is a far more reliable operation
+// than assembling flags.
 //
 // Two properties make that safe, and neither is optional:
 //
-//   1. The roster is DERIVED from the agent files on every export, never stored
+//   1. The roster is DERIVED from the agent files on every dump, never stored
 //      alongside them. A stored manifest would be a second source of truth, and
 //      it would desync the first time anyone touched the agent dir by hand.
 //
-//   2. Apply refuses to remove. Read-modify-write only protects while the
+//   2. Apply refuses to delete. Read-modify-write only protects while the
 //      caller actually modifies; one that regenerates the roster from memory
 //      reintroduces the wipe in a new wrapper. The guard, not the format, is
-//      what makes destruction require intent — so removals need an explicit
-//      opt-in and are reported by name before they happen.
+//      what makes destruction require intent.
+//
+// SHAPE. One map per role, keyed by model id, mirroring the files on disk:
+//
+//   { "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high" } },
+//     "drills": { "anthropic/claude-opus-5": { "variant": "max" } } }
+//
+// This replaced a flat model list carrying a `roles` array, for two reasons
+// worth keeping written down. First, one entry per MODEL forced one `variant`
+// per model, so "grunt at high, drill at max" was inexpressible — and a drill,
+// whose job is the harder cognitive one, is exactly where you would want to
+// spend more reasoning. Second, `roles: ["grunt"]` needed the rule "omitting it
+// means both", which had to be explained in three places; here an agent either
+// appears in a role map or it does not, and there is no rule to misread.
 
-/** Current roster schema version. Bumped only on a breaking shape change. */
-export const ROSTER_VERSION = 1;
-
-/** The two roles a model can be materialized as, in file order. */
-export const ALL_ROLES = ["grunt", "drill"];
+/** Roster key -> opencode agent role. `grunts` reads better than `grunt`. */
+export const ROLE_KEYS = /** @type {const} */ ({ grunts: "grunt", drills: "drill" });
 
 /**
- * Which roles an entry asks for, defaulting to both.
+ * Per-agent fields the roster owns.
  *
- * Both is the safe default because it is what OMITTING the field means, and
- * omission must never delete anything — narrowing an entry to one role is an
- * edit you have to actually type.
- *
- * @param {unknown} roles
- * @returns {string[]}
+ * Deliberately NOT exposed, though opencode's agent schema has them:
+ * `permission` (the read-only contract of a drill is a safety property, not a
+ * preference), `mode`/`hidden`/`color` (ours), and `temperature`/`top_p`/
+ * `options` — nobody has needed those, and `options` in particular can override
+ * the variant silently, which is the opposite of what this roster is for.
  */
-export function rolesOf(roles) {
-  if (!Array.isArray(roles) || roles.length === 0) return [...ALL_ROLES];
-  return ALL_ROLES.filter((r) => roles.includes(r));
-}
+const AGENT_KEYS = new Set(["variant", "description", "notes", "steps", "disable"]);
 
 /**
- * Pull the model id and reasoning variant out of a generated agent file's YAML
- * frontmatter. Deliberately a narrow line-scan rather than a YAML parse: these
- * files are written by `agentMarkdown()`, so the shape is known, and a real
- * parser would be a dependency bought for nothing.
+ * Fences the roster-supplied `notes` inside the generated prompt body so a dump
+ * can read them back. Without a marker the extra instructions would be
+ * indistinguishable from the bundled role prompt, and the round trip — which is
+ * what makes read-modify-write trustworthy — would quietly lose them.
+ */
+export const NOTES_OPEN = "<!-- squad:notes -->";
+export const NOTES_CLOSE = "<!-- /squad:notes -->";
+
+/**
+ * Read one generated agent file back into a roster entry.
+ *
+ * A narrow line-scan of the frontmatter rather than a YAML parse: these files
+ * are written by `agentMarkdown()`, so the shape is known, and a parser would
+ * be a dependency bought for nothing.
  *
  * @param {string} text  contents of a `grunt-*.md` / `drill-*.md`
- * @returns {{modelId?: string, variant?: string}}
+ * @returns {{modelId?: string, entry: Record<string, any>}}
  */
-export function parseAgentFrontmatter(text) {
-  const out = /** @type {{modelId?: string, variant?: string}} */ ({});
-  const lines = String(text).split("\n");
-  if (lines[0]?.trim() !== "---") return out;
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trim() === "---") break;
-    const model = line.match(/^model:\s*(\S.*?)\s*$/);
-    if (model) out.modelId = model[1];
-    const variant = line.match(/^variant:\s*(\S.*?)\s*$/);
-    if (variant) out.variant = variant[1];
+export function parseAgentFile(text) {
+  const src = String(text);
+  /** @type {Record<string, any>} */
+  const entry = {};
+  let modelId;
+  const lines = src.split("\n");
+  if (lines[0]?.trim() === "---") {
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim() === "---") break;
+      const m = line.match(/^([a-z_]+):\s*(\S.*?)\s*$/);
+      if (!m) continue;
+      const [, key, value] = m;
+      if (key === "model") modelId = value;
+      else if (key === "variant") entry.variant = value;
+      else if (key === "description") entry.description = value;
+      else if (key === "steps") entry.steps = Number(value);
+      else if (key === "disable" && value === "true") entry.disable = true;
+    }
   }
-  return out;
+  const open = src.indexOf(NOTES_OPEN);
+  const close = src.indexOf(NOTES_CLOSE);
+  if (open !== -1 && close > open) {
+    const notes = src.slice(open + NOTES_OPEN.length, close).trim();
+    if (notes) entry.notes = notes;
+  }
+  return { modelId, entry };
 }
 
 /**
- * Fold the per-role agent entries into one roster. A model normally has two
- * files (a grunt and a drill), and they are one entry.
+ * Fold per-file entries into the roster tree.
  *
- * `roles` is emitted only when it is NOT the default pair — a model that exists
- * as a grunt alone comes back as `roles: ["grunt"]`, which is also how you ask
- * for that. Not every model deserves a drill: a reviewer that cannot actually
- * review rubber-stamps the work or invents faults, and both are worse than no
- * review, so grunt-only is a legitimate and common shape.
+ * `description` is dropped when it matches the role's default, so a dump shows
+ * only what someone actually chose. That matters more than it sounds: the
+ * description is what the orchestrator reads in its subagent inventory when it
+ * picks who to dispatch, and today every grunt carries the same generic
+ * sentence — ten copies of a line that says nothing about which model to pick.
+ * Keeping defaults out of the dump is what makes a real one visible.
  *
- * A model whose files disagree on the variant is reported rather than silently
- * resolved — that only happens when something wrote them out of band, and
- * quietly picking a side would hide it.
- *
- * @param {Array<{modelId: string, role?: string, variant?: string}>} entries
- * @returns {{roster: {version: number, models: Array<{id: string, variant?: string, roles?: string[]}>}, conflicts: string[]}}
+ * @param {Array<{role: string, modelId?: string, entry: Record<string, any>}>} files
+ * @param {Record<string, string>} [defaultDescriptions]  role -> default description
+ * @returns {{roster: Record<string, Record<string, any>>, conflicts: string[]}}
  */
-export function buildRoster(entries) {
-  /** @type {Map<string, {variant?: string, roles: Set<string>}>} */
-  const byId = new Map();
+export function buildRoster(files, defaultDescriptions = {}) {
+  /** @type {Record<string, Record<string, any>>} */
+  const roster = { grunts: {}, drills: {} };
   const conflicts = [];
-  for (const entry of entries) {
-    if (!entry?.modelId) continue;
-    const existing = byId.get(entry.modelId);
-    if (!existing) {
-      byId.set(entry.modelId, {
-        variant: entry.variant,
-        roles: new Set(entry.role ? [entry.role] : ALL_ROLES),
-      });
+  for (const f of files) {
+    if (!f?.modelId) continue;
+    const key = f.role === "drill" ? "drills" : "grunts";
+    if (roster[key][f.modelId]) {
+      conflicts.push(`${f.role} ${f.modelId}: more than one file claims it; keeping the first`);
       continue;
     }
-    if (entry.role) existing.roles.add(entry.role);
-    if ((existing.variant ?? "") !== (entry.variant ?? "")) {
-      conflicts.push(
-        `${entry.modelId}: its agents disagree on variant (${existing.variant ?? "none"} vs ${entry.variant ?? "none"}); keeping ${existing.variant ?? "none"}`,
-      );
+    const entry = { ...f.entry };
+    if (entry.description && entry.description === defaultDescriptions[f.role]) {
+      delete entry.description;
     }
+    roster[key][f.modelId] = entry;
   }
-  const models = [...byId.entries()]
-    .map(([id, v]) => {
-      const roles = ALL_ROLES.filter((r) => v.roles.has(r));
-      /** @type {{id: string, variant?: string, roles?: string[]}} */
-      const out = { id };
-      if (v.variant) out.variant = v.variant;
-      if (roles.length !== ALL_ROLES.length) out.roles = roles;
-      return out;
-    })
-    .sort((a, b) => a.id.localeCompare(b.id));
-  return { roster: { version: ROSTER_VERSION, models }, conflicts };
+  for (const key of Object.keys(roster)) {
+    roster[key] = Object.fromEntries(
+      Object.entries(roster[key]).sort(([a], [b]) => a.localeCompare(b)),
+    );
+  }
+  return { roster, conflicts };
 }
 
 /**
- * Validate an edited roster document. Hand-rolled rather than schema-driven:
- * the shape is four fields deep, and a validator dependency in a scaffolder
- * earns less than it costs.
- *
- * Returns every problem at once — a caller fixing a hand-edited file should not
- * have to discover the mistakes one run at a time.
+ * Validate an edited roster. Hand-rolled rather than schema-driven: the shape
+ * is shallow, and a validator dependency in a scaffolder earns less than it
+ * costs. Reports every problem at once — someone fixing an edited document
+ * should not discover the mistakes one run at a time.
  *
  * @param {unknown} doc
  * @returns {string[]}  empty when valid
@@ -136,115 +151,101 @@ export function validateRoster(doc) {
     return ["roster must be a JSON object"];
   }
   const obj = /** @type {Record<string, unknown>} */ (doc);
-  if (obj.version !== ROSTER_VERSION) {
-    errors.push(`version must be ${ROSTER_VERSION} (got ${JSON.stringify(obj.version)})`);
-  }
   for (const key of Object.keys(obj)) {
-    if (key !== "version" && key !== "models") errors.push(`unknown top-level key "${key}"`);
+    if (!(key in ROLE_KEYS)) {
+      errors.push(`unknown top-level key "${key}" (expected ${Object.keys(ROLE_KEYS).join(", ")})`);
+    }
   }
-  if (!Array.isArray(obj.models)) {
-    errors.push("models must be an array");
-    return errors;
-  }
-  const seen = new Set();
-  obj.models.forEach((raw, i) => {
-    const at = `models[${i}]`;
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-      errors.push(`${at} must be an object`);
-      return;
+  for (const key of Object.keys(ROLE_KEYS)) {
+    const map = obj[key];
+    if (map === undefined) continue;
+    if (typeof map !== "object" || map === null || Array.isArray(map)) {
+      errors.push(`${key} must be an object keyed by model id`);
+      continue;
     }
-    const entry = /** @type {Record<string, unknown>} */ (raw);
-    for (const key of Object.keys(entry)) {
-      if (key !== "id" && key !== "variant" && key !== "roles") {
-        errors.push(`${at} has unknown key "${key}"`);
+    for (const [modelId, raw] of Object.entries(map)) {
+      const at = `${key}["${modelId}"]`;
+      if (!/^[^/]+\/.+$/.test(modelId)) {
+        errors.push(`${at}: "${modelId}" is not a provider/model id`);
       }
-    }
-    if (typeof entry.id !== "string" || !entry.id.trim()) {
-      errors.push(`${at}.id must be a non-empty string`);
-    } else {
-      if (!/^[^/]+\/.+$/.test(entry.id.trim())) {
-        errors.push(`${at}.id "${entry.id}" is not a provider/model id`);
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        errors.push(`${at} must be an object (use {} for no overrides)`);
+        continue;
       }
-      if (seen.has(entry.id.trim())) errors.push(`${at}.id "${entry.id}" is listed twice`);
-      seen.add(entry.id.trim());
-    }
-    if (
-      entry.variant !== undefined &&
-      (typeof entry.variant !== "string" || !entry.variant.trim())
-    ) {
-      errors.push(`${at}.variant must be a non-empty string when present`);
-    }
-    if (entry.roles !== undefined) {
-      if (!Array.isArray(entry.roles) || entry.roles.length === 0) {
-        errors.push(`${at}.roles must be a non-empty array when present`);
-      } else {
-        for (const r of entry.roles) {
-          if (!ALL_ROLES.includes(r)) {
-            errors.push(`${at}.roles has unknown role ${JSON.stringify(r)}`);
-          }
+      const entry = /** @type {Record<string, unknown>} */ (raw);
+      for (const k of Object.keys(entry)) {
+        if (!AGENT_KEYS.has(k)) errors.push(`${at} has unknown key "${k}"`);
+      }
+      for (const k of ["variant", "description", "notes"]) {
+        if (entry[k] !== undefined && (typeof entry[k] !== "string" || !String(entry[k]).trim())) {
+          errors.push(`${at}.${k} must be a non-empty string when present`);
         }
       }
+      if (entry.steps !== undefined && (!Number.isInteger(entry.steps) || entry.steps <= 0)) {
+        errors.push(`${at}.steps must be a positive integer when present`);
+      }
+      if (entry.disable !== undefined && typeof entry.disable !== "boolean") {
+        errors.push(`${at}.disable must be a boolean when present`);
+      }
     }
-  });
+  }
   return errors;
 }
 
+/** Flatten a roster tree to `"<role> <modelId>" -> entry`, for diffing. */
+function flatten(roster) {
+  const out = new Map();
+  for (const [key, role] of Object.entries(ROLE_KEYS)) {
+    for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
+      out.set(`${role} ${modelId}`, entry ?? {});
+    }
+  }
+  return out;
+}
+
 /**
- * Compare the roster on disk with the one being applied.
+ * Compare the roster on disk with the one being applied. The unit is the AGENT,
+ * which is also the unit on disk — so `removed` is exactly the set of files that
+ * would be deleted, and the guard has one thing to count.
  *
- * `changed` covers both a retuned variant and a narrowed or widened role set on
- * a model that stays. Narrowing DOES delete an agent file, so it is reported
- * here in words and still gated by the caller's removal guard — the invariant
- * worth keeping simple is "no generated agent disappears without an explicit
- * opt-in", not "only whole models are protected".
- *
- * @param {{models: Array<{id: string, variant?: string, roles?: string[]}>}} current
- * @param {{models: Array<{id: string, variant?: string, roles?: string[]}>}} next
- * @returns {{added: string[], removed: string[], changed: string[], unchanged: string[], removedRoles: Array<{id: string, role: string}>}}
+ * @param {Record<string, Record<string, any>>} current
+ * @param {Record<string, Record<string, any>>} next
+ * @returns {{added: string[], removed: string[], changed: string[], unchanged: string[]}}
  */
 export function diffRoster(current, next) {
-  const key = (m) => ({ variant: m.variant ?? "", roles: rolesOf(m.roles) });
-  const cur = new Map((current?.models ?? []).map((m) => [m.id, key(m)]));
-  const nxt = new Map((next?.models ?? []).map((m) => [m.id, key(m)]));
+  const cur = flatten(current);
+  const nxt = flatten(next);
   const added = [];
   const removed = [];
   const changed = [];
   const unchanged = [];
-  const removedRoles = [];
 
-  const label = (id, k) =>
-    `${id}${k.variant ? `@${k.variant}` : ""}` +
-    (k.roles.length !== ALL_ROLES.length ? ` (${k.roles.join("+")} only)` : "");
-
-  for (const [id, k] of nxt) {
-    const before = cur.get(id);
+  for (const [k, entry] of nxt) {
+    const before = cur.get(k);
     if (!before) {
-      added.push(label(id, k));
+      added.push(k);
       continue;
     }
-    const notes = [];
-    if (before.variant !== k.variant) {
-      notes.push(`${before.variant || "no variant"} -> ${k.variant || "no variant"}`);
+    const fields = [...AGENT_KEYS].filter(
+      (f) => JSON.stringify(before[f] ?? null) !== JSON.stringify(entry[f] ?? null),
+    );
+    if (fields.length === 0) {
+      unchanged.push(k);
+      continue;
     }
-    const dropped = before.roles.filter((r) => !k.roles.includes(r));
-    const gained = k.roles.filter((r) => !before.roles.includes(r));
-    for (const role of dropped) removedRoles.push({ id, role });
-    if (dropped.length || gained.length) {
-      notes.push(
-        `roles ${before.roles.join("+")} -> ${k.roles.join("+")}` +
-          (dropped.length ? ` (drops ${dropped.join(", ")})` : ""),
-      );
-    }
-    if (notes.length === 0) unchanged.push(id);
-    else changed.push(`${id}: ${notes.join("; ")}`);
+    const detail = fields
+      .map(
+        (f) => `${f} ${JSON.stringify(before[f] ?? null)} -> ${JSON.stringify(entry[f] ?? null)}`,
+      )
+      .join("; ");
+    changed.push(`${k}: ${detail}`);
   }
-  for (const id of cur.keys()) if (!nxt.has(id)) removed.push(id);
+  for (const k of cur.keys()) if (!nxt.has(k)) removed.push(k);
 
   return {
     added: added.sort(),
     removed: removed.sort(),
     changed: changed.sort(),
     unchanged: unchanged.sort(),
-    removedRoles: removedRoles.sort((a, b) => `${a.id}${a.role}`.localeCompare(`${b.id}${b.role}`)),
   };
 }

@@ -47,7 +47,7 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
-import { ROSTER_VERSION, validateRoster } from "../../src/roster.js";
+import { validateRoster } from "../../src/roster.js";
 import {
   applySquad,
   defaultAgentDir,
@@ -314,6 +314,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       // Missing usage must not suppress the cache-status line — it degrades to
       // the note without the size clause.
       const ctx = estimateContextTokens(msgs);
+
       return { lastHitMs, contextTokens: ctx?.used, finish, outputTokens, reasoningTokens };
     } catch {
       // Best-effort for the cache hint. `usageUnknown` matters more: without it
@@ -608,6 +609,52 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     await handleTerminalError(msgInfo.sessionID, msgInfo.error);
   };
 
+  // One agent's settings, shared by both role maps. Every field is optional:
+  // `{}` is a perfectly good entry meaning "this model, role defaults".
+  const agentEntry = tool.schema.object({
+    variant: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Reasoning level. Must be one of THIS model's own `reasoning_options` values in " +
+          "models.dev (glm-5.3: low|high|max; claude-opus-5: low|medium|high|xhigh|max) — " +
+          "opencode silently ignores an unrecognized one, so a typo buys silence rather than " +
+          "an error. Omit for models that publish no reasoning options. Setting it does not " +
+          "suppress reasoning: it bounds a reasoner otherwise limited only by the output " +
+          "cap. Per AGENT, so a drill may think harder than the grunt on the same model.",
+      ),
+    description: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "What this agent is for, in one line. The orchestrator reads exactly this in its " +
+          "subagent inventory when choosing who to dispatch, so make it say WHEN to pick " +
+          "this model — 'cheap, mechanical edits', 'strong analysis, slow'. Omit to keep the " +
+          "generic role default, which carries no routing signal at all.",
+      ),
+    notes: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Extra instructions appended to this agent's prompt only — per-model quirks and " +
+          "workarounds. Round-trips through squad_dump.",
+      ),
+    steps: tool.schema
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Max agentic iterations before opencode forces a text-only response."),
+    disable: tool.schema
+      .boolean()
+      .optional()
+      .describe(
+        "Park this agent without deleting it: it stops being dispatchable but its settings " +
+          "survive. Prefer this over deleting an agent you may want back.",
+      ),
+  });
+  const agentMap = tool.schema.record(tool.schema.string(), agentEntry);
+
   return {
     config: async (config) => {
       // Capture the orchestrator's configured model as a turn-1 fallback
@@ -665,9 +712,10 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     tool: {
       squad_dump: tool({
         description:
-          "Read the current squad roster: every model that has generated grunt/drill agents, " +
-          "with its reasoning variant. ALWAYS call this before squad_patch — the roster is a " +
-          "document you edit, not a list you retype. Returns JSON.",
+          "Read the current squad roster: every generated agent, grouped as `grunts` and " +
+          "`drills` and keyed by model id, with its per-agent settings. ALWAYS call this " +
+          "before squad_patch — the roster is a document you edit, not one you retype. " +
+          "Returns JSON.",
         args: {
           directory: tool.schema
             .string()
@@ -680,65 +728,48 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         async execute(args) {
           const dir = args.directory || defaultAgentDir();
           const { roster, conflicts } = readSquad(dir);
+          const count =
+            Object.keys(roster.grunts ?? {}).length + Object.keys(roster.drills ?? {}).length;
           const note = conflicts.length
             ? `\n\nnotes:\n${conflicts.map((c) => `  ${c}`).join("\n")}`
             : "";
           return {
-            title: `squad: ${roster.models.length} model(s)`,
+            title: `squad: ${count} agent(s)`,
             output:
               `Agent dir: ${dir}\n${JSON.stringify(roster, null, 2)}${note}\n\n` +
-              "To change the squad, pass this same list back to squad_patch with your edits " +
-              "applied — keeping every entry you were not asked to touch.",
-            metadata: { dir, models: roster.models.length },
+              "To change the squad, pass this same document back to squad_patch with your " +
+              "edits applied — keeping every agent you were not asked to touch.",
+            metadata: { dir, agents: count },
           };
         },
       }),
 
       squad_patch: tool({
         description:
-          "Write a squad roster: generate a grunt and a drill agent for every model listed, " +
-          "and remove agents for models that are absent. Per-model `roles` controls which of " +
-          "the two are written. The list is the COMPLETE intended squad, not a delta — so " +
-          "start from squad_dump and edit it. Deleting an agent the user did not ask you to " +
-          "delete is refused, not performed.",
+          "Write the squad roster: one agent per entry under `grunts` / `drills`, keyed by " +
+          "model id. This is the COMPLETE intended squad, not a delta — an agent absent from " +
+          "it is DELETED, so start from squad_dump and edit that. Deleting an agent the user " +
+          "did not ask you to delete is refused, not performed.",
         args: {
-          models: tool.schema
-            .array(
-              tool.schema.object({
-                id: tool.schema
-                  .string()
-                  .describe('opencode model id, e.g. "zai-coding-plan/glm-5.3".'),
-                roles: tool.schema
-                  .array(tool.schema.enum(["grunt", "drill"]))
-                  .optional()
-                  .describe(
-                    "Which agents to materialize for this model. Omit for both. Pass " +
-                      '["grunt"] for a model that should execute but never REVIEW — a drill ' +
-                      "on a weak model rubber-stamps the work or invents faults, and both are " +
-                      "worse than no review. Narrowing this DELETES the other agent, so it " +
-                      "needs allow_remove; omitting the field never deletes anything.",
-                  ),
-                variant: tool.schema
-                  .string()
-                  .optional()
-                  .describe(
-                    "Reasoning level. Must be one of THIS model's own `reasoning_options` " +
-                      "values in models.dev (glm-5.3: low|high|max; claude-opus-5: " +
-                      "low|medium|high|xhigh|max) — opencode silently ignores an unrecognized " +
-                      "one, so a typo buys silence rather than an error. Omit for models that " +
-                      "publish no reasoning options. Setting it does not suppress reasoning: " +
-                      "it bounds a reasoner that is otherwise limited only by the output cap.",
-                  ),
-              }),
-            )
-            .describe("The complete intended squad, one entry per model."),
+          grunts: agentMap
+            .optional()
+            .describe("Executors, keyed by model id. `{}` is a valid entry: role defaults."),
+          drills: agentMap
+            .optional()
+            .describe(
+              "Reviewers, keyed by model id. A drill's verdict is what the orchestrator acts " +
+                "on, so give one only to a model that can actually review — a weak reviewer " +
+                "rubber-stamps the work or invents faults, and both are worse than no review " +
+                "because they launder a bad change as an approved one. Cheap and small " +
+                "models belong in `grunts` alone.",
+            ),
           allow_remove: tool.schema
             .boolean()
             .optional()
             .describe(
-              "Permit deleting generated agents: models present in the current squad but " +
-                "absent here, and roles narrowed on models that stay. Pass true ONLY when the " +
-                "user asked for that removal — never to get past the refusal.",
+              "Permit deleting agents present in the current squad but absent from this " +
+                "roster. Pass true ONLY when the user asked for that deletion — never to " +
+                "get past the refusal.",
             ),
           directory: tool.schema
             .string()
@@ -747,18 +778,19 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         },
         async execute(args, ctx) {
           // A grunt or drill rewriting the squad mid-task is never intended, and
-          // the damage outlives the session. Same reasoning as the removal
+          // the damage outlives the session. Same reasoning as the deletion
           // guard: make the destructive path require the right caller.
           if (/^(?:grunt|drill)-/.test(ctx?.agent ?? "")) {
             return {
               title: "squad_patch refused",
               output:
-                `Refused: ${ctx.agent} is a subagent, and the squad roster is the orchestrator's ` +
-                "to change. Report what you think should change and let sarge decide.",
+                `Refused: ${ctx.agent} is a subagent, and the squad roster is the ` +
+                "orchestrator's to change. Report what you think should change and let " +
+                "sarge decide.",
             };
           }
           const dir = args.directory || defaultAgentDir();
-          const roster = { version: ROSTER_VERSION, models: args.models ?? [] };
+          const roster = { grunts: args.grunts ?? {}, drills: args.drills ?? {} };
           const errors = validateRoster(roster);
           if (errors.length) {
             return {
