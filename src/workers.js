@@ -49,27 +49,6 @@ export function slugForModel(modelId, role = "grunt") {
 }
 
 /**
- * Split a roster entry into its model id and optional reasoning variant.
- * `"zai-coding-plan/glm-5.3@high"` -> `{ modelId: "zai-coding-plan/glm-5.3",
- * variant: "high" }`.
- *
- * `@` rather than `:` as the separator: opencode model ids legitimately contain
- * colons (`claude-opus-4-thinking:32000`), so a colon cannot be split on
- * unambiguously. `@` appears in no opencode model id.
- *
- * @param {string} entry
- * @returns {{modelId: string, variant?: string}}
- */
-export function parseRosterEntry(entry) {
-  const raw = String(entry).trim();
-  const at = raw.lastIndexOf("@");
-  if (at <= 0) return { modelId: raw };
-  const variant = raw.slice(at + 1).trim();
-  if (!variant) return { modelId: raw.slice(0, at).trim() };
-  return { modelId: raw.slice(0, at).trim(), variant };
-}
-
-/**
  * Render the agent markdown file for one role+model: YAML frontmatter (subagent,
  * the model, role permissions, hidden) + the role's prompt as body.
  *

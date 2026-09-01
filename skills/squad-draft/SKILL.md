@@ -103,12 +103,6 @@ explicit list — honor it.)
    - Hand-authored agents are invisible to both tools: never dumped, never
      pruned.
 
-   There is also a bundled CLI with the same behaviour and the same guards —
-   `squad-draft.mjs --export | --schema | --apply <file> [--allow-remove]`, plus
-   a positional `<provider/model[@variant]>...` form. Use it only when the tools
-   are unavailable (running the generator outside a session); inside a session
-   the tools are the interface.
-
 5. **Report** the applied diff (`+added / -removed / ~changed / =unchanged`),
    echo the variants that were written — opencode ignores an unrecognized one
    without erroring, so this is the only place a typo shows up — and tell the

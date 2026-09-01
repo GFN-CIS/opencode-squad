@@ -1,11 +1,9 @@
-// The one implementation of "read the squad off disk" and "write this roster to
-// disk", shared by the `squad-draft.mjs` CLI and the `squad_dump`/`squad_patch`
-// plugin tools.
+// Filesystem side of the squad roster: read it off disk, write one back.
+// Backs the `squad_dump` / `squad_patch` plugin tools.
 //
-// It lives apart from src/roster.js (which stays pure) because it touches the
-// filesystem, and apart from either caller because two implementations of the
-// removal guard would eventually disagree — and the one that drifted would be
-// the one that deletes a squad.
+// Kept apart from src/roster.js so that module stays pure and directly
+// testable, and apart from the tool definitions so the removal guard and the
+// report have exactly one implementation.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -109,9 +107,9 @@ export function applySquad({ roster, dir, allowRemove = false, packageRoot }) {
 }
 
 /**
- * Human-readable report for an apply, shared so the CLI and the tool say the
- * same things — including the variant echo, which is the ONLY place a mistyped
- * reasoning level surfaces at all (opencode drops an unknown one silently).
+ * Human-readable report for an apply — including the variant echo, which is the
+ * only place a mistyped reasoning level surfaces at all, since opencode drops an
+ * unknown one silently.
  *
  * @param {ReturnType<typeof applySquad>} result
  * @returns {string}

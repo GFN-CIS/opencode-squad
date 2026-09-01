@@ -245,33 +245,21 @@ failure mode was a wiped squad. As a tool, the args schema *is* the roster
 schema: nothing to look up, nothing to assemble by hand, and a mistake comes
 back as a validation error instead of a deletion.
 
-The same behaviour and the same guards are still available from the CLI, for use
-outside a session:
-
-```bash
-squad-draft.mjs --export                 # current squad as JSON, from the agent files
-squad-draft.mjs --schema                 # the JSON Schema for that document
-squad-draft.mjs --apply roster.json      # write it back; prints the diff it applied
-squad-draft.mjs --apply roster.json --allow-remove
-squad-draft.mjs <provider/model[@variant]>...   # positional form, same guard
-```
-
-Both go through one implementation (`src/squad-apply.js`) — two copies of the
-removal guard would eventually disagree, and the one that drifted would be the
-one that deletes a squad.
+There is deliberately no CLI alongside them. There was one, and it was the path
+that wiped a squad; keeping it as a second entry point would have meant a second
+copy of the removal guard, and the copy that drifted would be the one that
+deletes agents.
 
 Two properties make that safe, and neither is optional:
 
-1. **The roster is derived, never stored.** Every `--export` reads the generated
-   agent files. A manifest kept beside them would be a second source of truth,
+1. **The roster is derived, never stored.** Every `squad_dump` reads the
+   generated agent files. A manifest kept beside them would be a second source of truth,
    desyncing the first time anyone edited the agent dir by hand.
 2. **Apply refuses to remove.** Read-modify-write only protects while the caller
    actually modifies; one that rebuilds the roster from memory reintroduces the
    wipe in a new wrapper. So removals are refused and named — nothing at all is
-   written, not even the model that would have been added — until
-   `allow_remove` / `--allow-remove` says otherwise. The positional CLI form
-   goes through the same guard, so the short invocation cannot wipe a squad
-   either. `--no-prune` is accepted and ignored: not pruning is the default now.
+   written, not even the model that would have been added — until `allow_remove`
+   says otherwise.
 
 `squad_patch` additionally refuses to run from a `grunt-`/`drill-` agent. A
 subagent rewriting the squad mid-task is never intended, and the damage outlives

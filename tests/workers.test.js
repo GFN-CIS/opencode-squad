@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { agentMarkdown, GENERATED_MARKER, parseRosterEntry, slugForModel } from "../src/workers.js";
+import { agentMarkdown, GENERATED_MARKER, slugForModel } from "../src/workers.js";
 
 test("slug collapses provider/model and punctuation, prefixed by role", () => {
   expect(slugForModel("openai/gpt-5.5")).toBe("grunt-openai-gpt-5-5"); // default role
@@ -49,22 +49,6 @@ test("unknown role throws", () => {
 test("frontmatter block is well-formed (opens and closes with ---)", () => {
   const { content } = agentMarkdown("grunt", "openai/gpt-5.5", "BODY");
   expect(content.indexOf("\n---\n", 4)).toBeGreaterThan(0);
-});
-
-test("parseRosterEntry splits a trailing @variant, and leaves plain ids alone", () => {
-  expect(parseRosterEntry("zai-coding-plan/glm-5.3@high")).toEqual({
-    modelId: "zai-coding-plan/glm-5.3",
-    variant: "high",
-  });
-  expect(parseRosterEntry("  anthropic/claude-opus-5  ")).toEqual({
-    modelId: "anthropic/claude-opus-5",
-  });
-  // Colons are part of real opencode model ids, so they must survive untouched.
-  expect(parseRosterEntry("anthropic/claude-opus-4-thinking:32000")).toEqual({
-    modelId: "anthropic/claude-opus-4-thinking:32000",
-  });
-  // A dangling separator is a typo, not a variant.
-  expect(parseRosterEntry("openai/gpt-5.5@")).toEqual({ modelId: "openai/gpt-5.5" });
 });
 
 test("agentMarkdown emits variant only when one is given", () => {
