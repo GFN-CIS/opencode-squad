@@ -697,9 +697,10 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       squad_patch: tool({
         description:
           "Write a squad roster: generate a grunt and a drill agent for every model listed, " +
-          "and remove agents for models that are absent. The list is the COMPLETE intended " +
-          "squad, not a delta — so start from squad_dump and edit it. Removing a model the " +
-          "user did not ask you to remove is refused, not performed.",
+          "and remove agents for models that are absent. Per-model `roles` controls which of " +
+          "the two are written. The list is the COMPLETE intended squad, not a delta — so " +
+          "start from squad_dump and edit it. Deleting an agent the user did not ask you to " +
+          "delete is refused, not performed.",
         args: {
           models: tool.schema
             .array(
@@ -707,6 +708,16 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
                 id: tool.schema
                   .string()
                   .describe('opencode model id, e.g. "zai-coding-plan/glm-5.3".'),
+                roles: tool.schema
+                  .array(tool.schema.enum(["grunt", "drill"]))
+                  .optional()
+                  .describe(
+                    "Which agents to materialize for this model. Omit for both. Pass " +
+                      '["grunt"] for a model that should execute but never REVIEW — a drill ' +
+                      "on a weak model rubber-stamps the work or invents faults, and both are " +
+                      "worse than no review. Narrowing this DELETES the other agent, so it " +
+                      "needs allow_remove; omitting the field never deletes anything.",
+                  ),
                 variant: tool.schema
                   .string()
                   .optional()
@@ -725,8 +736,9 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
             .boolean()
             .optional()
             .describe(
-              "Permit dropping models present in the current squad but absent here. Pass true " +
-                "ONLY when the user asked for that removal — never to get past the refusal.",
+              "Permit deleting generated agents: models present in the current squad but " +
+                "absent here, and roles narrowed on models that stay. Pass true ONLY when the " +
+                "user asked for that removal — never to get past the refusal.",
             ),
           directory: tool.schema
             .string()
