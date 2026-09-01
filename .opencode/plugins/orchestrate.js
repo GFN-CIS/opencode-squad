@@ -32,6 +32,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tool } from "@opencode-ai/plugin";
 import { formatBench } from "../../src/benchmarks.js";
 import { formatCacheStatus, resolveCacheTtl } from "../../src/cache-status.js";
 import { buildLimitMap, estimateContextTokens, formatLocalDateTime } from "../../src/context.js";
@@ -46,6 +47,13 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
+import { ROSTER_VERSION, validateRoster } from "../../src/roster.js";
+import {
+  applySquad,
+  defaultAgentDir,
+  formatApplyReport,
+  readSquad,
+} from "../../src/squad-apply.js";
 import { formatTaskOutcome, isTaskResultEmpty } from "../../src/task-outcome.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -643,6 +651,124 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         case "message.updated":
           return handleMessageUpdatedEvent(props);
       }
+    },
+
+    // --- squad roster tools (see src/squad-apply.js) ---
+    //
+    // The squad-draft skill used to shell out: `find` the bundled generator
+    // somewhere under ~/.cache, then compose a CLI invocation. That is a lot of
+    // ceremony for something this plugin is already holding in memory, and the
+    // failure mode was silent — a wrong invocation wiped the squad. These two
+    // tools give the same operations a typed contract instead: the args schema
+    // IS the roster schema, so there is nothing to look up and nothing to
+    // assemble by hand.
+    tool: {
+      squad_dump: tool({
+        description:
+          "Read the current squad roster: every model that has generated grunt/drill agents, " +
+          "with its reasoning variant. ALWAYS call this before squad_patch — the roster is a " +
+          "document you edit, not a list you retype. Returns JSON.",
+        args: {
+          directory: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "Agent directory to read. Defaults to the global ~/.config/opencode/agent. " +
+                "Pass a project's .opencode/agent to scope the squad to one project.",
+            ),
+        },
+        async execute(args) {
+          const dir = args.directory || defaultAgentDir();
+          const { roster, conflicts } = readSquad(dir);
+          const note = conflicts.length
+            ? `\n\nnotes:\n${conflicts.map((c) => `  ${c}`).join("\n")}`
+            : "";
+          return {
+            title: `squad: ${roster.models.length} model(s)`,
+            output:
+              `Agent dir: ${dir}\n${JSON.stringify(roster, null, 2)}${note}\n\n` +
+              "To change the squad, pass this same list back to squad_patch with your edits " +
+              "applied — keeping every entry you were not asked to touch.",
+            metadata: { dir, models: roster.models.length },
+          };
+        },
+      }),
+
+      squad_patch: tool({
+        description:
+          "Write a squad roster: generate a grunt and a drill agent for every model listed, " +
+          "and remove agents for models that are absent. The list is the COMPLETE intended " +
+          "squad, not a delta — so start from squad_dump and edit it. Removing a model the " +
+          "user did not ask you to remove is refused, not performed.",
+        args: {
+          models: tool.schema
+            .array(
+              tool.schema.object({
+                id: tool.schema
+                  .string()
+                  .describe('opencode model id, e.g. "zai-coding-plan/glm-5.3".'),
+                variant: tool.schema
+                  .string()
+                  .optional()
+                  .describe(
+                    "Reasoning level. Must be one of THIS model's own `reasoning_options` " +
+                      "values in models.dev (glm-5.3: low|high|max; claude-opus-5: " +
+                      "low|medium|high|xhigh|max) — opencode silently ignores an unrecognized " +
+                      "one, so a typo buys silence rather than an error. Omit for models that " +
+                      "publish no reasoning options. Setting it does not suppress reasoning: " +
+                      "it bounds a reasoner that is otherwise limited only by the output cap.",
+                  ),
+              }),
+            )
+            .describe("The complete intended squad, one entry per model."),
+          allow_remove: tool.schema
+            .boolean()
+            .optional()
+            .describe(
+              "Permit dropping models present in the current squad but absent here. Pass true " +
+                "ONLY when the user asked for that removal — never to get past the refusal.",
+            ),
+          directory: tool.schema
+            .string()
+            .optional()
+            .describe("Agent directory to write. Defaults to the global ~/.config/opencode/agent."),
+        },
+        async execute(args, ctx) {
+          // A grunt or drill rewriting the squad mid-task is never intended, and
+          // the damage outlives the session. Same reasoning as the removal
+          // guard: make the destructive path require the right caller.
+          if (/^(?:grunt|drill)-/.test(ctx?.agent ?? "")) {
+            return {
+              title: "squad_patch refused",
+              output:
+                `Refused: ${ctx.agent} is a subagent, and the squad roster is the orchestrator's ` +
+                "to change. Report what you think should change and let sarge decide.",
+            };
+          }
+          const dir = args.directory || defaultAgentDir();
+          const roster = { version: ROSTER_VERSION, models: args.models ?? [] };
+          const errors = validateRoster(roster);
+          if (errors.length) {
+            return {
+              title: "squad_patch rejected",
+              output: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+            };
+          }
+          const result = applySquad({
+            roster,
+            dir,
+            allowRemove: args.allow_remove === true,
+            packageRoot: PACKAGE_ROOT,
+          });
+          return {
+            title: result.ok
+              ? `squad: +${result.diff.added.length} ~${result.diff.changed.length} -${result.diff.removed.length}`
+              : "squad_patch refused",
+            output: formatApplyReport(result),
+            metadata: { ok: result.ok, ...result.diff },
+          };
+        },
+      }),
     },
 
     "tool.execute.after": handleTaskToolAfter,
