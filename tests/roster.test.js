@@ -2,201 +2,151 @@ import { expect, test } from "vitest";
 import {
   buildRoster,
   diffRoster,
-  parseAgentFrontmatter,
-  ROSTER_VERSION,
-  rolesOf,
+  NOTES_CLOSE,
+  NOTES_OPEN,
+  parseAgentFile,
   validateRoster,
 } from "../src/roster.js";
 
-const AGENT = [
+const FILE = [
   "---",
   "# generated-by: opencode-squad squad-draft",
-  "description: Per-model grunt (worker) for the sarge PDCA cycle.",
+  "description: cheap long-context coder",
   "mode: subagent",
   "model: zai-coding-plan/glm-5.3",
   "variant: high",
+  "steps: 40",
   "hidden: true",
-  "permission:",
-  "  edit: allow",
   "---",
   "",
-  "BODY with model: not-a-real-key",
+  "ROLE PROMPT with model: not-a-key",
+  "",
+  NOTES_OPEN,
+  "always write files with the write tool",
+  NOTES_CLOSE,
 ].join("\n");
 
-test("parseAgentFrontmatter reads model and variant, and stops at the closing fence", () => {
-  expect(parseAgentFrontmatter(AGENT)).toEqual({
+test("parseAgentFile reads the frontmatter and the fenced notes, ignoring the body", () => {
+  expect(parseAgentFile(FILE)).toEqual({
     modelId: "zai-coding-plan/glm-5.3",
-    variant: "high",
+    entry: {
+      description: "cheap long-context coder",
+      variant: "high",
+      steps: 40,
+      notes: "always write files with the write tool",
+    },
   });
 });
 
-test("parseAgentFrontmatter returns nothing for a file with no frontmatter", () => {
-  expect(parseAgentFrontmatter("just a body\nmodel: x/y")).toEqual({});
+test("parseAgentFile returns an empty entry for a file with no frontmatter", () => {
+  expect(parseAgentFile("just a body\nmodel: x/y")).toEqual({ modelId: undefined, entry: {} });
 });
 
-test("buildRoster folds the grunt+drill pair of a model into one sorted entry", () => {
+test("buildRoster groups by role, keyed and sorted by model id", () => {
   const { roster, conflicts } = buildRoster([
-    { modelId: "zai-coding-plan/glm-5.3", variant: "high" },
-    { modelId: "zai-coding-plan/glm-5.3", variant: "high" },
-    { modelId: "anthropic/claude-opus-5" },
-    { modelId: "anthropic/claude-opus-5" },
+    { role: "grunt", modelId: "z/last", entry: {} },
+    { role: "drill", modelId: "a/first", entry: { variant: "max" } },
+    { role: "grunt", modelId: "a/first", entry: { variant: "high" } },
   ]);
   expect(conflicts).toEqual([]);
   expect(roster).toEqual({
-    version: ROSTER_VERSION,
-    models: [{ id: "anthropic/claude-opus-5" }, { id: "zai-coding-plan/glm-5.3", variant: "high" }],
+    grunts: { "a/first": { variant: "high" }, "z/last": {} },
+    drills: { "a/first": { variant: "max" } },
   });
 });
 
-test("buildRoster reports a model whose two agents disagree instead of silently picking", () => {
-  const { roster, conflicts } = buildRoster([
-    { modelId: "a/b", variant: "high" },
-    { modelId: "a/b", variant: "low" },
+// The whole point of the tree: one model, two agents, two different levels.
+// The previous flat shape could not express this at all.
+test("a model can carry a different variant per role", () => {
+  const { roster } = buildRoster([
+    { role: "grunt", modelId: "a/b", entry: { variant: "high" } },
+    { role: "drill", modelId: "a/b", entry: { variant: "max" } },
   ]);
-  expect(conflicts).toHaveLength(1);
-  expect(conflicts[0]).toContain("a/b");
-  expect(conflicts[0]).toContain("high");
-  expect(conflicts[0]).toContain("low");
-  expect(roster.models).toEqual([{ id: "a/b", variant: "high" }]);
+  expect(roster.grunts["a/b"].variant).toBe("high");
+  expect(roster.drills["a/b"].variant).toBe("max");
 });
 
-test("diffRoster separates added, removed, changed and unchanged", () => {
-  const current = {
-    models: [
-      { id: "a/keep" },
-      { id: "a/retune", variant: "medium" },
-      { id: "a/drop", variant: "high" },
+test("buildRoster hides a description that is just the role default", () => {
+  const { roster } = buildRoster(
+    [
+      { role: "grunt", modelId: "a/generic", entry: { description: "GENERIC GRUNT" } },
+      { role: "grunt", modelId: "a/named", entry: { description: "cheap edits" } },
     ],
+    { grunt: "GENERIC GRUNT" },
+  );
+  expect(roster.grunts["a/generic"]).toEqual({});
+  expect(roster.grunts["a/named"]).toEqual({ description: "cheap edits" });
+});
+
+test("diffRoster works per AGENT, so removed is exactly the files that would go", () => {
+  const current = {
+    grunts: { "a/keep": {}, "a/retune": { variant: "low" }, "a/drop": {} },
+    drills: { "a/keep": {} },
   };
   const next = {
-    models: [
-      { id: "a/keep" },
-      { id: "a/retune", variant: "high" },
-      { id: "a/new", variant: "low" },
-    ],
+    grunts: { "a/keep": {}, "a/retune": { variant: "high" }, "a/new": {} },
+    drills: {},
   };
   expect(diffRoster(current, next)).toEqual({
-    added: ["a/new@low"],
-    removed: ["a/drop"],
-    changed: ["a/retune: medium -> high"],
-    unchanged: ["a/keep"],
-    removedRoles: [],
+    added: ["grunt a/new"],
+    removed: ["drill a/keep", "grunt a/drop"],
+    changed: ['grunt a/retune: variant "low" -> "high"'],
+    unchanged: ["grunt a/keep"],
   });
 });
 
-test("diffRoster treats adding a variant to an existing model as a change, not a removal", () => {
-  const d = diffRoster({ models: [{ id: "a/b" }] }, { models: [{ id: "a/b", variant: "high" }] });
-  expect(d.removed).toEqual([]);
-  expect(d.added).toEqual([]);
-  expect(d.changed).toEqual(["a/b: no variant -> high"]);
+test("diffRoster reports every changed field, not just the first", () => {
+  const d = diffRoster(
+    { grunts: { "a/b": { variant: "low" } } },
+    { grunts: { "a/b": { variant: "high", description: "now useful", steps: 20 } } },
+  );
+  expect(d.changed[0]).toContain('variant "low" -> "high"');
+  expect(d.changed[0]).toContain('description null -> "now useful"');
+  expect(d.changed[0]).toContain("steps null -> 20");
 });
 
-// The bug this whole flow exists to stop: "add one model" arriving as a roster
-// containing only that model. The diff must see it as three removals so the
-// caller is stopped, not obeyed.
-test("diffRoster surfaces the careless single-model roster as a mass removal", () => {
-  const current = { models: [{ id: "a/one" }, { id: "a/two" }, { id: "a/three" }] };
-  const next = { models: [{ id: "a/four" }] };
-  const d = diffRoster(current, next);
-  expect(d.added).toEqual(["a/four"]);
-  expect(d.removed).toEqual(["a/one", "a/three", "a/two"]);
+// "add one model" arriving as a roster containing only that model must read as
+// a mass deletion, so the guard stops it rather than obeying it.
+test("diffRoster surfaces a carelessly rebuilt roster as a mass deletion", () => {
+  const d = diffRoster(
+    { grunts: { "a/one": {}, "a/two": {} }, drills: { "a/one": {} } },
+    { grunts: { "a/three": {} } },
+  );
+  expect(d.added).toEqual(["grunt a/three"]);
+  expect(d.removed).toEqual(["drill a/one", "grunt a/one", "grunt a/two"]);
 });
 
-test("validateRoster accepts a well-formed document", () => {
+test("validateRoster accepts a well-formed document, including empty entries", () => {
   expect(
     validateRoster({
-      version: ROSTER_VERSION,
-      models: [{ id: "a/b" }, { id: "c/d", variant: "high" }],
+      grunts: { "a/b": {}, "c/d": { variant: "high", description: "x", notes: "y", steps: 5 } },
+      drills: { "a/b": { disable: true } },
     }),
   ).toEqual([]);
+  expect(validateRoster({ grunts: {} })).toEqual([]);
 });
 
 test("validateRoster reports every problem at once", () => {
   const errors = validateRoster({
-    version: 99,
-    extra: true,
-    models: [{ id: "nope" }, { id: "a/b", effort: "high" }, { id: "a/b" }, "x"],
+    models: [],
+    grunts: { nope: {}, "a/b": { effort: "high", variant: "", steps: 0, disable: "yes" } },
   });
   expect(errors).toEqual(
     expect.arrayContaining([
-      expect.stringContaining("version must be 1"),
-      expect.stringContaining('unknown top-level key "extra"'),
-      expect.stringContaining("is not a provider/model id"),
+      expect.stringContaining('unknown top-level key "models"'),
+      expect.stringContaining('"nope" is not a provider/model id'),
       expect.stringContaining('unknown key "effort"'),
-      expect.stringContaining("is listed twice"),
-      expect.stringContaining("models[3] must be an object"),
+      expect.stringContaining("variant must be a non-empty string"),
+      expect.stringContaining("steps must be a positive integer"),
+      expect.stringContaining("disable must be a boolean"),
     ]),
   );
 });
 
-test("validateRoster rejects non-objects and a non-array models field", () => {
+test("validateRoster rejects non-objects, and an entry that is not an object", () => {
   expect(validateRoster([])).toEqual(["roster must be a JSON object"]);
-  expect(validateRoster(null)).toEqual(["roster must be a JSON object"]);
-  expect(validateRoster({ version: ROSTER_VERSION, models: {} })).toContain(
-    "models must be an array",
+  expect(validateRoster({ grunts: [] })).toContain("grunts must be an object keyed by model id");
+  expect(validateRoster({ grunts: { "a/b": "high" } })).toContain(
+    'grunts["a/b"] must be an object (use {} for no overrides)',
   );
-});
-
-test("validateRoster rejects an empty-string variant rather than writing a blank key", () => {
-  expect(
-    validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", variant: "  " }] }),
-  ).toEqual(["models[0].variant must be a non-empty string when present"]);
-});
-
-test("buildRoster reports a grunt-only model as roles:[grunt], and a full pair as default", () => {
-  const { roster } = buildRoster([
-    { modelId: "a/full", role: "grunt" },
-    { modelId: "a/full", role: "drill" },
-    { modelId: "a/executor", role: "grunt", variant: "high" },
-  ]);
-  expect(roster.models).toEqual([
-    { id: "a/executor", variant: "high", roles: ["grunt"] },
-    { id: "a/full" },
-  ]);
-});
-
-test("buildRoster maps a legacy worker- file onto the grunt role", () => {
-  const { roster } = buildRoster([{ modelId: "a/old", role: "grunt" }]);
-  expect(roster.models).toEqual([{ id: "a/old", roles: ["grunt"] }]);
-});
-
-test("rolesOf defaults to both, because omitting the field must never delete", () => {
-  expect(rolesOf(undefined)).toEqual(["grunt", "drill"]);
-  expect(rolesOf([])).toEqual(["grunt", "drill"]);
-  expect(rolesOf(["drill"])).toEqual(["drill"]);
-  // Order is normalized, so ["drill","grunt"] and ["grunt","drill"] are one shape.
-  expect(rolesOf(["drill", "grunt"])).toEqual(["grunt", "drill"]);
-});
-
-test("diffRoster reports a narrowed role set as a change AND as a role removal", () => {
-  const d = diffRoster({ models: [{ id: "a/b" }] }, { models: [{ id: "a/b", roles: ["grunt"] }] });
-  expect(d.removed).toEqual([]);
-  expect(d.changed).toEqual(["a/b: roles grunt+drill -> grunt (drops drill)"]);
-  expect(d.removedRoles).toEqual([{ id: "a/b", role: "drill" }]);
-});
-
-test("diffRoster treats gaining a role as a change with nothing removed", () => {
-  const d = diffRoster({ models: [{ id: "a/b", roles: ["grunt"] }] }, { models: [{ id: "a/b" }] });
-  expect(d.removedRoles).toEqual([]);
-  expect(d.changed).toEqual(["a/b: roles grunt -> grunt+drill"]);
-});
-
-test("diffRoster labels an added grunt-only model so the report shows the shape", () => {
-  const d = diffRoster(
-    { models: [] },
-    { models: [{ id: "a/b", variant: "high", roles: ["grunt"] }] },
-  );
-  expect(d.added).toEqual(["a/b@high (grunt only)"]);
-});
-
-test("validateRoster rejects an unknown or empty roles list", () => {
-  expect(
-    validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", roles: ["sarge"] }] }),
-  ).toEqual(['models[0].roles has unknown role "sarge"']);
-  expect(validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", roles: [] }] })).toEqual([
-    "models[0].roles must be a non-empty array when present",
-  ]);
-  expect(
-    validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", roles: ["drill"] }] }),
-  ).toEqual([]);
 });

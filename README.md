@@ -230,53 +230,69 @@ So the roster is data you edit, exposed as two plugin tools:
 | tool | what it does |
 | --- | --- |
 | `squad_dump` | returns the current roster as JSON, derived from the agent files |
-| `squad_patch` | writes a roster back — `models[]`, plus `allow_remove` and `directory` |
+| `squad_patch` | writes a roster back — `grunts` / `drills`, plus `allow_remove` and `directory` |
 
 ```json
-{ "version": 1,
-  "models": [ { "id": "zai-coding-plan/glm-5.3", "variant": "high" },
-              { "id": "anthropic/claude-opus-5" },
-              { "id": "openai/gpt-5.6-luna", "roles": ["grunt"] } ] }
+{ "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high",
+                                           "description": "cheap 1M ctx coder",
+                                           "notes": "prefer the write tool" },
+              "openai/gpt-5.6-luna": { "description": "fast mechanical edits",
+                                       "steps": 25 } },
+  "drills":  { "anthropic/claude-opus-5": { "variant": "max",
+                                            "description": "final reviewer" } } }
 ```
 
-`roles` decides which of the two agents a model gets, and appears only when it
-is not the default pair. **A drill is not a free extra.** A grunt executes; a
-drill reviews, and its verdict is what the orchestrator acts on. A weak model in
-that seat either rubber-stamps what it is shown or invents faults, and both are
-worse than no review, because they launder a bad change as an approved one. So
-cheap and small models are `roles: ["grunt"]` — they work, they do not judge.
+One map per role, keyed by model id, mirroring the files on disk. An agent exists
+if it appears; `{}` means "this model, role defaults". This replaced a flat model
+list carrying a `roles` array for two reasons: one entry per *model* forced one
+`variant` per model, so "grunt at high, drill at max" was inexpressible — and the
+drill, whose job is the harder call, is exactly where you would want to spend
+more reasoning; and `roles: ["grunt"]` needed the rule "omitting it means both",
+which had to be explained in three places, where a role map needs no rule at all.
 
-They are tools rather than a documented shell recipe because the skill used to
-have to `find` the bundled generator under `~/.cache` and then compose a CLI
-invocation — ceremony for something this plugin already holds in memory, whose
-failure mode was a wiped squad. As a tool, the args schema *is* the roster
-schema: nothing to look up, nothing to assemble by hand, and a mistake comes
-back as a validation error instead of a deletion.
+**A drill is not a free extra.** A grunt executes; a drill reviews, and its
+verdict is what the orchestrator acts on. A weak model in that seat either
+rubber-stamps what it is shown or invents faults, and both are worse than no
+review, because they launder a bad change as an approved one. Cheap and small
+models belong in `grunts` alone.
 
-There is deliberately no CLI alongside them. There was one, and it was the path
-that wiped a squad; keeping it as a second entry point would have meant a second
-copy of the removal guard, and the copy that drifted would be the one that
-deletes agents.
+Per-agent fields, and why these and not the rest of opencode's agent schema:
 
-Two properties make that safe, and neither is optional:
+| field | why it is here |
+| --- | --- |
+| `variant` | the reasoning governor — per agent, so a drill can think harder |
+| `description` | the one line sarge reads in its inventory when choosing whom to dispatch; without it, ten grunts say the same generic sentence and carry no routing signal at all |
+| `notes` | extra instructions for one agent, fenced in the prompt so they round-trip |
+| `steps` | cap on agentic iterations before opencode forces a text response |
+| `disable` | park an agent without deleting it — the soft alternative to a removal |
+
+Deliberately **not** exposed: `permission` (a drill's read-only contract is a
+safety property, not a preference), `mode`/`hidden`/`color` (ours), and
+`temperature`/`top_p`/`options` — nobody has needed them, and `options` can
+override the variant silently, which is the opposite of what this roster is for.
+
+There is deliberately no CLI alongside the tools. There was one, and it was the
+path that wiped a squad; keeping it as a second entry point would have meant a
+second copy of the deletion guard, and the copy that drifted would be the one
+that deletes agents.
+
+Two properties make the flow safe, and neither is optional:
 
 1. **The roster is derived, never stored.** Every `squad_dump` reads the
-   generated agent files. A manifest kept beside them would be a second source of truth,
-   desyncing the first time anyone edited the agent dir by hand.
+   generated agent files. A manifest kept beside them would be a second source of
+   truth, desyncing the first time anyone edited the agent dir by hand.
 2. **Apply refuses to delete.** Read-modify-write only protects while the caller
    actually modifies; one that rebuilds the roster from memory reintroduces the
    wipe in a new wrapper. So deletions are refused and named — nothing at all is
-   written, not even the model that would have been added — until `allow_remove`
-   says otherwise. The invariant is per *agent file*, not per model: narrowing
-   `roles` on a model that stays deletes an agent too, and is gated the same
-   way. Omitting `roles` means both roles and can never delete anything, so a
-   drill is only ever lost by typing the field.
+   written, not even the agent that would have been added — until `allow_remove`
+   says otherwise. The unit is the agent, which is also the unit on disk, so
+   dropping just a drill is gated exactly like dropping a model.
 
 `squad_patch` additionally refuses to run from a `grunt-`/`drill-` agent. A
 subagent rewriting the squad mid-task is never intended, and the damage outlives
 the session.
 
-Hand-authored agents are invisible in every mode: never exported, never pruned.
+Hand-authored agents are invisible in every mode: never dumped, never pruned.
 
 ---
 

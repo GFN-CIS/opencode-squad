@@ -2,15 +2,15 @@
 // Backs the `squad_dump` / `squad_patch` plugin tools.
 //
 // Kept apart from src/roster.js so that module stays pure and directly
-// testable, and apart from the tool definitions so the removal guard and the
+// testable, and apart from the tool definitions so the deletion guard and the
 // report have exactly one implementation.
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ALL_ROLES, buildRoster, diffRoster, parseAgentFrontmatter, rolesOf } from "./roster.js";
-import { agentMarkdown, GENERATED_MARKER_DETECT } from "./workers.js";
+import { buildRoster, diffRoster, parseAgentFile, ROLE_KEYS } from "./roster.js";
+import { agentMarkdown, defaultDescriptions, GENERATED_MARKER_DETECT } from "./workers.js";
 
 const GENERATED_FILE_RE = /^(grunt|drill|worker)-.*\.md$/;
 
@@ -25,75 +25,66 @@ export function defaultAgentDir() {
  * nothing that can desync from what opencode will actually load.
  *
  * Only files carrying our marker count: a hand-authored `grunt-something.md`
- * belongs to somebody else and is neither exported nor pruned.
+ * belongs to somebody else and is neither dumped nor pruned.
  *
  * @param {string} dir
- * @returns {{roster: {version:number, models: Array<{id:string, variant?:string, roles?:string[]}>}, conflicts: string[], filesByModel: Map<string, Map<string, string>>}}
+ * @returns {{roster: Record<string, Record<string, any>>, conflicts: string[], filesByAgent: Map<string, string>}}
  */
 export function readSquad(dir) {
-  const entries = [];
-  const filesByModel = new Map();
-  let files = [];
+  const files = [];
+  /** @type {Map<string, string>} */
+  const filesByAgent = new Map();
+  let names = [];
   try {
-    files = fs.readdirSync(dir);
+    names = fs.readdirSync(dir);
   } catch {
-    // No agent dir yet is an empty squad, not an error — this is also the
-    // first-run path.
-    return { roster: buildRoster([]).roster, conflicts: [], filesByModel };
+    // No agent dir yet is an empty squad, not an error — also the first-run path.
+    return { roster: buildRoster([]).roster, conflicts: [], filesByAgent };
   }
-  for (const f of files) {
-    const m = GENERATED_FILE_RE.exec(f);
+  for (const name of names) {
+    const m = GENERATED_FILE_RE.exec(name);
     if (!m) continue;
     let txt;
     try {
-      txt = fs.readFileSync(path.join(dir, f), "utf8");
+      txt = fs.readFileSync(path.join(dir, name), "utf8");
     } catch {
       continue;
     }
     if (!txt.includes(GENERATED_MARKER_DETECT)) continue;
-    const { modelId, variant } = parseAgentFrontmatter(txt);
+    const { modelId, entry } = parseAgentFile(txt);
     if (!modelId) continue;
     // Legacy `worker-` files predate the grunt/drill split; treat them as the
     // executor so an old squad still round-trips instead of vanishing.
     const role = m[1] === "worker" ? "grunt" : m[1];
-    entries.push({ modelId, role, variant });
-    if (!filesByModel.has(modelId)) filesByModel.set(modelId, new Map());
-    filesByModel.get(modelId).set(role, f);
+    files.push({ role, modelId, entry });
+    filesByAgent.set(`${role} ${modelId}`, name);
   }
-  const { roster, conflicts } = buildRoster(entries);
-  return { roster, conflicts, filesByModel };
+  const { roster, conflicts } = buildRoster(files, defaultDescriptions());
+  return { roster, conflicts, filesByAgent };
 }
 
 /**
  * Write a roster to the agent dir.
  *
- * Returns `{ok: false, ...}` rather than throwing when the apply would remove
- * models and `allowRemove` is not set — the refusal is an ordinary outcome the
- * caller reports, not an exception.
+ * Returns `{ok: false, ...}` rather than throwing when the apply would delete
+ * agents and `allowRemove` is not set — the refusal is an ordinary outcome the
+ * caller reports, not an exception. The refusal is total: not even the agents
+ * that would have been added get written, so a rejected apply leaves the squad
+ * exactly as it was.
  *
- * @param {{roster: {models: Array<{id:string, variant?:string}>}, dir: string, allowRemove?: boolean, packageRoot: string}} input
- * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[],removedRoles:Array<{id:string,role:string}>}, written: Array<{id:string,role:string,variant?:string,filename:string}>, pruned: string[], conflicts: string[], dir: string, wouldDelete?: number}}
+ * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean, packageRoot: string}} input
+ * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[]}, written: Array<{role:string,id:string,variant?:string,filename:string}>, pruned: string[], conflicts: string[], dir: string}}
  */
 export function applySquad({ roster, dir, allowRemove = false, packageRoot }) {
-  const { roster: current, conflicts, filesByModel } = readSquad(dir);
+  const { roster: current, conflicts, filesByAgent } = readSquad(dir);
   const diff = diffRoster(current, roster);
 
-  // Every generated agent that would disappear counts, whether it goes because
-  // its model left the roster or because the entry was narrowed to one role.
-  // "Nothing is deleted without an explicit opt-in" is a simpler invariant to
-  // trust than one that protects only whole models.
-  if ((diff.removed.length > 0 || diff.removedRoles.length > 0) && !allowRemove) {
-    // Counted in FILES, not models: a model leaving takes however many role
-    // files it actually has with it. The caller is deciding whether to lose
-    // agents, so that is the number to put in front of them.
-    const wouldDelete =
-      diff.removed.reduce((n, id) => n + (filesByModel.get(id)?.size ?? 0), 0) +
-      diff.removedRoles.filter(({ id, role }) => filesByModel.get(id)?.has(role)).length;
-    return { ok: false, diff, written: [], pruned: [], conflicts, dir, wouldDelete };
+  if (diff.removed.length > 0 && !allowRemove) {
+    return { ok: false, diff, written: [], pruned: [], conflicts, dir };
   }
 
   const body = Object.fromEntries(
-    ALL_ROLES.map((r) => [
+    Object.values(ROLE_KEYS).map((r) => [
       r,
       fs.readFileSync(path.join(packageRoot, "prompts", `${r}.md`), "utf8"),
     ]),
@@ -101,25 +92,17 @@ export function applySquad({ roster, dir, allowRemove = false, packageRoot }) {
   fs.mkdirSync(dir, { recursive: true });
 
   const written = [];
-  for (const entry of roster.models) {
-    for (const role of rolesOf(entry.roles)) {
-      const { filename, content } = agentMarkdown(role, entry.id, body[role], {
-        variant: entry.variant,
-      });
+  for (const [key, role] of Object.entries(ROLE_KEYS)) {
+    for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
+      const { filename, content } = agentMarkdown(role, modelId, body[role], entry ?? {});
       fs.writeFileSync(path.join(dir, filename), content);
-      written.push({ id: entry.id, role, variant: entry.variant, filename });
+      written.push({ role, id: modelId, variant: entry?.variant, filename });
     }
   }
 
   const pruned = [];
-  for (const id of diff.removed) {
-    for (const f of (filesByModel.get(id) ?? new Map()).values()) {
-      fs.unlinkSync(path.join(dir, f));
-      pruned.push(f);
-    }
-  }
-  for (const { id, role } of diff.removedRoles) {
-    const f = filesByModel.get(id)?.get(role);
+  for (const agent of diff.removed) {
+    const f = filesByAgent.get(agent);
     if (!f) continue;
     fs.unlinkSync(path.join(dir, f));
     pruned.push(f);
@@ -141,27 +124,13 @@ export function formatApplyReport(result) {
   for (const c of result.conflicts) lines.push(`  note   ${c}`);
 
   if (!result.ok) {
-    const roleDrops = result.diff.removedRoles ?? [];
     lines.push(
       "",
-      `REFUSED: applying this roster would DELETE ${result.wouldDelete} agent file(s).`,
-      ...(result.diff.removed.length
-        ? [
-            "",
-            `models leaving the squad (${result.diff.removed.length}):`,
-            ...result.diff.removed.map((id) => `  - ${id}`),
-          ]
-        : []),
-      ...(roleDrops.length
-        ? [
-            "",
-            `roles dropped from models that stay (${roleDrops.length}):`,
-            ...roleDrops.map((r) => `  - ${r.role} for ${r.id}`),
-          ]
-        : []),
+      `REFUSED: applying this roster would DELETE ${result.diff.removed.length} agent(s):`,
+      ...result.diff.removed.map((a) => `  - ${a}`),
       "",
-      "Nothing was written. If the user asked for these removals, retry with allow_remove.",
-      "If you meant to ADD or RETUNE a model, you are working from the wrong roster —",
+      "Nothing was written. If the user asked for these deletions, retry with allow_remove.",
+      "If you meant to ADD or RETUNE an agent, you are working from the wrong roster —",
       "dump the current squad and edit THAT, rather than composing a new one.",
     );
     return lines.join("\n");
@@ -182,13 +151,11 @@ export function formatApplyReport(result) {
 
   const variants = result.written.filter((w) => w.variant);
   if (variants.length > 0) {
-    const seen = new Map();
-    for (const w of variants) seen.set(w.id, w.variant);
     lines.push(
       "",
       "Variants written — opencode IGNORES an unrecognized variant without erroring,",
       "so check each against that model's `reasoning_options` in models.dev:",
-      ...[...seen].map(([id, v]) => `  ${id} -> ${v}`),
+      ...variants.map((w) => `  ${w.role} ${w.id} -> ${w.variant}`),
     );
   }
   lines.push("", "Reload opencode (restart the TUI / start a new run) to pick up the new agents.");
