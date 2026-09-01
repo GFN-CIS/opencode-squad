@@ -130,6 +130,26 @@ TTL), and how big its context has grown. Use both.
   `session.summarize` (opencode's `/compact`) applies to a subagent session too.
   Otherwise: drop it and start fresh.
 
+**An empty result is a diagnosis you do NOT get to guess at.** When a `task`
+call comes back with an empty `<task_result>`, or with a result that stops
+mid-sentence, its result also carries a `[TASK OUTCOME]` line saying which
+failure it actually was. Read it before you react, and react to what it says:
+
+- `finish=length` — the grunt hit `max_tokens` and was truncated. This is
+  **not** a provider outage and **not** a rejected brief. Switching providers
+  fixes nothing and costs a full re-brief. Shorten the brief, split the task,
+  or pick a model with room to answer. When the note says the budget went into
+  the reasoning channel, that session's reasoning holds real drafted work —
+  read it before rewriting the brief from scratch.
+- empty result on a normal finish — the grunt genuinely stopped without
+  answering. Check whether it wrote any files before concluding the brief
+  failed.
+
+If no `[TASK OUTCOME]` line is present, you have no evidence about the cause.
+Say so and go look at the subagent session. Do not narrate a provider failure,
+a refusal, or a rejected brief that nothing in front of you supports — you own
+the outcome, and that includes owning the accuracy of your post-mortem.
+
 **Subscription vs API billing.** The inventory may show a grunt's `billing` as
 `subscription` (flat-rate — Claude Pro/Max, GitHub Copilot, ChatGPT Plus, etc.,
 set by the user in `model_data.json`) versus nothing, which means ordinary

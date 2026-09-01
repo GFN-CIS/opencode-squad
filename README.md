@@ -175,6 +175,118 @@ Verified live: dispatched a real grunt via the `task` tool with `cache_ttl_secon
 
 ---
 
+## Reasoning variant per squad model
+
+opencode builds a model's reasoning variants from models.dev's
+`reasoning_options` — `reasoningVariants()` wins over the hardcoded fallback,
+which only runs when that field is absent. `glm-5.3` publishes
+`low|high|max`, `claude-opus-5` `low|medium|high|xhigh|max`, and for an
+openai-compatible provider the chosen level is lowered into `reasoning_effort`
+in the request body.
+
+But a variant only applies when one is **selected**, and nothing selects one for
+a subagent. Without it no reasoning parameter is sent at all — and for an
+openai-compatible model, nothing then bounds its reasoning except the output cap.
+Measured over 20 days on one machine:
+
+| model | median reasoning | p95 | max | share of budget |
+|---|---:|---:|---:|---:|
+| claude-opus-5 | 751 chars | 3 980 | 7 404 | ~20% |
+| claude-sonnet-5 | 481 | 2 621 | 13 992 | ~20% |
+| zai/glm-5.3 | 920 | 13 007 | 67 028 | **70%** |
+
+The medians are the same; the tails are not. Anthropic models stay bounded
+without a variant because their server-side adaptive default governs;
+openai-compatible ones have no such fallback, and two glm-5.3 grunts were
+truncated mid-thought at the 32k output cap having emitted 2 and 9 tokens of
+answer. **Setting a variant is not a way to suppress reasoning** — it is what
+puts an unbounded reasoner under the same kind of governor Claude already has.
+
+So a roster entry carries an optional level, which becomes `variant:` in both
+generated agents (`variant` is a first-class opencode agent config key):
+
+```yaml
+model: zai-coding-plan/glm-5.3
+variant: high
+```
+
+An unrecognized variant is **silently ignored** by opencode
+(`if (!(agent.variant in model.variants)) return undefined`), so every variant
+written is echoed in the generator's report — that is the only place a typo
+surfaces.
+
+---
+
+## Roster as data (read-modify-write)
+
+The generator used to take one declarative list: "here is the roster, prune
+everything else". Asked to *add* a model, a caller would pass the single new id
+and the pruner would delete the rest — protocol followed exactly, squad wiped.
+Composing the right invocation was the caller's job, and getting it wrong was
+silent and total.
+
+So the roster is now data you edit:
+
+```bash
+squad-draft.mjs --export                 # current squad as JSON, from the agent files
+squad-draft.mjs --schema                 # the JSON Schema for that document
+squad-draft.mjs --apply roster.json      # write it back; prints the diff it applied
+squad-draft.mjs --apply roster.json --allow-remove
+squad-draft.mjs <provider/model[@variant]>...   # positional form, same guard
+```
+
+```json
+{ "version": 1,
+  "models": [ { "id": "zai-coding-plan/glm-5.3", "variant": "high" },
+              { "id": "anthropic/claude-opus-5" } ] }
+```
+
+Two properties make that safe, and neither is optional:
+
+1. **The roster is derived, never stored.** Every `--export` reads the generated
+   agent files. A manifest kept beside them would be a second source of truth,
+   desyncing the first time anyone edited the agent dir by hand.
+2. **Apply refuses to remove.** Read-modify-write only protects while the caller
+   actually modifies; one that rebuilds the roster from memory reintroduces the
+   wipe in a new wrapper. So removals exit non-zero and are named, until
+   `--allow-remove` says otherwise. The positional form goes through the same
+   guard, so the short invocation cannot wipe a squad either. `--no-prune` is
+   accepted and ignored — not pruning is the default now.
+
+Hand-authored agents are invisible in every mode: never exported, never pruned.
+
+---
+
+## Task-outcome note
+
+opencode's `task` tool hands the orchestrator the subagent's final text and nothing else — no finish reason, no token split. So two completely different failures arrive as the same empty string: the model was **cut off at max_tokens before it emitted anything**, or the model **genuinely ended its turn with no final message**. `state="completed"` in both cases.
+
+That gap is not theoretical. On 2026-09-01 two `zai-coding-plan` grunts (`glm-5.3-flash`, then `glm-5.3`) were dispatched on the same ESPHome component brief. Both came back with an empty `<task_result>`. Their sessions say why: `finish: "length"`, `reasoning: ~32000`, `output: 2` and `9` — each model spent its entire budget inside the reasoning channel (~133 KB of it, holding 70 fenced code blocks of real drafted work) and was truncated one step before writing a file. Their `gpt-5.6-terra` siblings on the same brief finished on `tool-calls` normally.
+
+Given only `""` to look at, the orchestrator announced *«отказ провайдера zai … бриф до оценки даже не дошёл»* and switched providers. Nothing in the session supported either claim — the brief had been parsed line by line and nearly implemented, and the only actual errors in that session were `Tool execution aborted` / `Task cancelled`, i.e. the user's own ESC. A missing diagnosis is bad; an invented one is worse, because the orchestrator acts on it.
+
+So when a `task` call returns an empty or truncated result, this plugin appends:
+
+```
+[TASK OUTCOME] task_id=ses_fa3e7d7a6ffe… (zai-coding-plan/glm-5.3) hit max_tokens (finish=length; 9 tokens output, 31991 tokens reasoning) and was cut off before emitting anything — the result is empty because the turn never reached one, not because the provider refused or the brief was rejected. The budget went into the reasoning channel, so the work may exist there as drafts; read that session's reasoning before rewriting the brief from scratch. Do not switch providers on this signal. Fix the cap: shorten the brief, split the task, or dispatch a model with room to answer.
+```
+
+Three outcomes get a note, and they say different things:
+
+| Signal | What the note says |
+| --- | --- |
+| `finish=length`, empty result | Truncated before emitting anything. **Not** a provider failure; don't reroute, fix the cap. Names the reasoning channel when reasoning dwarfs output (>4×), because that is where the work is. |
+| `finish=length`, non-empty result | The result below is **cut off mid-answer** — partial, not a deliverable. Verify what landed on disk. |
+| empty result, normal finish | Genuinely stopped rather than cut off. Named as such so the two don't get conflated in the other direction either. |
+
+A normal finish that produced a result gets no note at all.
+
+The facts come from the last *completed* assistant turn of the subagent session — the same `client.session.messages` fetch `[CACHE STATUS]` already makes, so this costs no extra call. Deliberately the last turn that carried a finish reason, not simply the newest: an aborted session can end with a stub assistant record (no finish, all-zero tokens), and reading the outcome off that stub would report "no finish reason" for every cancelled task. `[TASK OUTCOME]` is also appended when the model is unknown or the session has no usable timestamp, both of which suppress the cache-status line — degrading to silence there would restore the exact blind spot it exists to close.
+
+Verified by replaying the two real sessions above through `formatTaskOutcome()` against their stored `task` tool output: both parse as empty and produce the note quoted above.
+
+---
+
 ## Provider-quota signal (parser landed, delivery unsolved)
 
 Providers report how much of their rate-limit window is already burnt **on every successful response**, and opencode keeps none of it — so the orchestrator only learns a provider is saturated by getting a 429 from it, mid-dispatch, after paying for the work so far.

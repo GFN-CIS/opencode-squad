@@ -46,6 +46,7 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
+import { formatTaskOutcome, isTaskResultEmpty } from "../../src/task-outcome.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
@@ -280,20 +281,39 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       const res = await client.session.messages({ path: { id: sessionID }, query: { directory } });
       const msgs = res?.data ?? [];
       let lastHitMs = null;
+      let finish;
+      let outputTokens;
+      let reasoningTokens;
       for (let i = msgs.length - 1; i >= 0; i--) {
-        const created = msgs[i]?.info?.time?.created;
-        if (msgs[i]?.info?.role === "assistant" && typeof created === "number") {
-          lastHitMs = created;
-          break;
+        const info = msgs[i]?.info;
+        if (info?.role !== "assistant") continue;
+        if (lastHitMs === null && typeof info?.time?.created === "number") {
+          lastHitMs = info.time.created;
         }
+        // The finish reason and token split come from the last assistant turn
+        // that actually COMPLETED — a session can end with a stub assistant
+        // record (no finish, all-zero tokens) after an abort, and reading the
+        // outcome off that stub would report "no finish reason" for every
+        // cancelled task. Deliberately a separate scan from lastHitMs, which
+        // wants the newest provider contact whether or not it finished.
+        if (finish === undefined && typeof info?.finish === "string" && info.finish.length > 0) {
+          finish = info.finish;
+          outputTokens = info?.tokens?.output;
+          reasoningTokens = info?.tokens?.reasoning;
+        }
+        if (lastHitMs !== null && finish !== undefined) break;
       }
       // Missing usage must not suppress the cache-status line — it degrades to
       // the note without the size clause.
       const ctx = estimateContextTokens(msgs);
-      return { lastHitMs, contextTokens: ctx?.used };
+      return { lastHitMs, contextTokens: ctx?.used, finish, outputTokens, reasoningTokens };
     } catch {
-      // Best-effort; no hint is appended if we can't tell.
-      return { lastHitMs: null, contextTokens: undefined };
+      // Best-effort for the cache hint. `usageUnknown` matters more: without it
+      // the missing finish reason would read downstream as "finished normally",
+      // and an unreadable session would be reported as a subagent that chose to
+      // stop — a fabricated cause, which is the one thing [TASK OUTCOME] must
+      // never produce.
+      return { lastHitMs: null, contextTokens: undefined, usageUnknown: true };
     }
   };
 
@@ -311,9 +331,29 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     const taskId = meta?.sessionId;
     const providerID = meta?.model?.providerID;
     const modelID = meta?.model?.modelID;
-    if (!taskId || !providerID || !modelID) return;
+    if (!taskId) return;
 
-    const { lastHitMs, contextTokens } = await getSubagentUsage(taskId);
+    const { lastHitMs, contextTokens, finish, outputTokens, reasoningTokens, usageUnknown } =
+      await getSubagentUsage(taskId);
+
+    // [TASK OUTCOME] first, and on its own terms: an empty or truncated result
+    // is a fact about THIS call the orchestrator has to act on, whereas the
+    // cache status is advice about a possible next one. It is appended even
+    // when the model is unknown or the session has no usable timestamp —
+    // suppressing it there would silently restore the exact blind spot it
+    // exists to close. See src/task-outcome.js.
+    const outcome = formatTaskOutcome({
+      taskId,
+      providerModelId: providerID && modelID ? `${providerID}/${modelID}` : undefined,
+      finish,
+      outputTokens,
+      reasoningTokens,
+      resultEmpty: isTaskResultEmpty(/** @type {any} */ (output)?.output),
+      usageUnknown,
+    });
+    if (outcome) output.output = `${output.output}\n\n${outcome}`;
+
+    if (!providerID || !modelID) return;
     if (lastHitMs === null) return;
 
     // model_data.json wins when the user has filled it in; otherwise resolve

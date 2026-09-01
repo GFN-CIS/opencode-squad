@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { agentMarkdown, GENERATED_MARKER, slugForModel } from "../src/workers.js";
+import { agentMarkdown, GENERATED_MARKER, parseRosterEntry, slugForModel } from "../src/workers.js";
 
 test("slug collapses provider/model and punctuation, prefixed by role", () => {
   expect(slugForModel("openai/gpt-5.5")).toBe("grunt-openai-gpt-5-5"); // default role
@@ -49,4 +49,43 @@ test("unknown role throws", () => {
 test("frontmatter block is well-formed (opens and closes with ---)", () => {
   const { content } = agentMarkdown("grunt", "openai/gpt-5.5", "BODY");
   expect(content.indexOf("\n---\n", 4)).toBeGreaterThan(0);
+});
+
+test("parseRosterEntry splits a trailing @variant, and leaves plain ids alone", () => {
+  expect(parseRosterEntry("zai-coding-plan/glm-5.3@high")).toEqual({
+    modelId: "zai-coding-plan/glm-5.3",
+    variant: "high",
+  });
+  expect(parseRosterEntry("  anthropic/claude-opus-5  ")).toEqual({
+    modelId: "anthropic/claude-opus-5",
+  });
+  // Colons are part of real opencode model ids, so they must survive untouched.
+  expect(parseRosterEntry("anthropic/claude-opus-4-thinking:32000")).toEqual({
+    modelId: "anthropic/claude-opus-4-thinking:32000",
+  });
+  // A dangling separator is a typo, not a variant.
+  expect(parseRosterEntry("openai/gpt-5.5@")).toEqual({ modelId: "openai/gpt-5.5" });
+});
+
+test("agentMarkdown emits variant only when one is given", () => {
+  const withVariant = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", "BODY", {
+    variant: "high",
+  }).content;
+  expect(withVariant).toContain("model: zai-coding-plan/glm-5.3\nvariant: high\n");
+
+  const without = agentMarkdown("grunt", "anthropic/claude-opus-5", "BODY").content;
+  expect(without).not.toContain("variant:");
+  expect(without).toContain("model: anthropic/claude-opus-5\nhidden: true\n");
+});
+
+test("agentMarkdown ignores a blank variant rather than writing an empty key", () => {
+  const { content } = agentMarkdown("drill", "openai/gpt-5.5", "BODY", { variant: "   " });
+  expect(content).not.toContain("variant:");
+});
+
+test("the variant does not leak into the slug — one agent per model, not per variant", () => {
+  const a = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", "B", { variant: "high" });
+  const b = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", "B");
+  expect(a.slug).toBe(b.slug);
+  expect(a.filename).toBe(b.filename);
 });
