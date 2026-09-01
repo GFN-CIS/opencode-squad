@@ -88,16 +88,18 @@ job. (If they hand you an explicit list, honor it.)
    model: reviewing is the harder call. Prefer `high` for grunts, `high` or `max`
    for drills; `low` only when the user asks for cheap and fast.
 
-   Valid values are per-model, from that model's `reasoning_options` in
-   models.dev — `glm-5.3` publishes `low|high|max` (no `medium`),
-   `claude-opus-5` `low|medium|high|xhigh|max`, `gpt-5.6-terra` adds `none`:
-   ```bash
-   curl -s https://models.dev/api.json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["PROVIDER"]["models"]["MODEL"].get("reasoning_options"))'
-   ```
-   **An unrecognized variant is silently ignored** by opencode — a typo buys you
-   silence, not an error. Never guess a level; if you cannot read the model's
-   options, leave the variant off and say so. Models that publish no
-   `reasoning_options` get none.
+   **Do not work out which levels are valid — `squad_dump` already told you.**
+   Its output ends with the list opencode itself accepts per model, which is
+   authoritative. Do NOT derive them from models.dev `reasoning_options`: those
+   come in three types that opencode turns into different names, and reading
+   only the `effort` values under-reports. `claude-haiku-4-5` publishes just
+   `[{type: "budget_tokens", min: 1024}]`, so an effort reading says "no
+   variants" while opencode in fact accepts `high` and `max`.
+
+   A model listed with `(none — leave variant unset)` genuinely has no usable
+   knob; leave it alone. `squad_patch` rejects a variant opencode would not
+   accept, rather than writing one it would silently drop — so if you get that
+   error, read the accepted list in it, do not retry with another guess.
 
 5. **Ask, as a delta.** In one message (use the question tool if available), show
    what will CHANGE against the dumped roster, not just the end state:

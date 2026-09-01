@@ -35,7 +35,12 @@ import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
 import { formatBench } from "../../src/benchmarks.js";
 import { formatCacheStatus, resolveCacheTtl } from "../../src/cache-status.js";
-import { buildLimitMap, estimateContextTokens, formatLocalDateTime } from "../../src/context.js";
+import {
+  buildLimitMap,
+  buildVariantMap,
+  estimateContextTokens,
+  formatLocalDateTime,
+} from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { applyOrchestratorTransform } from "../../src/message-transform.js";
 import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
@@ -155,6 +160,10 @@ let _orchestratorModel = null;
 // Model context-window lookup, resolved once from the provider list.
 let _limitMap; // undefined = not loaded
 
+// Model context-window lookup's sibling: provider/model -> accepted variants.
+// undefined = not loaded, null = the lookup failed and we must not pretend.
+let _variantMap;
+
 // --- Rate-limit guard state (see src/rate-limit-guard.js for the decision
 // logic; everything here is plumbing: caches + the actual SDK calls). ---
 let _guardConfig; // normalized once from config.rate_limit_guard
@@ -239,6 +248,21 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       // Best-effort; falls back to DEFAULT_LIMIT per model.
     }
     return _limitMap;
+  };
+
+  // Which reasoning variants opencode will actually accept, per model — asked
+  // of opencode rather than derived from models.dev, because the derivation is
+  // a trap (see buildVariantMap). undefined means "could not ask", which is
+  // reported as unknown rather than treated as "none".
+  const getVariantMap = async () => {
+    if (_variantMap !== undefined) return _variantMap;
+    try {
+      const res = await client.config.providers();
+      _variantMap = buildVariantMap(res?.data?.providers ?? []);
+    } catch {
+      _variantMap = null;
+    }
+    return _variantMap;
   };
 
   // --- Rate-limit guard plumbing ---
@@ -733,10 +757,36 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
           const note = conflicts.length
             ? `\n\nnotes:\n${conflicts.map((c) => `  ${c}`).join("\n")}`
             : "";
+          // The accepted variants come from opencode itself. Without this the
+          // caller has to reconstruct them from models.dev `reasoning_options`,
+          // which silently under-reports: claude-haiku-4-5 publishes only a
+          // budget_tokens option, so an effort-values reading says "none" while
+          // opencode in fact accepts high and max.
+          const variantMap = await getVariantMap();
+          const ids = new Set([
+            ...Object.keys(roster.grunts ?? {}),
+            ...Object.keys(roster.drills ?? {}),
+          ]);
+          const variantLines =
+            variantMap === null
+              ? "\n\nAccepted variants: could not be read from opencode — treat as UNKNOWN and " +
+                "leave variants alone rather than guessing."
+              : ids.size === 0
+                ? ""
+                : `\n\nVariants opencode accepts (authoritative — do not guess, and do not derive\nthese from models.dev):\n${[
+                    ...ids,
+                  ]
+                    .sort()
+                    .map((id) => {
+                      const v = variantMap[id];
+                      if (v === undefined) return `  ${id}: unknown (model not in this install)`;
+                      return `  ${id}: ${v.length ? v.join(" | ") : "(none — leave variant unset)"}`;
+                    })
+                    .join("\n")}`;
           return {
             title: `squad: ${count} agent(s)`,
             output:
-              `Agent dir: ${dir}\n${JSON.stringify(roster, null, 2)}${note}\n\n` +
+              `Agent dir: ${dir}\n${JSON.stringify(roster, null, 2)}${note}${variantLines}\n\n` +
               "To change the squad, pass this same document back to squad_patch with your " +
               "edits applied — keeping every agent you were not asked to touch.",
             metadata: { dir, agents: count },
@@ -792,6 +842,32 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
           const dir = args.directory || defaultAgentDir();
           const roster = { grunts: args.grunts ?? {}, drills: args.drills ?? {} };
           const errors = validateRoster(roster);
+          // A variant opencode does not recognize is DROPPED by it without any
+          // error, so a typo would otherwise land as a silently ineffective
+          // config. We can ask opencode what it accepts, so refuse instead —
+          // but only when the lookup worked: our inability to check must not
+          // block a legitimate edit.
+          const variantMap = await getVariantMap();
+          if (variantMap) {
+            for (const [key, map] of Object.entries({
+              grunts: roster.grunts,
+              drills: roster.drills,
+            })) {
+              for (const [id, entry] of Object.entries(map ?? {})) {
+                const want = entry?.variant;
+                if (!want) continue;
+                const accepted = variantMap[id];
+                if (accepted === undefined) continue; // model not in this install
+                if (!accepted.includes(want)) {
+                  errors.push(
+                    `${key}["${id}"].variant "${want}" is not accepted by opencode for this ` +
+                      `model — it would be ignored silently. Accepted: ` +
+                      `${accepted.length ? accepted.join(" | ") : "(none: leave it unset)"}`,
+                  );
+                }
+              }
+            }
+          }
           if (errors.length) {
             return {
               title: "squad_patch rejected",
