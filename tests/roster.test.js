@@ -4,6 +4,7 @@ import {
   diffRoster,
   parseAgentFrontmatter,
   ROSTER_VERSION,
+  rolesOf,
   validateRoster,
 } from "../src/roster.js";
 
@@ -79,6 +80,7 @@ test("diffRoster separates added, removed, changed and unchanged", () => {
     removed: ["a/drop"],
     changed: ["a/retune: medium -> high"],
     unchanged: ["a/keep"],
+    removedRoles: [],
   });
 });
 
@@ -139,4 +141,62 @@ test("validateRoster rejects an empty-string variant rather than writing a blank
   expect(
     validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", variant: "  " }] }),
   ).toEqual(["models[0].variant must be a non-empty string when present"]);
+});
+
+test("buildRoster reports a grunt-only model as roles:[grunt], and a full pair as default", () => {
+  const { roster } = buildRoster([
+    { modelId: "a/full", role: "grunt" },
+    { modelId: "a/full", role: "drill" },
+    { modelId: "a/executor", role: "grunt", variant: "high" },
+  ]);
+  expect(roster.models).toEqual([
+    { id: "a/executor", variant: "high", roles: ["grunt"] },
+    { id: "a/full" },
+  ]);
+});
+
+test("buildRoster maps a legacy worker- file onto the grunt role", () => {
+  const { roster } = buildRoster([{ modelId: "a/old", role: "grunt" }]);
+  expect(roster.models).toEqual([{ id: "a/old", roles: ["grunt"] }]);
+});
+
+test("rolesOf defaults to both, because omitting the field must never delete", () => {
+  expect(rolesOf(undefined)).toEqual(["grunt", "drill"]);
+  expect(rolesOf([])).toEqual(["grunt", "drill"]);
+  expect(rolesOf(["drill"])).toEqual(["drill"]);
+  // Order is normalized, so ["drill","grunt"] and ["grunt","drill"] are one shape.
+  expect(rolesOf(["drill", "grunt"])).toEqual(["grunt", "drill"]);
+});
+
+test("diffRoster reports a narrowed role set as a change AND as a role removal", () => {
+  const d = diffRoster({ models: [{ id: "a/b" }] }, { models: [{ id: "a/b", roles: ["grunt"] }] });
+  expect(d.removed).toEqual([]);
+  expect(d.changed).toEqual(["a/b: roles grunt+drill -> grunt (drops drill)"]);
+  expect(d.removedRoles).toEqual([{ id: "a/b", role: "drill" }]);
+});
+
+test("diffRoster treats gaining a role as a change with nothing removed", () => {
+  const d = diffRoster({ models: [{ id: "a/b", roles: ["grunt"] }] }, { models: [{ id: "a/b" }] });
+  expect(d.removedRoles).toEqual([]);
+  expect(d.changed).toEqual(["a/b: roles grunt -> grunt+drill"]);
+});
+
+test("diffRoster labels an added grunt-only model so the report shows the shape", () => {
+  const d = diffRoster(
+    { models: [] },
+    { models: [{ id: "a/b", variant: "high", roles: ["grunt"] }] },
+  );
+  expect(d.added).toEqual(["a/b@high (grunt only)"]);
+});
+
+test("validateRoster rejects an unknown or empty roles list", () => {
+  expect(
+    validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", roles: ["sarge"] }] }),
+  ).toEqual(['models[0].roles has unknown role "sarge"']);
+  expect(validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", roles: [] }] })).toEqual([
+    "models[0].roles must be a non-empty array when present",
+  ]);
+  expect(
+    validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", roles: ["drill"] }] }),
+  ).toEqual([]);
 });

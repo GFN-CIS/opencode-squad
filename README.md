@@ -235,8 +235,16 @@ So the roster is data you edit, exposed as two plugin tools:
 ```json
 { "version": 1,
   "models": [ { "id": "zai-coding-plan/glm-5.3", "variant": "high" },
-              { "id": "anthropic/claude-opus-5" } ] }
+              { "id": "anthropic/claude-opus-5" },
+              { "id": "openai/gpt-5.6-luna", "roles": ["grunt"] } ] }
 ```
+
+`roles` decides which of the two agents a model gets, and appears only when it
+is not the default pair. **A drill is not a free extra.** A grunt executes; a
+drill reviews, and its verdict is what the orchestrator acts on. A weak model in
+that seat either rubber-stamps what it is shown or invents faults, and both are
+worse than no review, because they launder a bad change as an approved one. So
+cheap and small models are `roles: ["grunt"]` — they work, they do not judge.
 
 They are tools rather than a documented shell recipe because the skill used to
 have to `find` the bundled generator under `~/.cache` and then compose a CLI
@@ -255,11 +263,14 @@ Two properties make that safe, and neither is optional:
 1. **The roster is derived, never stored.** Every `squad_dump` reads the
    generated agent files. A manifest kept beside them would be a second source of truth,
    desyncing the first time anyone edited the agent dir by hand.
-2. **Apply refuses to remove.** Read-modify-write only protects while the caller
+2. **Apply refuses to delete.** Read-modify-write only protects while the caller
    actually modifies; one that rebuilds the roster from memory reintroduces the
-   wipe in a new wrapper. So removals are refused and named — nothing at all is
+   wipe in a new wrapper. So deletions are refused and named — nothing at all is
    written, not even the model that would have been added — until `allow_remove`
-   says otherwise.
+   says otherwise. The invariant is per *agent file*, not per model: narrowing
+   `roles` on a model that stays deletes an agent too, and is gated the same
+   way. Omitting `roles` means both roles and can never delete anything, so a
+   drill is only ever lost by typing the field.
 
 `squad_patch` additionally refuses to run from a `grunt-`/`drill-` agent. A
 subagent rewriting the squad mid-task is never intended, and the damage outlives

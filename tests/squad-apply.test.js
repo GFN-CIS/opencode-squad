@@ -107,3 +107,65 @@ test("formatApplyReport echoes written variants once per model, with the typo wa
 test("formatApplyReport omits the variant block entirely when no variant was set", () => {
   expect(formatApplyReport(apply([{ id: "a/one" }]))).not.toContain("Variants written");
 });
+
+test("applySquad writes only the roles an entry asks for", () => {
+  const result = apply([{ id: "a/executor", roles: ["grunt"] }, { id: "a/both" }]);
+  expect(result.ok).toBe(true);
+  expect(fs.readdirSync(dir).sort()).toEqual([
+    "drill-a-both.md",
+    "grunt-a-both.md",
+    "grunt-a-executor.md",
+  ]);
+  expect(readSquad(dir).roster.models).toEqual([
+    { id: "a/both" },
+    { id: "a/executor", roles: ["grunt"] },
+  ]);
+});
+
+// Not every model deserves a reviewer: a drill that cannot review rubber-stamps
+// or invents faults. Dropping one must be possible — and must still be gated,
+// because it deletes an agent.
+test("dropping a role is refused without allowRemove, and writes nothing", () => {
+  apply([{ id: "a/weak" }]);
+  const before = fs.readdirSync(dir).sort();
+
+  const refused = apply([{ id: "a/weak", roles: ["grunt"], variant: "high" }]);
+  expect(refused.ok).toBe(false);
+  expect(refused.diff.removed).toEqual([]);
+  expect(refused.diff.removedRoles).toEqual([{ id: "a/weak", role: "drill" }]);
+  expect(fs.readdirSync(dir).sort()).toEqual(before);
+  // The retune that shared the call must not land either — a refusal is total.
+  expect(fs.readFileSync(path.join(dir, "grunt-a-weak.md"), "utf8")).not.toContain("variant:");
+});
+
+test("dropping a role with allowRemove deletes just that agent", () => {
+  apply([{ id: "a/weak" }, { id: "a/keep" }]);
+  const result = apply([{ id: "a/weak", roles: ["grunt"] }, { id: "a/keep" }], true);
+  expect(result.ok).toBe(true);
+  expect(result.pruned).toEqual(["drill-a-weak.md"]);
+  expect(fs.readdirSync(dir).sort()).toEqual([
+    "drill-a-keep.md",
+    "grunt-a-keep.md",
+    "grunt-a-weak.md",
+  ]);
+});
+
+test("adding a missing role to an existing model needs no permission", () => {
+  apply([{ id: "a/half", roles: ["grunt"] }]);
+  const result = apply([{ id: "a/half" }]);
+  expect(result.ok).toBe(true);
+  expect(fs.existsSync(path.join(dir, "drill-a-half.md"))).toBe(true);
+});
+
+test("formatApplyReport separates models leaving from roles dropped", () => {
+  apply([{ id: "a/gone" }, { id: "a/narrow" }]);
+  const refused = apply([{ id: "a/narrow", roles: ["grunt"] }]);
+  // a/gone is two files, a/narrow loses one — three agents, not "two entries".
+  expect(refused.wouldDelete).toBe(3);
+  const report = formatApplyReport(refused);
+  expect(report).toContain("would DELETE 3 agent file(s)");
+  expect(report).toContain("models leaving the squad (1):");
+  expect(report).toContain("  - a/gone");
+  expect(report).toContain("roles dropped from models that stay (1):");
+  expect(report).toContain("  - drill for a/narrow");
+});

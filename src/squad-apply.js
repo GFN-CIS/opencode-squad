@@ -9,11 +9,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { buildRoster, diffRoster, parseAgentFrontmatter } from "./roster.js";
+import { ALL_ROLES, buildRoster, diffRoster, parseAgentFrontmatter, rolesOf } from "./roster.js";
 import { agentMarkdown, GENERATED_MARKER_DETECT } from "./workers.js";
 
-const ROLES = ["grunt", "drill"];
-const GENERATED_FILE_RE = /^(?:grunt|drill|worker)-.*\.md$/;
+const GENERATED_FILE_RE = /^(grunt|drill|worker)-.*\.md$/;
 
 /** The global agent dir opencode merges; the default target for the squad. */
 export function defaultAgentDir() {
@@ -29,7 +28,7 @@ export function defaultAgentDir() {
  * belongs to somebody else and is neither exported nor pruned.
  *
  * @param {string} dir
- * @returns {{roster: {version:number, models: Array<{id:string, variant?:string}>}, conflicts: string[], filesByModel: Map<string, string[]>}}
+ * @returns {{roster: {version:number, models: Array<{id:string, variant?:string, roles?:string[]}>}, conflicts: string[], filesByModel: Map<string, Map<string, string>>}}
  */
 export function readSquad(dir) {
   const entries = [];
@@ -43,7 +42,8 @@ export function readSquad(dir) {
     return { roster: buildRoster([]).roster, conflicts: [], filesByModel };
   }
   for (const f of files) {
-    if (!GENERATED_FILE_RE.test(f)) continue;
+    const m = GENERATED_FILE_RE.exec(f);
+    if (!m) continue;
     let txt;
     try {
       txt = fs.readFileSync(path.join(dir, f), "utf8");
@@ -53,9 +53,12 @@ export function readSquad(dir) {
     if (!txt.includes(GENERATED_MARKER_DETECT)) continue;
     const { modelId, variant } = parseAgentFrontmatter(txt);
     if (!modelId) continue;
-    entries.push({ modelId, variant });
-    if (!filesByModel.has(modelId)) filesByModel.set(modelId, []);
-    filesByModel.get(modelId).push(f);
+    // Legacy `worker-` files predate the grunt/drill split; treat them as the
+    // executor so an old squad still round-trips instead of vanishing.
+    const role = m[1] === "worker" ? "grunt" : m[1];
+    entries.push({ modelId, role, variant });
+    if (!filesByModel.has(modelId)) filesByModel.set(modelId, new Map());
+    filesByModel.get(modelId).set(role, f);
   }
   const { roster, conflicts } = buildRoster(entries);
   return { roster, conflicts, filesByModel };
@@ -69,38 +72,57 @@ export function readSquad(dir) {
  * caller reports, not an exception.
  *
  * @param {{roster: {models: Array<{id:string, variant?:string}>}, dir: string, allowRemove?: boolean, packageRoot: string}} input
- * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[]}, written: Array<{id:string,variant?:string,filename:string}>, pruned: string[], conflicts: string[], dir: string}}
+ * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[],removedRoles:Array<{id:string,role:string}>}, written: Array<{id:string,role:string,variant?:string,filename:string}>, pruned: string[], conflicts: string[], dir: string, wouldDelete?: number}}
  */
 export function applySquad({ roster, dir, allowRemove = false, packageRoot }) {
   const { roster: current, conflicts, filesByModel } = readSquad(dir);
   const diff = diffRoster(current, roster);
 
-  if (diff.removed.length > 0 && !allowRemove) {
-    return { ok: false, diff, written: [], pruned: [], conflicts, dir };
+  // Every generated agent that would disappear counts, whether it goes because
+  // its model left the roster or because the entry was narrowed to one role.
+  // "Nothing is deleted without an explicit opt-in" is a simpler invariant to
+  // trust than one that protects only whole models.
+  if ((diff.removed.length > 0 || diff.removedRoles.length > 0) && !allowRemove) {
+    // Counted in FILES, not models: a model leaving takes however many role
+    // files it actually has with it. The caller is deciding whether to lose
+    // agents, so that is the number to put in front of them.
+    const wouldDelete =
+      diff.removed.reduce((n, id) => n + (filesByModel.get(id)?.size ?? 0), 0) +
+      diff.removedRoles.filter(({ id, role }) => filesByModel.get(id)?.has(role)).length;
+    return { ok: false, diff, written: [], pruned: [], conflicts, dir, wouldDelete };
   }
 
   const body = Object.fromEntries(
-    ROLES.map((r) => [r, fs.readFileSync(path.join(packageRoot, "prompts", `${r}.md`), "utf8")]),
+    ALL_ROLES.map((r) => [
+      r,
+      fs.readFileSync(path.join(packageRoot, "prompts", `${r}.md`), "utf8"),
+    ]),
   );
   fs.mkdirSync(dir, { recursive: true });
 
   const written = [];
   for (const entry of roster.models) {
-    for (const role of ROLES) {
+    for (const role of rolesOf(entry.roles)) {
       const { filename, content } = agentMarkdown(role, entry.id, body[role], {
         variant: entry.variant,
       });
       fs.writeFileSync(path.join(dir, filename), content);
-      written.push({ id: entry.id, variant: entry.variant, filename });
+      written.push({ id: entry.id, role, variant: entry.variant, filename });
     }
   }
 
   const pruned = [];
   for (const id of diff.removed) {
-    for (const f of filesByModel.get(id) ?? []) {
+    for (const f of (filesByModel.get(id) ?? new Map()).values()) {
       fs.unlinkSync(path.join(dir, f));
       pruned.push(f);
     }
+  }
+  for (const { id, role } of diff.removedRoles) {
+    const f = filesByModel.get(id)?.get(role);
+    if (!f) continue;
+    fs.unlinkSync(path.join(dir, f));
+    pruned.push(f);
   }
 
   return { ok: true, diff, written, pruned, conflicts, dir };
@@ -119,10 +141,24 @@ export function formatApplyReport(result) {
   for (const c of result.conflicts) lines.push(`  note   ${c}`);
 
   if (!result.ok) {
+    const roleDrops = result.diff.removedRoles ?? [];
     lines.push(
       "",
-      `REFUSED: applying this roster would REMOVE ${result.diff.removed.length} model(s):`,
-      ...result.diff.removed.map((id) => `  - ${id}`),
+      `REFUSED: applying this roster would DELETE ${result.wouldDelete} agent file(s).`,
+      ...(result.diff.removed.length
+        ? [
+            "",
+            `models leaving the squad (${result.diff.removed.length}):`,
+            ...result.diff.removed.map((id) => `  - ${id}`),
+          ]
+        : []),
+      ...(roleDrops.length
+        ? [
+            "",
+            `roles dropped from models that stay (${roleDrops.length}):`,
+            ...roleDrops.map((r) => `  - ${r.role} for ${r.id}`),
+          ]
+        : []),
       "",
       "Nothing was written. If the user asked for these removals, retry with allow_remove.",
       "If you meant to ADD or RETUNE a model, you are working from the wrong roster —",

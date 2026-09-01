@@ -24,8 +24,11 @@ explicit list — honor it.)
    ```json
    { "version": 1,
      "models": [ { "id": "anthropic/claude-opus-5" },
-                 { "id": "zai-coding-plan/glm-5.3", "variant": "high" } ] }
+                 { "id": "zai-coding-plan/glm-5.3", "variant": "high" },
+                 { "id": "openai/gpt-5.6-luna", "roles": ["grunt"] } ] }
    ```
+   `roles` appears only when it is not the default pair, so an entry without it
+   has both a grunt and a drill.
    If the squad is non-empty, the task is almost always a DELTA — "add glm-5.3",
    "make the GLM grunt think less", "drop the qwen one". Keep every entry you
    were not asked about. Composing a fresh roster from memory is how a squad of
@@ -47,7 +50,16 @@ explicit list — honor it.)
    - **cheap & fast** — mechanical, high-volume work;
    - **code-specialized** — if such a model is available.
    Present it as a concrete list of `provider/model` ids, each with a one-line
-   "why". The same list is used for both grunts and drills.
+   "why".
+
+   **A drill is not a free extra — decide it per model.** A grunt executes; a
+   drill REVIEWS a grunt's work and its verdict is what sarge acts on. A weak
+   model in that seat either rubber-stamps whatever it is shown or invents
+   faults that aren't there, and both are worse than shipping with no review at
+   all, because they launder a bad change as an approved one. So give a drill
+   only to models that can genuinely review — the strong and balanced tiers.
+   Cheap/fast and small models get `roles: ["grunt"]`: they work, they do not
+   judge. Say which models you are proposing grunt-only, and why.
 
 2a. **Pick a reasoning variant for each model that publishes one.** Without a
    variant, opencode sends NO reasoning parameter — and for an
@@ -93,11 +105,13 @@ explicit list — honor it.)
    in. It writes a hidden `grunt-<slug>.md` (executor) and `drill-<slug>.md`
    (read-only reviewer) per model, and returns the diff it applied.
 
-   - **Removals are refused by default.** If the patch would drop a model, it
-     writes nothing and names what it would have removed. Hitting that means
-     your roster is wrong, not that the tool is in your way: re-dump and edit
-     that one. Pass `allow_remove: true` ONLY when the user asked for the
-     removal.
+   - **Deletions are refused by default.** That covers both a model leaving the
+     roster and a `roles` narrowed on a model that stays — either way an agent
+     file disappears. The patch writes nothing at all and names what it would
+     have deleted. Hitting that means your roster is wrong, not that the tool is
+     in your way: re-dump and edit that one. Pass `allow_remove: true` ONLY when
+     the user asked for it. Note the asymmetry: OMITTING `roles` means both and
+     deletes nothing, so you can only lose a drill by actually typing the field.
    - `directory` targets a project's `.opencode/agent` instead of the global
      `~/.config/opencode/agent`.
    - Hand-authored agents are invisible to both tools: never dumped, never
