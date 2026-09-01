@@ -225,7 +225,28 @@ and the pruner would delete the rest — protocol followed exactly, squad wiped.
 Composing the right invocation was the caller's job, and getting it wrong was
 silent and total.
 
-So the roster is now data you edit:
+So the roster is data you edit, exposed as two plugin tools:
+
+| tool | what it does |
+| --- | --- |
+| `squad_dump` | returns the current roster as JSON, derived from the agent files |
+| `squad_patch` | writes a roster back — `models[]`, plus `allow_remove` and `directory` |
+
+```json
+{ "version": 1,
+  "models": [ { "id": "zai-coding-plan/glm-5.3", "variant": "high" },
+              { "id": "anthropic/claude-opus-5" } ] }
+```
+
+They are tools rather than a documented shell recipe because the skill used to
+have to `find` the bundled generator under `~/.cache` and then compose a CLI
+invocation — ceremony for something this plugin already holds in memory, whose
+failure mode was a wiped squad. As a tool, the args schema *is* the roster
+schema: nothing to look up, nothing to assemble by hand, and a mistake comes
+back as a validation error instead of a deletion.
+
+The same behaviour and the same guards are still available from the CLI, for use
+outside a session:
 
 ```bash
 squad-draft.mjs --export                 # current squad as JSON, from the agent files
@@ -235,11 +256,9 @@ squad-draft.mjs --apply roster.json --allow-remove
 squad-draft.mjs <provider/model[@variant]>...   # positional form, same guard
 ```
 
-```json
-{ "version": 1,
-  "models": [ { "id": "zai-coding-plan/glm-5.3", "variant": "high" },
-              { "id": "anthropic/claude-opus-5" } ] }
-```
+Both go through one implementation (`src/squad-apply.js`) — two copies of the
+removal guard would eventually disagree, and the one that drifted would be the
+one that deletes a squad.
 
 Two properties make that safe, and neither is optional:
 
@@ -248,10 +267,15 @@ Two properties make that safe, and neither is optional:
    desyncing the first time anyone edited the agent dir by hand.
 2. **Apply refuses to remove.** Read-modify-write only protects while the caller
    actually modifies; one that rebuilds the roster from memory reintroduces the
-   wipe in a new wrapper. So removals exit non-zero and are named, until
-   `--allow-remove` says otherwise. The positional form goes through the same
-   guard, so the short invocation cannot wipe a squad either. `--no-prune` is
-   accepted and ignored — not pruning is the default now.
+   wipe in a new wrapper. So removals are refused and named — nothing at all is
+   written, not even the model that would have been added — until
+   `allow_remove` / `--allow-remove` says otherwise. The positional CLI form
+   goes through the same guard, so the short invocation cannot wipe a squad
+   either. `--no-prune` is accepted and ignored: not pruning is the default now.
+
+`squad_patch` additionally refuses to run from a `grunt-`/`drill-` agent. A
+subagent rewriting the squad mid-task is never intended, and the damage outlives
+the session.
 
 Hand-authored agents are invisible in every mode: never exported, never pruned.
 

@@ -25,32 +25,19 @@
 // Hand-authored agents are never touched in any mode.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  buildRoster,
-  diffRoster,
-  parseAgentFrontmatter,
-  ROSTER_SCHEMA,
-  ROSTER_VERSION,
-  validateRoster,
-} from "../src/roster.js";
-import { agentMarkdown, GENERATED_MARKER_DETECT, parseRosterEntry } from "../src/workers.js";
+import { ROSTER_SCHEMA, ROSTER_VERSION, validateRoster } from "../src/roster.js";
+import { applySquad, defaultAgentDir, formatApplyReport, readSquad } from "../src/squad-apply.js";
+import { parseRosterEntry } from "../src/workers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
-const PROMPTS = {
-  grunt: path.join(PACKAGE_ROOT, "prompts", "grunt.md"),
-  drill: path.join(PACKAGE_ROOT, "prompts", "drill.md"),
-};
-const ROLES = ["grunt", "drill"];
-const GENERATED_FILE_RE = /^(?:grunt|drill|worker)-.*\.md$/;
 
 function parseArgs(argv) {
   const models = [];
-  let dir = path.join(os.homedir(), ".config", "opencode", "agent");
+  let dir = defaultAgentDir();
   let allowRemove = false;
   let mode = "apply-positional";
   let rosterFile;
@@ -74,100 +61,15 @@ function parseArgs(argv) {
   return { models, dir, allowRemove, mode, rosterFile };
 }
 
-/**
- * Read the squad that currently exists, from the generated agent files. Only
- * files carrying our marker count — a hand-authored `grunt-something.md` is
- * somebody else's and is neither exported nor pruned.
- */
-function readCurrent(dir) {
-  const entries = [];
-  let files = [];
-  try {
-    files = fs.readdirSync(dir);
-  } catch {
-    return { entries, files: new Map() };
-  }
-  const byModel = new Map();
-  for (const f of files) {
-    if (!GENERATED_FILE_RE.test(f)) continue;
-    let txt;
-    try {
-      txt = fs.readFileSync(path.join(dir, f), "utf8");
-    } catch {
-      continue;
-    }
-    if (!txt.includes(GENERATED_MARKER_DETECT)) continue;
-    const { modelId, variant } = parseAgentFrontmatter(txt);
-    if (!modelId) continue;
-    entries.push({ modelId, variant });
-    if (!byModel.has(modelId)) byModel.set(modelId, []);
-    byModel.get(modelId).push(f);
-  }
-  return { entries, files: byModel };
-}
-
-function applyRoster({ roster, dir, allowRemove }) {
-  const { entries, files } = readCurrent(dir);
-  const { roster: current, conflicts } = buildRoster(entries);
-  const diff = diffRoster(current, roster);
-
-  if (diff.removed.length > 0 && !allowRemove) {
-    console.error(
-      `Refusing to apply: this would REMOVE ${diff.removed.length} model(s) from the squad:`,
-    );
-    for (const id of diff.removed) console.error(`  - ${id}`);
-    console.error(
-      "\nIf that is what you meant, re-run with --allow-remove. If you meant to ADD a model,\n" +
-        "start from `--export` and edit that roster rather than writing a new one.",
-    );
+/** Apply, print the shared report, and exit non-zero when the apply was refused. */
+function run({ roster, dir, allowRemove }) {
+  const result = applySquad({ roster, dir, allowRemove, packageRoot: PACKAGE_ROOT });
+  const report = formatApplyReport(result);
+  if (!result.ok) {
+    console.error(report);
     process.exit(1);
   }
-
-  const body = Object.fromEntries(ROLES.map((r) => [r, fs.readFileSync(PROMPTS[r], "utf8")]));
-  fs.mkdirSync(dir, { recursive: true });
-
-  const written = [];
-  for (const entry of roster.models) {
-    for (const role of ROLES) {
-      const { filename, content } = agentMarkdown(role, entry.id, body[role], {
-        variant: entry.variant,
-      });
-      fs.writeFileSync(path.join(dir, filename), content);
-      written.push({ id: entry.id, variant: entry.variant, filename });
-    }
-  }
-
-  const pruned = [];
-  for (const id of diff.removed) {
-    for (const f of files.get(id) ?? []) {
-      fs.unlinkSync(path.join(dir, f));
-      pruned.push(f);
-    }
-  }
-
-  console.log(`Agent dir: ${dir}`);
-  for (const c of conflicts) console.log(`  note   ${c}`);
-  for (const w of written) {
-    console.log(`  wrote  ${w.filename}   (${w.id}${w.variant ? `, variant: ${w.variant}` : ""})`);
-  }
-  for (const f of pruned) console.log(`  pruned ${f}`);
-  console.log(
-    `\n+${diff.added.length} added, -${diff.removed.length} removed, ` +
-      `~${diff.changed.length} changed, =${diff.unchanged.length} unchanged.`,
-  );
-  for (const a of diff.added) console.log(`  + ${a}`);
-  for (const c of diff.changed) console.log(`  ~ ${c}`);
-  for (const r of diff.removed) console.log(`  - ${r}`);
-  const variants = written.filter((w) => w.variant);
-  if (variants.length) {
-    console.log(
-      "\nVariants written (opencode ignores an unrecognized one WITHOUT error — check these\n" +
-        "against each model's `reasoning_options` in models.dev):",
-    );
-    for (const m of roster.models.filter((m) => m.variant))
-      console.log(`  ${m.id} -> ${m.variant}`);
-  }
-  console.log("\nReload opencode (restart the TUI / start a new run) to pick up the new agents.");
+  console.log(report);
 }
 
 function main() {
@@ -179,8 +81,7 @@ function main() {
   }
 
   if (mode === "export") {
-    const { entries } = readCurrent(dir);
-    const { roster, conflicts } = buildRoster(entries);
+    const { roster, conflicts } = readSquad(dir);
     for (const c of conflicts) console.error(`note: ${c}`);
     console.log(JSON.stringify(roster, null, 2));
     return;
@@ -207,7 +108,7 @@ function main() {
       console.error("\nRun --schema for the expected shape.");
       process.exit(2);
     }
-    applyRoster({ roster: doc, dir, allowRemove });
+    run({ roster: doc, dir, allowRemove });
     return;
   }
 
@@ -235,7 +136,7 @@ function main() {
     for (const e of errors) console.error(`  - ${e}`);
     process.exit(2);
   }
-  applyRoster({ roster, dir, allowRemove });
+  run({ roster, dir, allowRemove });
 }
 
 main();

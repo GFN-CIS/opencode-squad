@@ -18,19 +18,19 @@ explicit list — honor it.)
 
 ## Flow
 
-0. **Read the squad that already exists — before proposing anything.** The
-   roster is data you EDIT, not a list you retype:
-   ```bash
-   SCRIPT="$(find ~/.cache/opencode/packages -path '*node_modules/opencode-squad/scripts/squad-draft.mjs' 2>/dev/null | head -1)"
-   [ -z "$SCRIPT" ] && SCRIPT="$(find ~ -path '*opencode-squad/scripts/squad-draft.mjs' 2>/dev/null | head -1)"
-   node "$SCRIPT" --export > /tmp/squad-roster.json   # current squad, from the agent files
-   node "$SCRIPT" --schema                            # the shape, if you need it
-   cat /tmp/squad-roster.json
+0. **Read the squad that already exists — before proposing anything.** Call the
+   `squad_dump` tool. It returns the current roster as JSON, derived from the
+   generated agent files:
+   ```json
+   { "version": 1,
+     "models": [ { "id": "anthropic/claude-opus-5" },
+                 { "id": "zai-coding-plan/glm-5.3", "variant": "high" } ] }
    ```
    If the squad is non-empty, the task is almost always a DELTA — "add glm-5.3",
    "make the GLM grunt think less", "drop the qwen one". Keep every entry you
-   were not asked about. Writing a fresh roster from memory is how a squad of
-   seven became a squad of one.
+   were not asked about. Composing a fresh roster from memory is how a squad of
+   seven became a squad of one; `squad_patch` will refuse it, but the refusal is
+   a backstop, not the plan.
 
 1. **Discover** the models actually available in this install:
    ```bash
@@ -88,32 +88,26 @@ explicit list — honor it.)
    inside a rewrite. Wait for the answer and fold in their edits. Do not
    generate before they confirm.
 
-4. **Apply the edited roster.** Edit `/tmp/squad-roster.json` in place — add,
-   remove or retune entries — then apply it:
-   ```bash
-   node "$SCRIPT" --apply /tmp/squad-roster.json
-   ```
-   For each model it writes a hidden `grunt-<slug>.md` (executor) and a
-   `drill-<slug>.md` (read-only reviewer) to the global agent dir
-   (`~/.config/opencode/agent/`), and prints the diff it applied.
+4. **Apply the edited roster** with `squad_patch`, passing the COMPLETE
+   intended squad — the list you got from `squad_dump` with your edits folded
+   in. It writes a hidden `grunt-<slug>.md` (executor) and `drill-<slug>.md`
+   (read-only reviewer) per model, and returns the diff it applied.
 
-   - **Removals are refused by default.** If the apply would drop a model, the
-     script exits non-zero and names it. That is a guard, not an obstacle: if
-     you hit it and the user did NOT ask you to remove those models, your
-     roster is wrong — re-export and edit that one. Only pass `--allow-remove`
-     when the user actually asked for the removal.
-   - `--dir <path>` targets a project's `.opencode/agent` instead of the global
-     dir. `--apply -` reads the roster from stdin.
-   - Hand-authored agents are invisible to this script in every mode — they are
-     neither exported nor pruned.
+   - **Removals are refused by default.** If the patch would drop a model, it
+     writes nothing and names what it would have removed. Hitting that means
+     your roster is wrong, not that the tool is in your way: re-dump and edit
+     that one. Pass `allow_remove: true` ONLY when the user asked for the
+     removal.
+   - `directory` targets a project's `.opencode/agent` instead of the global
+     `~/.config/opencode/agent`.
+   - Hand-authored agents are invisible to both tools: never dumped, never
+     pruned.
 
-   The positional form still works for a first-time setup, and goes through the
-   same removal guard:
-   ```bash
-   node "$SCRIPT" 'zai-coding-plan/glm-5.3@high' 'anthropic/claude-opus-5'
-   ```
-   `@` rather than `:` because real model ids contain colons
-   (`claude-opus-4-thinking:32000`). Entries without `@` get no variant key.
+   There is also a bundled CLI with the same behaviour and the same guards —
+   `squad-draft.mjs --export | --schema | --apply <file> [--allow-remove]`, plus
+   a positional `<provider/model[@variant]>...` form. Use it only when the tools
+   are unavailable (running the generator outside a session); inside a session
+   the tools are the interface.
 
 5. **Report** the applied diff (`+added / -removed / ~changed / =unchanged`),
    echo the variants that were written — opencode ignores an unrecognized one
