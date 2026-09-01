@@ -110,7 +110,7 @@ test("resolveCacheTtl returns published figures for providers that publish one",
 });
 
 test("resolveCacheTtl falls back to the assumed floor, always with a number", () => {
-  for (const p of ["alibaba-token-plan", "zai-coding-plan", "totally-unknown", undefined, ""]) {
+  for (const p of ["alibaba-token-plan", "totally-unknown", undefined, ""]) {
     expect(resolveCacheTtl(p)).toEqual({
       seconds: ASSUMED_CACHE_TTL_SECONDS,
       source: "assumed",
@@ -198,4 +198,36 @@ test("formatCacheStatus degrades to relative-only when the timestamp is unavaila
     expect(s).toContain("last provider hit ~17m ago, model anthropic/claude-opus-5");
     expect(s).toContain("likely cold by now");
   }
+});
+
+test("resolveCacheTtl prefers a published figure over our own measurement", () => {
+  // We measured ~300 for openai, but 1800 is the vendor's published retention;
+  // a regression of their behaviour must not overrule their own number.
+  expect(resolveCacheTtl("openai")).toEqual({ seconds: 1800, source: "published" });
+});
+
+test("resolveCacheTtl falls to measured values where nothing is published", () => {
+  expect(resolveCacheTtl("zai")).toEqual({ seconds: 600, source: "measured" });
+  expect(resolveCacheTtl("zai-coding-plan")).toEqual({ seconds: 600, source: "measured" });
+  // Measured at the same number as the floor, but the label is now earned.
+  expect(resolveCacheTtl("github-copilot")).toEqual({ seconds: 300, source: "measured" });
+});
+
+test("resolveCacheTtl keeps the floor for providers we could not measure", () => {
+  // alibaba: 5 sessions total. google: no sample anywhere past 5m.
+  expect(resolveCacheTtl("alibaba-token-plan")).toEqual({ seconds: 300, source: "assumed" });
+  expect(resolveCacheTtl("google")).toEqual({ seconds: 300, source: "assumed" });
+});
+
+test("formatCacheStatus says a measured TTL came from our own history", () => {
+  const now = 1_000_000;
+  const s = formatCacheStatus({
+    taskId: "ses_glm",
+    providerModelId: "zai-coding-plan/glm-5.3",
+    lastHitMs: now - 6 * 60_000, // 6 min: cold under the old 300s floor, warm now
+    now,
+  });
+  expect(s).toContain("publishes no TTL; ~10m measured from our own history");
+  expect(s).toContain("likely still warm");
+  expect(s).not.toContain("assuming a conservative");
 });

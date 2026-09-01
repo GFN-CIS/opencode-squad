@@ -45,8 +45,34 @@ const PUBLISHED_CACHE_TTL_SECONDS = {
   openai: 1800,
 };
 
-// Assumed TTL for providers that publish nothing (alibaba-token-plan,
-// zai-coding-plan as of 2026-08). 300s is the shortest TTL anyone publishes,
+// Measured TTLs for providers that publish nothing, derived from opencode's own
+// message history by scripts/squad-measure-cache-ttl.mjs (see
+// src/cache-ttl-measure.js for the method — it reproduces Anthropic's published
+// 300s from ~70k samples, which is what makes it trustworthy here).
+//
+// Consulted only below the published table: a vendor's own number wins over our
+// regression of it. Measured as of 2026-09-01:
+//   zai              600 — 95% hits under 5m, still 93% at 5-10m, 83% at 10-20m
+//   zai-coding-plan  600 — 98% under 5m, 81% at 5-10m, 50% at 10-20m
+//   github-copilot   300 — 92% under 5m, then flat zero in every later bucket
+//
+// The two 600s rest on thin decisive buckets (n=15 and n=16) and are rounded
+// DOWN to the last gap with real evidence rather than up to where the curve
+// finally dies — same err-toward-cold bias as the floor below. What they buy is
+// not precision: it's not telling the orchestrator a 6-minute-old zai session is
+// cold when ~85% of them are still warm.
+//
+// Deliberately absent: alibaba-token-plan (points the same way but rests on 5
+// sessions total), and google (no sample anywhere past 5m, so "300" would mean
+// "never observed", not "measured"). Both keep the floor until there's data.
+const MEASURED_CACHE_TTL_SECONDS = {
+  zai: 600,
+  "zai-coding-plan": 600,
+  "github-copilot": 300,
+};
+
+// Assumed TTL for providers with neither a published nor a measured figure.
+// 300s is the shortest TTL anyone publishes,
 // so it errs toward "cold" — the cheap direction: a false "cold" costs one
 // re-brief, a false "warm" costs a full context re-upload.
 //
@@ -56,21 +82,25 @@ export const ASSUMED_CACHE_TTL_SECONDS = 300;
 
 /**
  * Resolve a prompt-cache TTL for a provider, always returning a number, with
- * `source` marking whether it's the provider's published figure or the assumed
- * floor. Callers surface that distinction rather than passing a bare number
- * off as fact.
+ * `source` marking where it came from. Callers surface that distinction rather
+ * than passing a bare number off as fact.
+ *
+ * Tiers, most authoritative first: published by the vendor, measured from our
+ * own history, then the assumed floor.
  *
  * @param {string} [providerID]  opencode providerID, e.g. "anthropic"
- * @returns {{seconds:number, source:"published"|"assumed"}}
+ * @returns {{seconds:number, source:"published"|"measured"|"assumed"}}
  */
 export function resolveCacheTtl(providerID) {
   // Own-property check: a bare `[providerID]` lookup would resolve
   // "constructor"/"toString" to Object.prototype members.
-  const published =
-    providerID && Object.hasOwn(PUBLISHED_CACHE_TTL_SECONDS, providerID)
-      ? PUBLISHED_CACHE_TTL_SECONDS[providerID]
-      : undefined;
+  const at = (table) =>
+    providerID && Object.hasOwn(table, providerID) ? table[providerID] : undefined;
+
+  const published = at(PUBLISHED_CACHE_TTL_SECONDS);
   if (typeof published === "number") return { seconds: published, source: "published" };
+  const measured = at(MEASURED_CACHE_TTL_SECONDS);
+  if (typeof measured === "number") return { seconds: measured, source: "measured" };
   return { seconds: ASSUMED_CACHE_TTL_SECONDS, source: "assumed" };
 }
 
@@ -110,7 +140,7 @@ function formatSizeClause(contextTokens, contextLimit) {
  *   lastHitMs: number,
  *   lastHitAtText?: string,
  *   ttlSeconds?: number,
- *   ttlSource?: "published"|"assumed",
+ *   ttlSource?: "published"|"measured"|"assumed",
  *   contextTokens?: number,
  *   contextLimit?: number,
  *   now: number,
@@ -135,11 +165,15 @@ export function formatCacheStatus(info) {
       : resolveCacheTtl(info.providerModelId?.split("/")[0]);
 
   const verdict = ageSeconds < ttl.seconds ? "likely still warm" : "likely cold by now";
-  const ttlLine =
-    ttl.source === "published"
-      ? `published cache TTL ~${humanizeSeconds(ttl.seconds)} — ${verdict}`
-      : `no cache TTL published for this provider, assuming a conservative ` +
-        `~${humanizeSeconds(ttl.seconds)} floor — ${verdict}`;
+  const ttlLine = {
+    published: () => `published cache TTL ~${humanizeSeconds(ttl.seconds)} — ${verdict}`,
+    measured: () =>
+      `this provider publishes no TTL; ~${humanizeSeconds(ttl.seconds)} measured from ` +
+      `our own history — ${verdict}`,
+    assumed: () =>
+      `no cache TTL published for this provider, assuming a conservative ` +
+      `~${humanizeSeconds(ttl.seconds)} floor — ${verdict}`,
+  }[ttl.source]();
 
   return (
     `[CACHE STATUS] task_id=${info.taskId} — last provider hit ${ageStr}, model ${info.providerModelId}. ` +

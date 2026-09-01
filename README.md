@@ -155,6 +155,22 @@ What stays honest is the label, not the silence: a published TTL is reported as 
 
 `qwen3.7-max` above leaves the field unset on purpose: that model gets the assumed 300s floor, reported as assumed. Set the field only when you have a real published number to override it with.
 
+### Measuring the TTL instead of trusting one
+
+`scripts/squad-measure-cache-ttl.mjs` derives each provider's TTL from opencode's own message history. Every provider reports `tokens.cache.read`, so for two consecutive assistant messages on the same provider+model you can ask whether the later one hit the prefix cache, and correlate that against the gap between them. Bucket by gap and the TTL shows up as the point the hit rate falls off.
+
+It is trustworthy because it recovers a known answer: Anthropic's published 300s falls straight out of the data — 93% hits under 5m, **7%** at 5-10m, ~2% beyond, across ~70k samples in 2016 sessions.
+
+```
+node scripts/squad-measure-cache-ttl.mjs [--db <file>] [--models] [--json]
+```
+
+It prints a report and writes nothing. `n` is printed on every row deliberately: a bucket reading 100% on two samples next to one reading 93% on sixty thousand is actively misleading without it, and `deriveTtl` refuses to extrapolate — running out of samples ends the walk exactly like a miss does, and the verdict is marked `[weak]` when a thin bucket decided it.
+
+Results as of 2026-09-01 fed `MEASURED_CACHE_TTL_SECONDS`: `zai` and `zai-coding-plan` at 600 (95%/98% under 5m, still 93%/81% at 5-10m — the 300s floor was calling six-minute-old sessions cold when ~85% of them were warm), `github-copilot` at 300 (92% under 5m, then flat zero). `alibaba-token-plan` and `google` deliberately keep the floor: the first rests on 5 sessions, the second has no sample anywhere past 5m, so "300" would mean "never observed" rather than "measured". Measured values sit *below* published ones — our regression of a vendor's behaviour does not overrule the vendor's own number, which is why `openai` stays at its published 1800 even though the measurement reads ~300.
+
+Like `squad-file-performance.mjs`, this is manual-only and will go stale. That is tolerable here in a way it was not for the read path: it is a periodic measurement, and a provider with no entry now falls through to the tiers above rather than to "unknown".
+
 Verified live: dispatched a real grunt via the `task` tool with `cache_ttl_seconds` set on its model entry and confirmed the exact `[CACHE STATUS]` line landed in the actual `task_result` the orchestrator sees (queried straight from opencode's own storage, not just logs).
 
 ---
