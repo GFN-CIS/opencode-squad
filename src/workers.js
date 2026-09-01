@@ -49,24 +49,70 @@ export function slugForModel(modelId, role = "grunt") {
 }
 
 /**
+ * Split a roster entry into its model id and optional reasoning variant.
+ * `"zai-coding-plan/glm-5.3@high"` -> `{ modelId: "zai-coding-plan/glm-5.3",
+ * variant: "high" }`.
+ *
+ * `@` rather than `:` as the separator: opencode model ids legitimately contain
+ * colons (`claude-opus-4-thinking:32000`), so a colon cannot be split on
+ * unambiguously. `@` appears in no opencode model id.
+ *
+ * @param {string} entry
+ * @returns {{modelId: string, variant?: string}}
+ */
+export function parseRosterEntry(entry) {
+  const raw = String(entry).trim();
+  const at = raw.lastIndexOf("@");
+  if (at <= 0) return { modelId: raw };
+  const variant = raw.slice(at + 1).trim();
+  if (!variant) return { modelId: raw.slice(0, at).trim() };
+  return { modelId: raw.slice(0, at).trim(), variant };
+}
+
+/**
  * Render the agent markdown file for one role+model: YAML frontmatter (subagent,
  * the model, role permissions, hidden) + the role's prompt as body.
+ *
+ * `variant` selects the model's reasoning level. opencode builds a model's
+ * variants from models.dev's `reasoning_options` (e.g. glm-5.3 publishes
+ * `low|high|max`, claude-opus-5 `low|medium|high|xhigh|max`) and lowers the
+ * chosen one into the provider's own parameter — `reasoning_effort` for
+ * openai-compatible providers. Without a variant NO reasoning parameter is
+ * sent, which for an openai-compatible model means its reasoning is bounded by
+ * nothing but the output cap: measured on glm-5.3, 70% of the token budget went
+ * to reasoning, with a tail to ~19k reasoning tokens in one turn, and two grunts
+ * were truncated mid-thought at the 32k cap having emitted 2 and 9 tokens.
+ * Anthropic models stay bounded without a variant because their server-side
+ * adaptive default governs; openai-compatible ones have no such fallback.
+ *
+ * Setting a variant is therefore NOT a way to suppress reasoning — it is what
+ * puts an unbounded reasoner under the same kind of governor Claude already has.
+ *
+ * An unknown variant is SILENTLY IGNORED by opencode (`if (!(agent.variant in
+ * model.variants)) return undefined`), so a typo buys silence, not an error.
+ * Only pass values from that model's own `reasoning_options`.
  *
  * @param {"grunt"|"drill"} role
  * @param {string} modelId  e.g. "anthropic/claude-opus-4-7"
  * @param {string} promptBody  contents of prompts/<role>.md
+ * @param {{variant?: string}} [opts]
  * @returns {{slug:string, filename:string, content:string}}
  */
-export function agentMarkdown(role, modelId, promptBody) {
+export function agentMarkdown(role, modelId, promptBody, opts = {}) {
   const cfg = ROLES[role];
   if (!cfg) throw new Error(`unknown role: ${role}`);
   const slug = slugForModel(modelId, role);
+  const variant = opts.variant?.trim();
   const content = [
     "---",
     `# ${GENERATED_MARKER}`,
     `description: ${cfg.description}`,
     "mode: subagent",
     `model: ${modelId}`,
+    // Only emitted when asked for: an absent `variant` leaves the model on its
+    // provider default, which is the right behaviour for models that don't
+    // publish reasoning options at all.
+    ...(variant ? [`variant: ${variant}`] : []),
     "hidden: true",
     "permission:",
     ...cfg.permission,
