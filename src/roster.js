@@ -27,51 +27,6 @@
 export const ROSTER_VERSION = 1;
 
 /**
- * JSON Schema for the roster document, served by `squad-draft.mjs --schema` so
- * the caller reads the shape instead of guessing it.
- *
- * `variant` is deliberately an open string rather than an enum: the valid
- * levels are per-model, published by models.dev as `reasoning_options`
- * (glm-5.3 has `low|high|max` and no `medium`; claude-opus-5 has
- * `low|medium|high|xhigh|max`). An enum here would be wrong for some model on
- * the day it shipped.
- */
-export const ROSTER_SCHEMA = {
-  $schema: "https://json-schema.org/draft/2020-12/schema",
-  title: "opencode-squad roster",
-  type: "object",
-  required: ["version", "models"],
-  additionalProperties: false,
-  properties: {
-    version: { const: ROSTER_VERSION },
-    models: {
-      type: "array",
-      description: "One entry per model. Each yields a grunt and a drill agent.",
-      items: {
-        type: "object",
-        required: ["id"],
-        additionalProperties: false,
-        properties: {
-          id: {
-            type: "string",
-            description: 'opencode model id, e.g. "zai-coding-plan/glm-5.3".',
-            pattern: "^[^/]+/.+$",
-          },
-          variant: {
-            type: "string",
-            description:
-              "Reasoning level for this model. Must be one of that model's own " +
-              "`reasoning_options` values in models.dev — opencode SILENTLY IGNORES " +
-              "an unrecognized variant. Omit for models that publish none.",
-            minLength: 1,
-          },
-        },
-      },
-    },
-  },
-};
-
-/**
  * Pull the model id and reasoning variant out of a generated agent file's YAML
  * frontmatter. Deliberately a narrow line-scan rather than a YAML parse: these
  * files are written by `agentMarkdown()`, so the shape is known, and a real

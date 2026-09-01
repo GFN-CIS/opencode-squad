@@ -3,7 +3,6 @@ import {
   buildRoster,
   diffRoster,
   parseAgentFrontmatter,
-  ROSTER_SCHEMA,
   ROSTER_VERSION,
   validateRoster,
 } from "../src/roster.js";
@@ -140,11 +139,4 @@ test("validateRoster rejects an empty-string variant rather than writing a blank
   expect(
     validateRoster({ version: ROSTER_VERSION, models: [{ id: "a/b", variant: "  " }] }),
   ).toEqual(["models[0].variant must be a non-empty string when present"]);
-});
-
-test("the schema advertises the same version the validator enforces", () => {
-  expect(ROSTER_SCHEMA.properties.version.const).toBe(ROSTER_VERSION);
-  // variant stays an open string: valid levels are per-model (models.dev
-  // reasoning_options), so an enum here would be wrong for some model.
-  expect(ROSTER_SCHEMA.properties.models.items.properties.variant.enum).toBeUndefined();
 });
