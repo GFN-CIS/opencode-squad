@@ -145,3 +145,45 @@ export function buildLimitMap(providers) {
   }
   return map;
 }
+
+/**
+ * `providerID/modelID` -> the reasoning variant names opencode will actually
+ * accept for that model.
+ *
+ * Read from opencode's own provider list rather than derived from models.dev,
+ * because deriving it is a trap. opencode builds a model's variants from
+ * `reasoning_options` by TYPE, and each type produces different names: `effort`
+ * yields the published values verbatim, `budget_tokens` yields `high`/`max`
+ * (but only for providers that have a budget parameter — openai-compatible does
+ * not, so those get nothing), and `toggle` yields `none`/`high` for exactly two
+ * npm packages. Observed consequence: `claude-haiku-4-5` publishes only
+ * `[{type: "budget_tokens", min: 1024}]`, so reading the effort values gives
+ * "no variants" while opencode in fact accepts `high` and `max`.
+ *
+ * Getting it wrong is silent — opencode drops an unrecognized variant without
+ * erroring — which is exactly why this comes from the horse's mouth.
+ *
+ * @param {Array<{id?:string, models?:Record<string, {variants?:unknown}>}>} providers
+ * @returns {Record<string, string[]>}
+ */
+export function buildVariantMap(providers) {
+  /** @type {Record<string, string[]>} */
+  const map = {};
+  if (!Array.isArray(providers)) return map;
+  for (const p of providers) {
+    const pid = p?.id;
+    const models = p?.models;
+    if (!pid || !models || typeof models !== "object") continue;
+    for (const [mid, m] of Object.entries(models)) {
+      const v = m?.variants;
+      // Both shapes seen in the wild: a keyed object of settings, or a list.
+      const names = Array.isArray(v)
+        ? v.filter((x) => typeof x === "string")
+        : v && typeof v === "object"
+          ? Object.keys(v)
+          : [];
+      map[`${pid}/${mid}`] = names;
+    }
+  }
+  return map;
+}

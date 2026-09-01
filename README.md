@@ -211,9 +211,16 @@ variant: high
 ```
 
 An unrecognized variant is **silently ignored** by opencode
-(`if (!(agent.variant in model.variants)) return undefined`), so every variant
-written is echoed in the generator's report — that is the only place a typo
-surfaces.
+(`if (!(agent.variant in model.variants)) return undefined`), so `squad_patch`
+refuses one instead of writing it. Which levels are valid comes from opencode's
+own provider list, not from models.dev: `reasoning_options` arrives in three
+types that opencode turns into different variant names — `effort` yields the
+published values, `budget_tokens` yields `high`/`max` but only for providers
+that have a budget parameter, and `toggle` yields `none`/`high` for exactly two
+npm packages. Reading only the effort values under-reports, and did:
+`claude-haiku-4-5` publishes just `[{type: "budget_tokens", min: 1024}]`, so an
+effort reading says "no variants" while opencode accepts `high` and `max`.
+`squad_dump` therefore prints the accepted list per model alongside the roster.
 
 ---
 

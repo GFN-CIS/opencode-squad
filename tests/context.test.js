@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   buildLimitMap,
+  buildVariantMap,
   CONTEXT_MARKER,
   estimateContextTokens,
   formatContextLine,
@@ -137,4 +138,27 @@ test("limit map keys by provider/model and bare model (provider array)", () => {
   expect(map.broken).toBeUndefined();
   expect(buildLimitMap(undefined)).toEqual({});
   expect(buildLimitMap([])).toEqual({});
+});
+
+test("buildVariantMap reads the variant names opencode itself accepts", () => {
+  const map = buildVariantMap([
+    {
+      id: "anthropic",
+      // Keyed object of per-variant settings — the shape opencode serves.
+      models: { "claude-haiku-4-5": { variants: { high: {}, max: {} } } },
+    },
+    // A model with reasoning but no usable variant knob reports an empty set,
+    // which must stay distinguishable from "we could not look it up".
+    { id: "alibaba-token-plan", models: { "qwen3.7-max": { variants: {} } } },
+    { id: "zai-coding-plan", models: { "glm-5.3": { variants: ["low", "high", "max"] } } },
+  ]);
+  expect(map["anthropic/claude-haiku-4-5"]).toEqual(["high", "max"]);
+  expect(map["alibaba-token-plan/qwen3.7-max"]).toEqual([]);
+  expect(map["zai-coding-plan/glm-5.3"]).toEqual(["low", "high", "max"]);
+});
+
+test("buildVariantMap survives junk without inventing entries", () => {
+  expect(buildVariantMap(null)).toEqual({});
+  expect(buildVariantMap([{ models: { "a/b": {} } }])).toEqual({}); // no provider id
+  expect(buildVariantMap([{ id: "p", models: { m: {} } }])).toEqual({ "p/m": [] });
 });
