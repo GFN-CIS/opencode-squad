@@ -195,12 +195,20 @@ Measured over 20 days on one machine:
 | claude-sonnet-5 | 481 | 2 621 | 13 992 | ~20% |
 | zai/glm-5.3 | 920 | 13 007 | 67 028 | **70%** |
 
-The medians are the same; the tails are not. Anthropic models stay bounded
-without a variant because their server-side adaptive default governs;
-openai-compatible ones have no such fallback, and two glm-5.3 grunts were
-truncated mid-thought at the 32k output cap having emitted 2 and 9 tokens of
-answer. **Setting a variant is not a way to suppress reasoning** — it is what
-puts an unbounded reasoner under the same kind of governor Claude already has.
+The medians are the same; the tails are not — and the tail is what hits the cap:
+two glm-5.3 grunts were truncated mid-thought having emitted 2 and 9 tokens of
+answer.
+
+**A variant is a hint about depth, not a token budget.** It does not prevent
+truncation: on 2026-09-02/03, one glm-5.3 and two claude-sonnet-5 turns were cut
+at 32k *with* `variant: high` set — the last of them 32 000 reasoning tokens and
+0 output. No model is immune, Anthropic included; an earlier claim here that
+Anthropic stayed bounded on its server-side default came from per-message
+reasoning lengths and did not survive contact with truncation data.
+
+What the variant does change is how often it happens. With it, glm-5.3 ran 83
+turns in one day with no truncation, against five in the two days before. So:
+mitigation, not a fix. The fix is the cap ([#2](https://github.com/GFN-CIS/opencode-squad/issues/2)).
 
 So a roster entry carries an optional level, which becomes `variant:` in both
 generated agents (`variant` is a first-class opencode agent config key):

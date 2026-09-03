@@ -78,15 +78,21 @@ job. (If they hand you an explicit list, honor it.)
    nothing but the output cap. Measured on `zai-coding-plan/glm-5.3`: 70% of the
    token budget went to reasoning (against ~20% for Claude), with a tail to ~19k
    reasoning tokens in one turn, and two grunts were truncated mid-thought having
-   emitted 2 and 9 tokens of actual answer. Anthropic models stay bounded on
-   their server-side adaptive default; openai-compatible ones have no such
-   fallback.
+   emitted 2 and 9 tokens of actual answer.
 
-   So a variant is **not** a way to suppress reasoning — it puts an unbounded
-   reasoner under the same kind of governor Claude already has. The variant is
-   per AGENT, so a drill may legitimately think harder than the grunt on the same
-   model: reviewing is the harder call. Prefer `high` for grunts, `high` or `max`
-   for drills; `low` only when the user asks for cheap and fast.
+   **A variant is a hint about depth, not a token budget — it does not prevent
+   truncation.** Three turns were cut at the cap WITH `variant: high` set (one
+   glm-5.3, two claude-sonnet-5, one of them 32000 reasoning tokens and 0
+   output). No model is immune, Anthropic included. What the variant changes is
+   the frequency: with it, glm-5.3 ran 83 turns in a day without a single
+   truncation, against five in the two days before. Set it as mitigation and say
+   so; the fix for truncation is the output cap, not the variant.
+
+   The variant is per AGENT, so a drill may legitimately think harder than the
+   grunt on the same model: reviewing is the harder call. Prefer `high` for
+   grunts, `high` or `max` for drills; `low` only when the user asks for cheap
+   and fast — and note that a lower level is the one thing that reduces
+   truncation directly, at the cost of the reasoning you wanted.
 
    **Do not work out which levels are valid — `squad_dump` already told you.**
    Its output ends with the list opencode itself accepts per model, which is
