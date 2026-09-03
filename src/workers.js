@@ -62,10 +62,16 @@ export function slugForModel(modelId, role = "grunt") {
  * nothing but the output cap: measured on glm-5.3, 70% of the token budget went
  * to reasoning, with a tail to ~19k reasoning tokens in one turn, and two grunts
  * were truncated mid-thought at the 32k cap having emitted 2 and 9 tokens.
- * Anthropic models stay bounded without a variant because their server-side
- * adaptive default governs; openai-compatible ones have no such fallback. So
- * setting a variant is NOT a way to suppress reasoning — it is what puts an
- * unbounded reasoner under the same kind of governor Claude already has.
+ * A variant is a HINT ABOUT DEPTH, not a token budget, and it does not stop a
+ * turn from hitting the cap: on 2026-09-02/03 a glm-5.3 grunt and two
+ * claude-sonnet-5 grunts were truncated at 32k WITH `variant: high` set. What it
+ * does change is how often that happens — with the variant, glm-5.3 ran 83 turns
+ * in a day with none. Treat it as mitigation, not a fix; the fix is the cap.
+ *
+ * Nor is Anthropic immune, contrary to what this comment used to claim: sonnet-5
+ * burned the whole 32k on reasoning and emitted 0 output tokens. The earlier
+ * conclusion came from per-message reasoning LENGTHS on another machine and did
+ * not survive contact with truncation data.
  *
  * An unknown variant is SILENTLY IGNORED by opencode (`if (!(agent.variant in
  * model.variants)) return undefined`), so a typo buys silence, not an error.
