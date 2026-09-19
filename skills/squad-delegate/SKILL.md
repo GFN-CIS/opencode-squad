@@ -124,8 +124,17 @@ TTL), and how big its context has grown. Use both.
   user's narrative is not continuity of context requirements — decide on what
   the work needs, not on how the request was phrased.
 - Past the TTL the cache is cold, so continuing does not just re-read the
-  history — it re-*uploads* it once at write price. A session that has grown
-  large is expensive to resume after a gap, and cheap to replace.
+  history — it re-*uploads* it once at full input price. What makes this bite is
+  not how often it happens but how much it costs when it does: the re-upload is
+  the WHOLE accumulated context, which only ever grows. Measured on one nine-
+  dispatch chain, seven resumes hit the cache for ~8k of fresh input each and
+  two went cold — and those two cost 303k and 440k, in that order. A session
+  that has grown large is expensive to resume after a gap, and cheap to replace.
+- **TTLs differ enormously between providers, so do not carry one habit across
+  them.** In the same chain a z.ai session was still warm after a 34-minute gap,
+  while Anthropic's published default expires at five minutes. The
+  `[CACHE STATUS]` line names the TTL it is judging against and where that
+  number came from; use it instead of a general sense of how long is too long.
 - Watch the size, not just the temperature. A reuse chain that keeps growing
   gets more expensive every step while delivering the same amount of work, and
   nothing stops it on its own. If the session is large but you genuinely need
@@ -330,9 +339,17 @@ The four facts and the verdict:
 - **size** — from that session's `[CACHE STATUS]` line (§1b);
 - **last hit** — the absolute timestamp in the same line. That is when the
   session last *started* a provider request, not when your task finished;
-- **now** — the current time from your bootstrap. Compute the gap yourself; the
-  `~Nm ago` in the note was relative to when that task ended and is stale by
-  the time you are deciding;
+- **now** — a LOWER BOUND on the current time, and you must take the latest
+  stamp you actually hold. Your bootstrap clock is stamped at the START of your
+  turn and does not advance while you work, so several tool calls in it can
+  understate the elapsed time badly. The `[CACHE STATUS]` line of any task that
+  has finished since carries a `read at` stamp; when it is newer than the
+  bootstrap clock, that is your bound. Because every stamp can only lag, the
+  gap you compute is a MINIMUM — the real one is at least that, never less. So
+  round against reuse: a gap anywhere near the TTL is cold. And if no
+  `[CACHE STATUS]` line is present at all — the hook omits it when the model or
+  the session's last-hit time is unknown — you have no tight bound and no
+  evidence of warmth, so treat the session as cold;
 - **verdict** — which way you went AND why, naming the numbers that decided it
   ("cold + 94% → fresh", "warm, 60k, same investigation → reuse"). A restatement
   of the figures with no commitment is worse than nothing: reasoning purely
