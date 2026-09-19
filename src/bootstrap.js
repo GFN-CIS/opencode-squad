@@ -23,7 +23,13 @@ export const BOOTSTRAP_MARKER = "<ORCHESTRATE_BOOTSTRAP>";
 // whether) and correctly lives only in the skill in full.
 export function buildBootstrap(inventoryMarkdown, facts = {}) {
   const lines = [];
-  if (facts.nowText) lines.push(`Current local time: ${facts.nowText}.`);
+  if (facts.nowText)
+    lines.push(
+      `Local time at the start of this turn: ${facts.nowText}. This clock is ` +
+        `stamped once per turn and does NOT advance while you work, so treat it ` +
+        `as a lower bound on "now" — see squad-delegate §6 before doing ` +
+        `elapsed-time math with it.`,
+    );
   if (facts.modelText) {
     lines.push(
       `You are running on: ${facts.modelText}. Trust this over any assumption ` +

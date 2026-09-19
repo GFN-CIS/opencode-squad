@@ -42,7 +42,7 @@ import {
   formatLocalDateTime,
 } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
-import { applyOrchestratorTransform } from "../../src/message-transform.js";
+import { applyOrchestratorTransform, createTurnMemo } from "../../src/message-transform.js";
 import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
 import {
   evaluateRetry,
@@ -68,6 +68,11 @@ const SKILLS_DIR = path.join(PACKAGE_ROOT, "skills");
 // The primary agent that acts as the orchestrator. Injection targets only this
 // agent's sessions (verified via message.info.agent in the Task 0 spike).
 const ORCHESTRATOR_AGENT = "build";
+
+// Holds the rendered injection block for the turn in flight, so every model
+// call within one turn sends byte-identical text and the provider's prompt
+// cache survives. See createTurnMemo for the measurements behind it.
+const _turnMemo = createTurnMemo();
 
 // Cache the subagent inventory string (and whether a squad has been drafted)
 // per process — neither changes at runtime. The bootstrap itself is assembled
@@ -415,6 +420,12 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
           new Date(lastHitMs),
           Intl.DateTimeFormat().resolvedOptions().timeZone,
         ) ?? undefined,
+      // The orchestrator's own clock is frozen at the start of its turn (see
+      // src/message-transform.js), so this stamp is the tighter lower bound on
+      // "now" when it computes a reuse gap later in the same turn.
+      nowAtText:
+        formatLocalDateTime(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone) ??
+        undefined,
       ttlSeconds: ttl.seconds,
       ttlSource: ttl.source,
       contextTokens,
@@ -900,6 +911,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         getLimitMap,
         getHasSquad: () => _hasSquadCache,
         orchestratorModel: _orchestratorModel,
+        turnMemo: _turnMemo,
       });
     },
   };

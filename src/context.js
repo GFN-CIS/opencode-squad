@@ -109,7 +109,9 @@ export function formatContextLine(used, limit) {
   const size = lim ? `~${k(used)} / ${k(lim)} (${pct}%)` : `~${k(used)} tokens`;
   return (
     `${CONTEXT_MARKER}\n` +
-    `Your current context: ${size}. ` +
+    `Your context at the start of this turn: ${size}. ` +
+    `It is stamped once per turn and does not move while you work — which is ` +
+    `the right value for a verdict you state at the top of the turn. ` +
     `Factor it into the self-vs-delegate decision as you see fit: doing heavy ` +
     `work yourself burns the raw reading and iterations into THIS context, ` +
     `while delegating costs you only the brief plus a compact result.\n` +

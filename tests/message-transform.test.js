@@ -3,6 +3,7 @@ import { BOOTSTRAP_MARKER } from "../src/bootstrap.js";
 import { CONTEXT_MARKER } from "../src/context.js";
 import {
   applyOrchestratorTransform,
+  createTurnMemo,
   findInjectionTarget,
   hasBootstrapMarker,
   isInternalGeneration,
@@ -132,4 +133,114 @@ test("applyOrchestratorTransform does nothing when there's no injection target",
     orchestratorModel: null,
   });
   expect(called).toBe(false);
+});
+
+// The cache fix. The transform fires once per MODEL CALL, so a turn with forty
+// tool calls runs it forty times; if the text it injects differs between those
+// calls, Anthropic's prefix-matched cache cannot read back anything at or after
+// it. These two tests are the only pre-deployment evidence the block is stable
+// — the injection is never persisted, so it cannot be observed from the DB.
+test("the injected block is byte-identical across calls within one turn", async () => {
+  const turnMemo = createTurnMemo();
+  const opts = {
+    orchestratorAgent: ORCH,
+    getInventory: async () => "- `grunt-x`: worker (model: p/m)",
+    getLimitMap: async () => ({ "p/m": 1_000_000 }),
+    getHasSquad: () => true,
+    orchestratorModel: "p/m",
+    turnMemo,
+  };
+
+  const first = {
+    info: { role: "user", agent: ORCH, id: "msg_turn1" },
+    parts: [{ type: "text", text: "go" }],
+  };
+  await applyOrchestratorTransform(
+    [
+      assistantMsg({
+        providerID: "p",
+        modelID: "m",
+        tokens: { input: 10, output: 5, cache: { read: 1000, write: 0 } },
+      }),
+      first,
+    ],
+    opts,
+  );
+  const firstTexts = first.parts.map((p) => p.text);
+
+  // Same turn, later call: a fresh copy of the stored message (injections are
+  // not persisted) and a bigger context — the growth must NOT change the text.
+  const later = {
+    info: { role: "user", agent: ORCH, id: "msg_turn1" },
+    parts: [{ type: "text", text: "go" }],
+  };
+  await applyOrchestratorTransform(
+    [
+      assistantMsg({
+        providerID: "p",
+        modelID: "m",
+        tokens: { input: 10, output: 5, cache: { read: 400_000, write: 0 } },
+      }),
+      later,
+    ],
+    opts,
+  );
+
+  expect(later.parts.map((p) => p.text)).toEqual(firstTexts);
+});
+
+test("a new turn gets a freshly built block", async () => {
+  const turnMemo = createTurnMemo();
+  let inventory = "- `grunt-x`: worker (model: p/m)";
+  const opts = {
+    orchestratorAgent: ORCH,
+    getInventory: async () => inventory,
+    getLimitMap: async () => ({ "p/m": 1_000_000 }),
+    getHasSquad: () => true,
+    orchestratorModel: "p/m",
+    turnMemo,
+  };
+  const mk = (id) => ({
+    info: { role: "user", agent: ORCH, id },
+    parts: [{ type: "text", text: "go" }],
+  });
+
+  const t1 = mk("msg_turn1");
+  await applyOrchestratorTransform([t1], opts);
+  inventory = "- `grunt-y`: a different squad (model: p/m)";
+  const t2 = mk("msg_turn2");
+  await applyOrchestratorTransform([t2], opts);
+
+  expect(t2.parts[0].text).not.toBe(t1.parts[0].text);
+  expect(t2.parts[0].text).toContain("grunt-y");
+});
+
+test("the memo is bounded, so concurrent orchestrator sessions cannot evict each other into rebuilding", async () => {
+  const turnMemo = createTurnMemo(2);
+  turnMemo.set("a", { bootstrap: "A", contextLine: null });
+  turnMemo.set("b", { bootstrap: "B", contextLine: null });
+  expect(turnMemo.get("a")?.bootstrap).toBe("A");
+  turnMemo.set("c", { bootstrap: "C", contextLine: null });
+  expect(turnMemo.get("a")).toBe(null); // oldest evicted, not the whole map
+  expect(turnMemo.get("b")?.bootstrap).toBe("B");
+  expect(turnMemo.get("c")?.bootstrap).toBe("C");
+});
+
+test("without a message id the block is rebuilt — no stable key to memo on", async () => {
+  const turnMemo = createTurnMemo();
+  let calls = 0;
+  const opts = {
+    orchestratorAgent: ORCH,
+    getInventory: async () => {
+      calls++;
+      return "(no subagents available)";
+    },
+    getLimitMap: async () => ({}),
+    getHasSquad: () => false,
+    orchestratorModel: null,
+    turnMemo,
+  };
+  await applyOrchestratorTransform([userMsg({ text: "go" })], opts);
+  await applyOrchestratorTransform([userMsg({ text: "go" })], opts);
+  expect(calls).toBe(2);
 });

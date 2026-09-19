@@ -139,6 +139,7 @@ function formatSizeClause(contextTokens, contextLimit) {
  *   providerModelId: string,
  *   lastHitMs: number,
  *   lastHitAtText?: string,
+ *   nowAtText?: string,
  *   ttlSeconds?: number,
  *   ttlSource?: "published"|"measured"|"assumed",
  *   contextTokens?: number,
@@ -175,8 +176,16 @@ export function formatCacheStatus(info) {
       `~${humanizeSeconds(ttl.seconds)} floor — ${verdict}`,
   }[ttl.source]();
 
+  // The absolute read-time matters as much as the last-hit time. The
+  // orchestrator's bootstrap clock is frozen at the start of its turn, so when
+  // it decides on reuse several tool calls later that clock understates the
+  // elapsed gap — which biases toward "still warm", the one direction that
+  // costs money. This stamp is the tighter lower bound on now, and it is the
+  // pair (last hit, read at) that makes the gap computable from one line.
+  const readAt = info.nowAtText ? `, read at ${info.nowAtText}` : "";
+
   return (
-    `[CACHE STATUS] task_id=${info.taskId} — last provider hit ${ageStr}, model ${info.providerModelId}. ` +
+    `[CACHE STATUS] task_id=${info.taskId} — last provider hit ${ageStr}${readAt}, model ${info.providerModelId}. ` +
     `${ttlLine}.${formatSizeClause(info.contextTokens, info.contextLimit)} ` +
     `Pass task_id to continue this same session if you want to reuse it.`
   );
