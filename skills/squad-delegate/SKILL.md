@@ -200,40 +200,25 @@ Before calling grunt, write:
 
 ### 2a. Address the brief to the model you are sending it to
 
-A brief is not model-neutral. Prompting technique that helps one model actively
-degrades another, and the gap is generational, not cosmetic: what an older
-generation needed spelled out — decomposed steps, few-shot examples, "think step
-by step", the same constraint repeated three times — is scaffolding a current
-reasoning model already builds for itself, and feeding it that scaffolding makes
-the output worse, not better. Check the bootstrap: you are very likely running on
-a recent frontier model yourself, so your own instinct for "a good prompt" is
-calibrated for a reader that may not be the one receiving this brief.
+A brief is not model-neutral, and you already know how they differ. You have
+read a lot about prompting GLM, Claude, GPT and the rest; what is missing is not
+the knowledge but the moment — so make this the moment. Before writing, look up
+the delegate's model in the inventory and ask yourself plainly: *what does a
+brief for THIS model, of THIS provider, at THIS generation need to look like?*
+Then write that one. Same reasoning §1a routes on, one step later.
 
-So before writing, look at the delegate's model in the inventory and the date in
-the bootstrap, and derive the register from *that specific model of that specific
-provider* — the same reasoning §1a uses to route, one step later. Reason from the
-model identity, not from habit, and don't trust a technique because it is famous.
+Two things nothing in your training will tell you, because they are about your
+position rather than about any model:
 
-What to reason about (axes, not a lookup table — any concrete list of
-"generation N wants X" rots faster than this file is edited):
-
-- **Procedure vs. outcome.** Weaker or older models want the path: numbered
-  steps, a worked example of the output, constraints restated at the point they
-  apply. Frontier reasoning models want the destination: goal, hard constraints,
-  definition of done, and the freedom to plan the route. Over-specifying the
-  procedure to a strong model burns its budget and boxes it out of the better
-  approach it would have found on its own.
-- **Do not hand a reasoning model your reasoning.** "Think step by step", forced
-  analysis preambles, "first consider X, then Y" — a model that reasons natively
-  already spends a budget doing exactly that; your scaffolding makes it pay
-  twice.
-- **Format rigidity is a weakness compensator.** drill's STRICT-JSON-ONLY demand,
-  repeated warnings, capitalised MUSTs: necessary insurance on a weak model,
-  near-noise on a strong one — and enough of it starts reading as if compliance
-  were the task.
-- **Negative constraints land unevenly across families.** Where "do not touch X"
-  does not stick, state the positive boundary instead — "edit only these two
-  files".
+- **Your instinct is calibrated for you.** Check the bootstrap — you are very
+  likely a recent frontier model, so "a good prompt" means, to you, the prompt
+  you would want to receive. The delegate may be two generations back, where the
+  scaffolding you would find insulting is load-bearing, or the opposite.
+  Whichever it is, the default of writing the brief you'd like is wrong roughly
+  half the time.
+- **Your knowledge has a cutoff and the inventory does not.** A model id you do
+  not recognise is not a licence to guess from the family name. Reason from what
+  it is, say that you are extrapolating, and let the first result correct you.
 
 Two consequences that are not style points:
 
