@@ -113,12 +113,10 @@ job. (If they hand you an explicit list, honor it.)
    prompt, which is the only place a per-model quirk can live permanently
    instead of being re-derived in every task brief (sarge does the per-brief
    half — writing each brief in its delegate's register — in `squad-delegate`
-   §2a). Fair game: a model that ignores negative constraints and needs the
-   positive boundary, one that drops the output format unless it is restated
-   last, one that has to be told to keep the reply short. Not fair game: policy
-   that belongs to the role for every model. Most agents need no notes at all —
-   propose one only where you have an actual observed reason, and say what it
-   is.
+   §2a). The test is narrow: a note earns its place only if it is true of THIS
+   model and false of the others — a quirk you have actually watched it exhibit,
+   not prompting advice in general and not policy that belongs to the role. Most
+   agents need none. Propose one only where you can name the reason.
 
 5. **Ask, as a delta.** In one message (use the question tool if available), show
    what will CHANGE against the dumped roster, not just the end state:
