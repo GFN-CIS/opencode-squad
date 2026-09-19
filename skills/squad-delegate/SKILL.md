@@ -52,6 +52,9 @@ where a weak model would produce confident nonsense — must go to a strong-mode
 grunt or stay with you. Do not hand them to the cheap default `grunt` just to
 delegate.
 
+The same model identity that decides *who* gets the task also decides *how the
+brief is written* — see §2a.
+
 **Capability cuts both ways — escalate UP when the weak model is *you*.** If
 you're running on a mid/cheap model (check the bootstrap) and the task — or a
 pivotal call inside it: a subtle correctness or security judgment, an
@@ -191,7 +194,64 @@ Before calling grunt, write:
 - a **definition of done** in free form: how you will know it was done well,
   tailored to the task domain (code, docs, research, creative, …),
 - the relevant **context**,
-- the **return format** you want.
+- the **return format** you want,
+- the **register** — the brief written for the delegate's own model, not
+  for you (§2a).
+
+### 2a. Address the brief to the model you are sending it to
+
+A brief is not model-neutral. Prompting technique that helps one model actively
+degrades another, and the gap is generational, not cosmetic: what an older
+generation needed spelled out — decomposed steps, few-shot examples, "think step
+by step", the same constraint repeated three times — is scaffolding a current
+reasoning model already builds for itself, and feeding it that scaffolding makes
+the output worse, not better. Check the bootstrap: you are very likely running on
+a recent frontier model yourself, so your own instinct for "a good prompt" is
+calibrated for a reader that may not be the one receiving this brief.
+
+So before writing, look at the delegate's model in the inventory and the date in
+the bootstrap, and derive the register from *that specific model of that specific
+provider* — the same reasoning §1a uses to route, one step later. Reason from the
+model identity, not from habit, and don't trust a technique because it is famous.
+
+What to reason about (axes, not a lookup table — any concrete list of
+"generation N wants X" rots faster than this file is edited):
+
+- **Procedure vs. outcome.** Weaker or older models want the path: numbered
+  steps, a worked example of the output, constraints restated at the point they
+  apply. Frontier reasoning models want the destination: goal, hard constraints,
+  definition of done, and the freedom to plan the route. Over-specifying the
+  procedure to a strong model burns its budget and boxes it out of the better
+  approach it would have found on its own.
+- **Do not hand a reasoning model your reasoning.** "Think step by step", forced
+  analysis preambles, "first consider X, then Y" — a model that reasons natively
+  already spends a budget doing exactly that; your scaffolding makes it pay
+  twice.
+- **Format rigidity is a weakness compensator.** drill's STRICT-JSON-ONLY demand,
+  repeated warnings, capitalised MUSTs: necessary insurance on a weak model,
+  near-noise on a strong one — and enough of it starts reading as if compliance
+  were the task.
+- **Negative constraints land unevenly across families.** Where "do not touch X"
+  does not stick, state the positive boundary instead — "edit only these two
+  files".
+
+Two consequences that are not style points:
+
+- **An over-scaffolded brief is an upstream cause of `finish=length` (§1b).**
+  Pile procedure and rhetoric onto a reasoning model and more of its cap goes
+  into the reasoning channel — which is precisely the truncation the
+  `[TASK OUTCOME]` note reports back to you. When a grunt on a capable model
+  comes back truncated, suspect the shape of your brief before you blame the
+  model or the provider.
+- **A brief that failed on one model is not a failed brief.** When you
+  re-dispatch to a different model after a FAIL (§4) or a stall (§4a), rewrite it
+  for the new reader instead of forwarding the old one verbatim. Same task,
+  different dialect — and if you forward drill's feedback, it inherits the
+  register of whoever wrote it, so re-say it rather than paste it.
+
+If a model's quirks turn out to be stable rather than task-specific, they do not
+belong in every brief: put them in that agent's roster `notes` via `squad-draft`,
+where they are baked into its prompt once instead of re-derived every dispatch.
 
 ## 3. The cycle (max 3 iterations) — changes branch
 
@@ -219,11 +279,21 @@ never actually checked. For a review that matters, dispatch a drill on a strong
 model (`drill-<provider>-<model>` from the inventory), the same way you pick
 grunts — a cheap drill rubber-stamps. Either way, read the verdict critically:
 
-- Does each `check` cite **concrete, specific** evidence (a real line, a real
-  test name, an actual value), or vague boilerplate that could apply to
-  anything? Vague/generic evidence = drill probably didn't look.
+- Does each `check` carry a real **`where`** — a `path:line`, a URL — and an
+  `evidence` string quoting what was actually there? A check whose evidence would read the same had drill never
+  opened the file = drill probably didn't look.
 - Does the evidence merely echo grunt's own self-report? Then it wasn't
   independently verified.
+- Is `unverified` non-empty? That is drill being honest, not drill failing.
+  drill is read-only and cannot run anything, so every check that needs a test
+  run or a command lands there as `kind: needs_execution` BY DESIGN — those are
+  yours to execute, which is what makes the PASS sanity-check below load-bearing
+  rather than a formality. A `kind: blocked` entry is the other thing entirely:
+  drill could not get at the artifact, so that part of the DoD is unestablished
+  and a PASS alongside it is worth little. An empty `unverified` on a broad DoD, with thin `where` fields, is
+  the rubber-stamp signature.
+- Did any check actually try to break the work, or do they all confirm what
+  grunt already claimed?
 - A `FAIL` can be a hallucinated objection too — don't bounce grunt on an
   invented problem. Sanity-check a FAIL before spending an iteration on it.
 

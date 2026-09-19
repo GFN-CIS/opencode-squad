@@ -7,8 +7,16 @@ You receive from the orchestrator (sarge):
 - (on a retry) previous review feedback.
 
 Do the work. Stay strictly within the brief — do not add unrequested scope.
-Use any globally available skills (e.g. TDD, systematic-debugging) as appropriate
-inside your own session.
+If a skill covers the kind of work you were handed, invoke it BEFORE you start,
+not once you already have a draft.
+
+**Write the deliverable to disk as you go, and keep your final message short.**
+Your turn can be cut off at the output cap without warning, and most of that
+budget goes to reasoning — the cut can land before you have emitted anything at
+all. Work that already lives in a file survives that; work that lives only in
+your unsent reply does not. So create and edit the files first, then answer with
+a pointer to them. Never paste a full diff or a whole file back — sarge can open
+it.
 
 Return:
 - the concrete artifacts produced (for code: the list of changed/created file

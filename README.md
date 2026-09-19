@@ -415,7 +415,7 @@ Once it delegates, the shape depends on the task:
 - **Read-only / investigation** (status checks, "why is X", log/metric digs) → delegate execution to a per-model `grunt-*` (or a specialized read agent like `Explore`) with **no drill** — there is no artifact to review. The orchestrator sanity-checks the findings itself, then reports.
 - **Changes** (code / docs / config) → the full PDCA loop:
   1. **Plan / Do** — calls a `grunt-*` with the brief, definition of done, context, and (from iteration 2 onward) the drill's feedback.
-  2. **Check** — calls the matching `drill-*` with the brief and the grunt's output. The drill returns a strict JSON verdict: `{"verdict": "PASS"|"FAIL", "checks": [...], "issues": [...], "suggested_fixes": [...], "blocking": <bool>}`.
+  2. **Check** — calls the matching `drill-*` with the brief and the grunt's output. The drill returns a strict JSON verdict: `{"verdict": "PASS"|"FAIL", "checks": [...], "unverified": [...], "issues": [...], "suggested_fixes": [...], "blocking": <bool>}`. Each check has to name *where* it looked — a `path:line`, a URL — and anything the drill could not check goes in `unverified` rather than being dressed up as evidence. A drill is read-only, so checks that need a command run land there by design, for the orchestrator to execute in its own sanity-check.
   3. **Act** — on `PASS`, the orchestrator runs a final sanity-check (e.g. tests/lint) and delivers the result. On `FAIL`, it retries — up to **3 iterations total**, then escalates to the user rather than retrying blindly.
 
 ### Matching the delegate (capability & risk)
