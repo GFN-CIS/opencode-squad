@@ -2,12 +2,12 @@
 // into its file at generation time for the one bundled with the plugin RIGHT
 // NOW, on every request, via `experimental.chat.system.transform`.
 //
-// WHY. `prompts/grunt.md` / `prompts/drill.md` are inlined into every generated
-// agent file by src/workers.js, because opencode's `task` tool takes only a
-// `subagent_type` and the per-model agent file is the only place a model can be
-// pinned. That makes each file a COPY: editing the bundled prompt changed
-// nothing for a squad already on disk until someone re-ran squad-draft by hand
-// — a manual step nobody remembers, and the copies drift silently.
+// WHY. A generated agent file exists per model, because opencode's `task` tool
+// takes only a `subagent_type` and the file is the only place a model can be
+// pinned. The role prompt used to be INLINED into each of those files, which
+// made every file a copy: editing the bundled prompt changed nothing for a
+// squad already on disk until someone re-ran squad-draft by hand — a manual
+// step nobody remembers, and the copies drifted silently.
 //
 // opencode builds the system prompt per request as
 //   system[0] = [agent.prompt, ...system, user.system].join("\n")
@@ -25,10 +25,14 @@
 //
 // Two properties this must keep:
 //
-//   1. The file on disk stays a COMPLETE, valid prompt. This is an override,
-//      never the only copy — if the plugin is missing, older than the agent, or
-//      the prompt file is unreadable, the agent still runs on the body it was
-//      generated with. Degrade to stale, never to blank.
+//   1. ONE source of truth. The file carries a placeholder, not a copy of the
+//      prompt, so nothing on disk can silently disagree with what was sent.
+//      An earlier version inlined the full body as a fallback; that bought a
+//      soft landing when the plugin is absent at the price of two states, and
+//      of not being able to tell from the file what the model actually got.
+//      The placeholder instead tells the agent to STOP and say so — a missing
+//      plugin is a broken install, and a grunt with `edit`/`bash` guessing its
+//      way through a task without its role prompt is worse than a loud failure.
 //
 //   2. Nothing volatile goes in. This text sits in the cache prefix, so a clock
 //      or a counter here would invalidate the whole conversation on every call
@@ -53,6 +57,32 @@ const OPEN_RE = /<!-- squad:prompt role=([a-z][a-z0-9-]*) -->/;
  */
 export function wrapPrompt(role, body) {
   return `${promptOpen(role)}\n${String(body).trim()}\n${PROMPT_CLOSE}`;
+}
+
+/**
+ * What a generated agent file carries INSIDE the fence: not the prompt, a note
+ * saying where the prompt comes from — plus an instruction for the one case
+ * where a model ever reads this text, which is the plugin failing to replace
+ * it. Kept to a few lines because it is dead weight in every healthy request.
+ *
+ * @param {string} role
+ * @returns {string}
+ */
+export function placeholderBody(role) {
+  return [
+    `This is a generated **${role}** agent for the opencode-squad (sarge PDCA) plugin.`,
+    "",
+    "The role prompt is NOT stored here: the plugin replaces this block with the current",
+    `\`prompts/${role}.md\` on every request, so editing that file takes effect immediately.`,
+    "",
+    "If you are reading this text as your instructions, that replacement did not happen —",
+    "the opencode-squad plugin is not loaded, and you have NO role instructions. Do not",
+    "attempt the task and do not guess what was wanted. Reply with exactly:",
+    "",
+    `\`squad prompt missing: the opencode-squad plugin did not inject the ${role} prompt\``,
+    "",
+    "and stop.",
+  ].join("\n");
 }
 
 /**

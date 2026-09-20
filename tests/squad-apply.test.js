@@ -4,7 +4,6 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { applySquad, formatApplyReport, readSquad } from "../src/squad-apply.js";
 
-const PACKAGE_ROOT = path.resolve(import.meta.dirname, "..");
 let dir;
 
 beforeEach(() => {
@@ -14,8 +13,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const apply = (roster, allowRemove = false) =>
-  applySquad({ roster, dir, allowRemove, packageRoot: PACKAGE_ROOT });
+const apply = (roster, allowRemove = false) => applySquad({ roster, dir, allowRemove });
 const ls = () => fs.readdirSync(dir).sort();
 const read = (f) => fs.readFileSync(path.join(dir, f), "utf8");
 

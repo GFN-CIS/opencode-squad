@@ -5,6 +5,7 @@ import {
   createPromptLoader,
   findPromptFence,
   PROMPT_CLOSE,
+  placeholderBody,
   promptOpen,
   wrapPrompt,
 } from "../src/prompt-inject.js";
@@ -123,18 +124,26 @@ describe("createPromptLoader", () => {
 });
 
 describe("generated agent files carry the fence", () => {
-  it("fences the role prompt and keeps roster notes outside it", () => {
-    const { content } = agentMarkdown("grunt", "anthropic/claude-opus-5", "ROLE BODY", {
+  it("fences a placeholder — never a copy of the role prompt — with notes outside it", () => {
+    const { content } = agentMarkdown("grunt", "anthropic/claude-opus-5", {
       notes: "this model over-scaffolds",
     });
     const fence = findPromptFence(content);
     expect(fence.role).toBe("grunt");
-    expect(content.slice(fence.start, fence.end)).toBe(wrapPrompt("grunt", "ROLE BODY"));
+    expect(content.slice(fence.start, fence.end)).toBe(
+      wrapPrompt("grunt", placeholderBody("grunt")),
+    );
     expect(content.indexOf("<!-- squad:notes -->")).toBeGreaterThan(fence.end);
   });
 
+  it("the placeholder tells an unhelped agent to stop rather than improvise", () => {
+    const { content } = agentMarkdown("grunt", "a/b");
+    expect(content).toContain("squad prompt missing");
+    expect(content).toContain("Do not");
+  });
+
   it("round-trips through parseAgentFile with notes and model intact", () => {
-    const { content } = agentMarkdown("grunt", "anthropic/claude-opus-5", "ROLE BODY", {
+    const { content } = agentMarkdown("grunt", "anthropic/claude-opus-5", {
       variant: "high",
       description: "strong analysis",
       notes: "this model over-scaffolds",
@@ -149,18 +158,16 @@ describe("generated agent files carry the fence", () => {
     // Regenerating from what was read back must reproduce the same file — the
     // fence sits before the notes markers, which is exactly where a parser
     // reading by index could start eating them.
-    const again = agentMarkdown("grunt", modelId, "ROLE BODY", entry);
+    const again = agentMarkdown("grunt", modelId, entry);
     expect(again.content).toBe(content);
   });
 
-  it("a generated body survives a refresh with its notes intact", () => {
-    const { content } = agentMarkdown("drill", "zai-coding-plan/glm-5.3", "OLD ROLE BODY", {
-      notes: "keep me",
-    });
+  it("the placeholder is replaced by the real prompt, notes intact", () => {
+    const { content } = agentMarkdown("drill", "zai-coding-plan/glm-5.3", { notes: "keep me" });
     const system = sys(content);
-    applySystemPromptTransform(system, () => "NEW ROLE BODY");
-    expect(system[0]).toContain("NEW ROLE BODY");
-    expect(system[0]).not.toContain("OLD ROLE BODY");
+    applySystemPromptTransform(system, () => "REAL ROLE BODY");
+    expect(system[0]).toContain("REAL ROLE BODY");
+    expect(system[0]).not.toContain("squad prompt missing");
     expect(system[0]).toContain("keep me");
     expect(system[0]).toContain(PROMPT_CLOSE);
   });
