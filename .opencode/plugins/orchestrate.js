@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
 import { formatBench } from "../../src/benchmarks.js";
 import { formatCacheStatus, resolveCacheTtl } from "../../src/cache-status.js";
+import { formatCompactReport, pickCompactionModel, splitModelId } from "../../src/compact.js";
 import {
   buildLimitMap,
   buildVariantMap,
@@ -302,8 +303,9 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     return info;
   };
 
-  const getAgentModel = async (agentName) => {
-    if (!agentName) return null;
+  // agent name -> its configured model, loaded once. Also the squad's set of
+  // usable models, which is what squad_compact picks the cheapest one out of.
+  const getAgentModelMap = async () => {
     if (_agentsCache === undefined) {
       _agentsCache = new Map();
       try {
@@ -315,6 +317,12 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         // Best-effort; the guard note just says "unknown" model on failure.
       }
     }
+    return _agentsCache;
+  };
+
+  const getAgentModel = async (agentName) => {
+    if (!agentName) return null;
+    await getAgentModelMap();
     return _agentsCache.get(agentName) ?? null;
   };
 
@@ -703,6 +711,30 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   });
   const agentMap = tool.schema.record(tool.schema.string(), agentEntry);
 
+  // --- subagent compaction (see src/compact.js) ---
+
+  // How long to wait on the compaction call before reporting back anyway.
+  // `POST /session/:id/summarize` runs the compaction inline and only then
+  // returns, so on a large history it can outlast a comfortable tool call.
+  // Timing out is not a failure: the compaction keeps running server-side,
+  // and the report says the sizes may be stale rather than inventing a
+  // result.
+  const COMPACT_TIMEOUT_MS = 180_000;
+
+  // Context size of a session right now, for the before/after numbers. Same
+  // estimator the [CACHE STATUS] size clause uses, so the two agree.
+  const readContextTokens = async (sessionID) => {
+    try {
+      const res = await client.session.messages({
+        path: { id: sessionID },
+        query: { directory },
+      });
+      return estimateContextTokens(res?.data ?? [])?.used;
+    } catch {
+      return undefined;
+    }
+  };
+
   return {
     config: async (config) => {
       // Capture the orchestrator's configured model as a turn-1 fallback
@@ -758,6 +790,115 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     // IS the roster schema, so there is nothing to look up and nothing to
     // assemble by hand.
     tool: {
+      squad_compact: tool({
+        description:
+          "Compact a subagent session BEFORE reusing it for a new, unrelated task: replaces its " +
+          "history with a summary, so the next dispatch re-reads a small context instead of the " +
+          "whole transcript. Use when you are about to send a LONG task down a session whose " +
+          "context is already large and mostly irrelevant to it — the size is in that session's " +
+          "last [CACHE STATUS] line. Not free: one full pass of the summarising model over the " +
+          "history, and the session's provider cache goes cold afterwards, so it pays off only " +
+          "when several turns follow. If the old history is worthless to the new task, a FRESH " +
+          "session is cheaper than compacting. opencode's own auto-compaction fires only at the " +
+          "context limit, which is far later than the moment this is for.",
+        args: {
+          task_id: tool.schema
+            .string()
+            .describe(
+              "The subagent session to compact — the task_id from its [CACHE STATUS] line.",
+            ),
+          model: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "`provider/model` that writes the summary. Defaults to the cheapest model the squad " +
+                "has an agent for (a flat-rate one first), NOT the session's own model — " +
+                "summarising is mechanical and does not need the expensive model that did the work.",
+            ),
+        },
+        async execute(args, ctx) {
+          // Rewriting another session's history is strictly more destructive
+          // than a roster write, so it takes the same caller guard: a drill is
+          // read-only by contract and must not be able to edit a grunt's
+          // transcript.
+          if (/^(?:grunt|drill)-/.test(ctx?.agent ?? "")) {
+            return (
+              `Refused: ${ctx.agent} is a subagent, and compacting a session is the ` +
+              "orchestrator's call. Say in your result that your context is large; sarge " +
+              "decides what to do about it."
+            );
+          }
+          const taskId = String(args.task_id ?? "").trim();
+          if (!taskId) return "squad_compact: task_id is required.";
+
+          // Read the session directly rather than through _sessionInfoCache:
+          // that cache stores null permanently for a lookup that failed once,
+          // which here would silently change which model writes the summary.
+          let agentName;
+          try {
+            const res = await client.session.get({ path: { id: taskId }, query: { directory } });
+            agentName = res?.data?.agent ?? undefined;
+          } catch {
+            // Falls through: the picker does not need the agent, only the
+            // report's wording and the last-resort model do.
+          }
+          const sessionModel = agentName ? await getAgentModel(agentName) : null;
+          const modelData = loadModelData() ?? {};
+          const available = new Set(
+            [...(await getAgentModelMap()).values()].map((m) => `${m.providerID}/${m.modelID}`),
+          );
+          const picked = pickCompactionModel({
+            explicit: args.model,
+            models: modelData,
+            available,
+            sessionModel: sessionModel
+              ? `${sessionModel.providerID}/${sessionModel.modelID}`
+              : undefined,
+          });
+          const model = picked && splitModelId(picked.id);
+          if (!model) {
+            return (
+              "squad_compact: could not resolve a model to summarise with. Pass one explicitly " +
+              "as `provider/model`."
+            );
+          }
+
+          const before = await readContextTokens(taskId);
+          let timedOut = false;
+          try {
+            await Promise.race([
+              client.session.summarize({
+                path: { id: taskId },
+                query: { directory },
+                body: { providerID: model.providerID, modelID: model.modelID },
+              }),
+              new Promise((resolve) =>
+                setTimeout(() => {
+                  timedOut = true;
+                  resolve(undefined);
+                }, COMPACT_TIMEOUT_MS),
+              ),
+            ]);
+          } catch (e) {
+            return `squad_compact: the compaction call failed — ${e?.message ?? String(e)}`;
+          }
+          // Not read on timeout: the compaction is still running, so the size
+          // then is mid-flight and a reduction computed from it would be a
+          // stated number that happens to be wrong.
+          const after = timedOut ? undefined : await readContextTokens(taskId);
+
+          return formatCompactReport({
+            taskId,
+            agent: agentName,
+            before,
+            after,
+            model: picked.id,
+            why: picked.why,
+            timedOut,
+          });
+        },
+      }),
+
       squad_dump: tool({
         description:
           "Read the current squad roster: every generated agent, grouped as `grunts` and " +

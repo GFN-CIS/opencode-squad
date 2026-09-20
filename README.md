@@ -247,6 +247,24 @@ So the roster is data you edit, exposed as two plugin tools:
 | `squad_dump` | returns the current roster as JSON, derived from the agent files |
 | `squad_patch` | writes a roster back — `grunts` / `drills`, plus `allow_remove` and `directory` |
 
+A third tool covers the other half of reuse:
+
+| tool | what it does |
+| --- | --- |
+| `squad_compact` | compacts a subagent session before it is reused for a new task — `task_id`, plus an optional `model` |
+
+Reuse used to be all-or-nothing: pass the `task_id` and re-read the whole
+transcript on every step, or start fresh and lose the history. `squad_compact`
+is the middle option — it runs opencode's own compaction (`POST
+/session/:id/summarize`, which accepts a subagent session like any other) so the
+next dispatch reads a summary instead. The summary is written by the cheapest
+model the squad has an agent for, preferring a flat-rate one, because
+summarising does not need the model that did the work. It is not free: one full
+pass over the history, and the session's provider cache goes cold afterwards, so
+it pays off only when several turns follow. opencode's automatic compaction
+fires at the context limit — around a million tokens on a 1M model — which is
+long past the point where reuse became expensive.
+
 ```json
 { "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high",
                                            "description": "cheap 1M ctx coder",
