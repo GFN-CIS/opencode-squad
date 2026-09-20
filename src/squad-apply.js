@@ -158,6 +158,11 @@ export function formatApplyReport(result) {
       ...variants.map((w) => `  ${w.role} ${w.id} -> ${w.variant}`),
     );
   }
-  lines.push("", "Reload opencode (restart the TUI / start a new run) to pick up the new agents.");
+  lines.push(
+    "",
+    "Reload opencode (restart the TUI / start a new run) to pick up the new agents.",
+    "Role prompt bodies do NOT need this: the plugin refreshes them from the bundled",
+    "prompts/<role>.md on every request. The reload is for the frontmatter written here.",
+  );
   return lines.join("\n");
 }

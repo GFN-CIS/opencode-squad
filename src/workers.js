@@ -1,3 +1,4 @@
+import { wrapPrompt } from "./prompt-inject.js";
 import { NOTES_CLOSE, NOTES_OPEN } from "./roster.js";
 
 // Pure helpers for scaffolding per-model squad subagents — both grunts (workers)
@@ -98,9 +99,14 @@ export function agentMarkdown(role, modelId, promptBody, opts = {}) {
   const variant = opts.variant?.trim();
   const description = opts.description?.trim() || cfg.description;
   const notes = opts.notes?.trim();
-  const body = notes
-    ? `${promptBody.trim()}\n\n${NOTES_OPEN}\n${notes}\n${NOTES_CLOSE}`
-    : promptBody.trim();
+  // The role prompt goes inside a fence so the plugin can swap it for the
+  // currently bundled one at request time (src/prompt-inject.js) — editing
+  // prompts/<role>.md then takes effect without regenerating the squad. The
+  // body written here stays complete and valid on its own: the override is a
+  // refresh, not the only copy. Roster `notes` sit OUTSIDE the fence, since
+  // they belong to this agent and the fence is replaced wholesale.
+  const fenced = wrapPrompt(role, promptBody);
+  const body = notes ? `${fenced}\n\n${NOTES_OPEN}\n${notes}\n${NOTES_CLOSE}` : fenced;
   const content = [
     "---",
     `# ${GENERATED_MARKER}`,

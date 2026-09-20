@@ -149,8 +149,10 @@ job. (If they hand you an explicit list, honor it.)
 7. **Report** the applied diff (`+added / -removed / ~changed / =unchanged`),
    echo the variants that were written — opencode ignores an unrecognized one
    without erroring, so this is the only place a typo shows up — and tell the
-   user to reload opencode (restart the TUI / start a new run) so the new agents
-   load. The generic `grunt` / `drill` remain as the default.
+   user to reload opencode (restart the TUI / start a new run) so the new
+   agents load. That reload is about the agent FILES (a new model, a changed
+   variant or description); role prompt bodies refresh by themselves and need
+   no reload. The generic `grunt` / `drill` remain as the default.
 
 ## Notes
 
@@ -166,5 +168,13 @@ job. (If they hand you an explicit list, honor it.)
   round-trip through `squad_dump`. Use them for per-model quirks, not for policy
   that belongs in the shared role prompt.
 - To change behavior for ALL agents of a role, edit the bundled
-  `prompts/grunt.md` / `prompts/drill.md` and re-apply — the prompt body is
-  inlined per file.
+  `prompts/grunt.md` / `prompts/drill.md`. **No re-apply is needed**: the body
+  is inlined per file, but the plugin swaps it for the currently bundled one on
+  every request (`experimental.chat.system.transform`, see
+  `src/prompt-inject.js`), so an edit is live for the next model call — even
+  mid-session. The inlined copy stays the fallback for when the plugin is
+  absent or the prompt file is unreadable. Two limits: an agent generated
+  before this existed carries no fence and needs ONE re-apply to opt in, and
+  everything in the frontmatter — `model`, `variant`, `description`, `steps`,
+  `disable`, permissions, adding or removing a model — still only changes by
+  re-applying the roster.
