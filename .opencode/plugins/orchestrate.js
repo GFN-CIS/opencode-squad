@@ -44,6 +44,7 @@ import {
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { applyOrchestratorTransform, createTurnMemo } from "../../src/message-transform.js";
 import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
+import { applySystemPromptTransform, createPromptLoader } from "../../src/prompt-inject.js";
 import {
   evaluateRetry,
   formatGuardNote,
@@ -73,6 +74,18 @@ const ORCHESTRATOR_AGENT = "build";
 // call within one turn sends byte-identical text and the provider's prompt
 // cache survives. See createTurnMemo for the measurements behind it.
 const _turnMemo = createTurnMemo();
+
+// Serves the CURRENT bundled role prompt to every generated grunt/drill agent,
+// overriding the copy frozen into its file when the squad was drafted. Cached
+// on (size, mtime) so an edit to prompts/<role>.md goes live without a restart
+// while costing one stat per request instead of a read. See src/prompt-inject.js.
+const _loadRolePrompt = createPromptLoader({
+  readFile: (role) => fs.readFileSync(path.join(PACKAGE_ROOT, "prompts", `${role}.md`), "utf8"),
+  statKey: (role) => {
+    const st = fs.statSync(path.join(PACKAGE_ROOT, "prompts", `${role}.md`));
+    return `${st.size}:${st.mtimeMs}`;
+  },
+});
 
 // Cache the subagent inventory string (and whether a squad has been drafted)
 // per process — neither changes at runtime. The bootstrap itself is assembled
@@ -903,6 +916,14 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     },
 
     "tool.execute.after": handleTaskToolAfter,
+
+    // Refresh a generated agent's role prompt in place. Fires for subagent
+    // sessions too (verified live: a dispatched grunt's system[0] arrives here
+    // starting with the grunt body), and no-ops on anything without our fence —
+    // sarge and hand-authored agents included.
+    "experimental.chat.system.transform": async (_input, output) => {
+      applySystemPromptTransform(output.system, _loadRolePrompt);
+    },
 
     "experimental.chat.messages.transform": async (_input, output) => {
       await applyOrchestratorTransform(output.messages, {

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { wrapPrompt } from "../src/prompt-inject.js";
 import { NOTES_CLOSE, NOTES_OPEN } from "../src/roster.js";
 import {
   agentMarkdown,
@@ -35,7 +36,7 @@ test("grunt markdown: edit/bash allowed, frontmatter, model, marker, body", () =
   expect(content).toContain("bash: allow");
   expect(content).toContain("'*': deny");
   expect(content).toContain(GENERATED_MARKER);
-  expect(content.trimEnd().endsWith(body)).toBe(true);
+  expect(content.trimEnd().endsWith(wrapPrompt("grunt", body))).toBe(true);
 });
 
 test("drill markdown: read-only (edit/bash denied, webfetch allowed)", () => {
@@ -45,7 +46,7 @@ test("drill markdown: read-only (edit/bash denied, webfetch allowed)", () => {
   expect(content).toContain("bash: deny");
   expect(content).toContain("webfetch: allow");
   expect(content).not.toContain("edit: allow");
-  expect(content.trimEnd().endsWith("REVIEW BODY")).toBe(true);
+  expect(content.trimEnd().endsWith(wrapPrompt("drill", "REVIEW BODY"))).toBe(true);
 });
 
 test("unknown role throws", () => {
