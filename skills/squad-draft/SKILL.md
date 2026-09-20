@@ -168,13 +168,15 @@ job. (If they hand you an explicit list, honor it.)
   round-trip through `squad_dump`. Use them for per-model quirks, not for policy
   that belongs in the shared role prompt.
 - To change behavior for ALL agents of a role, edit the bundled
-  `prompts/grunt.md` / `prompts/drill.md`. **No re-apply is needed**: the body
-  is inlined per file, but the plugin swaps it for the currently bundled one on
-  every request (`experimental.chat.system.transform`, see
+  `prompts/grunt.md` / `prompts/drill.md`. **No re-apply is needed**: the agent
+  file holds only a fenced placeholder, and the plugin injects the current
+  prompt on every request (`experimental.chat.system.transform`, see
   `src/prompt-inject.js`), so an edit is live for the next model call — even
-  mid-session. The inlined copy stays the fallback for when the plugin is
-  absent or the prompt file is unreadable. Two limits: an agent generated
-  before this existed carries no fence and needs ONE re-apply to opt in, and
-  everything in the frontmatter — `model`, `variant`, `description`, `steps`,
-  `disable`, permissions, adding or removing a model — still only changes by
-  re-applying the roster.
+  mid-session. The prompt is NOT copied into the file, deliberately: one source
+  of truth, and nothing on disk that can quietly disagree with what was sent.
+  Without the plugin an agent has no role prompt at all — the placeholder tells
+  it to stop and say so, which is the right failure for a grunt holding
+  `edit`/`bash`. Two limits: an agent generated before the fence existed needs
+  ONE re-apply to opt in, and everything in the frontmatter — `model`,
+  `variant`, `description`, `steps`, `disable`, permissions, adding or removing
+  a model — still only changes by re-applying the roster.

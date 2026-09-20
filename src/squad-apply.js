@@ -72,10 +72,10 @@ export function readSquad(dir) {
  * that would have been added get written, so a rejected apply leaves the squad
  * exactly as it was.
  *
- * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean, packageRoot: string}} input
+ * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean}} input
  * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[]}, written: Array<{role:string,id:string,variant?:string,filename:string}>, pruned: string[], conflicts: string[], dir: string}}
  */
-export function applySquad({ roster, dir, allowRemove = false, packageRoot }) {
+export function applySquad({ roster, dir, allowRemove = false }) {
   const { roster: current, conflicts, filesByAgent } = readSquad(dir);
   const diff = diffRoster(current, roster);
 
@@ -83,18 +83,16 @@ export function applySquad({ roster, dir, allowRemove = false, packageRoot }) {
     return { ok: false, diff, written: [], pruned: [], conflicts, dir };
   }
 
-  const body = Object.fromEntries(
-    Object.values(ROLE_KEYS).map((r) => [
-      r,
-      fs.readFileSync(path.join(packageRoot, "prompts", `${r}.md`), "utf8"),
-    ]),
-  );
+  // The bundled prompts are deliberately NOT read here: an agent file carries a
+  // fenced placeholder and the plugin injects the current role prompt at
+  // request time (src/prompt-inject.js), so this writes only frontmatter and
+  // the roster's own `notes`.
   fs.mkdirSync(dir, { recursive: true });
 
   const written = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
     for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
-      const { filename, content } = agentMarkdown(role, modelId, body[role], entry ?? {});
+      const { filename, content } = agentMarkdown(role, modelId, entry ?? {});
       fs.writeFileSync(path.join(dir, filename), content);
       written.push({ role, id: modelId, variant: entry?.variant, filename });
     }

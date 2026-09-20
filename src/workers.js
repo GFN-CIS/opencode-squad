@@ -1,4 +1,4 @@
-import { wrapPrompt } from "./prompt-inject.js";
+import { placeholderBody, wrapPrompt } from "./prompt-inject.js";
 import { NOTES_CLOSE, NOTES_OPEN } from "./roster.js";
 
 // Pure helpers for scaffolding per-model squad subagents — both grunts (workers)
@@ -86,26 +86,27 @@ export function slugForModel(modelId, role = "grunt") {
  * so a dump can read them back — the round trip is what makes the roster
  * trustworthy to edit.
  *
+ * The ROLE PROMPT ITSELF is not written here. The file gets a fenced
+ * placeholder, and the plugin swaps in the current `prompts/<role>.md` on every
+ * request (src/prompt-inject.js) — so a prompt edit is live without
+ * regenerating the squad, and the file never carries a second, staler copy of
+ * a text it does not own.
+ *
  * @param {"grunt"|"drill"} role
  * @param {string} modelId  e.g. "anthropic/claude-opus-4-7"
- * @param {string} promptBody  contents of prompts/<role>.md
  * @param {{variant?: string, description?: string, notes?: string, steps?: number, disable?: boolean}} [opts]
  * @returns {{slug:string, filename:string, content:string}}
  */
-export function agentMarkdown(role, modelId, promptBody, opts = {}) {
+export function agentMarkdown(role, modelId, opts = {}) {
   const cfg = ROLES[role];
   if (!cfg) throw new Error(`unknown role: ${role}`);
   const slug = slugForModel(modelId, role);
   const variant = opts.variant?.trim();
   const description = opts.description?.trim() || cfg.description;
   const notes = opts.notes?.trim();
-  // The role prompt goes inside a fence so the plugin can swap it for the
-  // currently bundled one at request time (src/prompt-inject.js) — editing
-  // prompts/<role>.md then takes effect without regenerating the squad. The
-  // body written here stays complete and valid on its own: the override is a
-  // refresh, not the only copy. Roster `notes` sit OUTSIDE the fence, since
-  // they belong to this agent and the fence is replaced wholesale.
-  const fenced = wrapPrompt(role, promptBody);
+  // Roster `notes` sit OUTSIDE the fence: they belong to this agent, and the
+  // fence is replaced wholesale on every request.
+  const fenced = wrapPrompt(role, placeholderBody(role));
   const body = notes ? `${fenced}\n\n${NOTES_OPEN}\n${notes}\n${NOTES_CLOSE}` : fenced;
   const content = [
     "---",
