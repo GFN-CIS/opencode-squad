@@ -137,10 +137,24 @@ TTL), and how big its context has grown. Use both.
   number came from; use it instead of a general sense of how long is too long.
 - Watch the size, not just the temperature. A reuse chain that keeps growing
   gets more expensive every step while delivering the same amount of work, and
-  nothing stops it on its own. If the session is large but you genuinely need
-  its history, you can compact it first and then continue on the brief —
-  `session.summarize` (opencode's `/compact`) applies to a subagent session too.
-  Otherwise: drop it and start fresh.
+  nothing stops it on its own. So the choice is three-way, not two-way, and the
+  question that separates them is what the NEW task needs from the old history:
+
+  - **nothing** → fresh session. Cheapest; the brief carries what matters.
+  - **some of it, and there is a lot of it** → `squad_compact(task_id)`, then
+    dispatch into the same session. It replaces the transcript with a summary,
+    so the next dispatch reads a small context instead of the whole thing.
+  - **all of it, and it is still small** → reuse as is; compacting a small
+    session buys nothing and loses detail.
+
+  `squad_compact` is not free and the numbers decide, not the instinct: it is
+  one full pass of a cheap model over the history, and it leaves that session's
+  cache COLD, so the next dispatch re-uploads the compacted context once. It
+  pays off when several turns follow — for a single short dispatch a fresh
+  session is cheaper. Decide BEFORE dispatching: compacting mid-task wastes the
+  pass. Note that opencode's own auto-compaction only fires at the context
+  LIMIT (around a million tokens on a 1M model), which is long past the point
+  where reuse got expensive — so it will not do this for you.
 
 **An empty result is a diagnosis you do NOT get to guess at.** When a `task`
 call comes back with an empty `<task_result>`, or with a result that stops
@@ -357,4 +371,4 @@ The four facts and the verdict:
   single session absorbed nine unrelated tasks and 94% of a 1M window.
 
 If you reuse a large session deliberately because you need its history, say
-that too — including whether you compacted it first (§1b).
+that too — including whether you ran `squad_compact` on it first (§1b).
