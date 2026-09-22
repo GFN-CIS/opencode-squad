@@ -1,0 +1,42 @@
+name: refresh-benchmarks
+on:
+  schedule:
+    - cron: "17 4 * * *" # daily; off the top of the hour to dodge the cron rush
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: refresh-benchmarks
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: node scripts/refresh-benchmarks.mjs
+        env:
+          AA_API_KEY: ${{ secrets.AA_API_KEY }}
+      # The script stamps _meta.generated on every run; a diff that is only that
+      # line is not a refresh, so don't commit it.
+      - id: diff
+        run: |
+          if git diff --quiet -I '"generated":' -- src/benchmarks.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Guard against a malformed or reshaped AA response landing on master.
+      - if: steps.diff.outputs.changed == 'true'
+        run: npm test
+      - if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/benchmarks.json
+          git commit -m "chore(benchmarks): refresh AA snapshot ($(date -u +%F))"
+          git pull --rebase origin master
+          git push origin HEAD:master
