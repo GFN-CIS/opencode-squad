@@ -2,8 +2,8 @@
  "_meta": {
   "source": "artificialanalysis.ai",
   "endpoint": "https://artificialanalysis.ai/api/v2/data/llms/models",
-  "generated": "2026-09-27",
-  "model_count": 664,
+  "generated": "2026-09-28",
+  "model_count": 665,
   "note": "Keyed by AA slug. Map an opencode provider/model id via src/benchmarks.js. Indices ~0-100; price is $/1M blended (3:1). No native agentic index — see agentic.* benchmarks. No cost-per-task — price_blended is the proxy."
  },
  "models": {
@@ -35,8 +35,8 @@
    "price_blended": 8,
    "price_input": 4,
    "price_output": 20,
-   "tps": 98.588,
-   "ttft": 232.884
+   "tps": 95.831,
+   "ttft": 384.96
   },
   "claude-opus-5-5-xhigh": {
    "name": "Claude Opus 5.5 (Adaptive Reasoning, Xhigh Effort, Default Fallback)",
@@ -66,8 +66,8 @@
    "price_blended": 8,
    "price_input": 4,
    "price_output": 20,
-   "tps": 85.33,
-   "ttft": 60.639
+   "tps": 85.288,
+   "ttft": 67.808
   },
   "claude-opus-5-5-high": {
    "name": "Claude Opus 5.5 (Adaptive Reasoning, High Effort, Default Fallback)",
@@ -97,7 +97,7 @@
    "price_blended": 8,
    "price_input": 4,
    "price_output": 20,
-   "tps": 80.616,
+   "tps": 80.108,
    "ttft": 19.326
   },
   "claude-fable-5-1": {
@@ -128,8 +128,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 71.375,
-   "ttft": 145.959
+   "tps": 68.903,
+   "ttft": 128.553
   },
   "claude-fable-5-1-xhigh": {
    "name": "Claude Fable 5.1 (Adaptive Reasoning, Xhigh Effort, Default Fallback)",
@@ -159,8 +159,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 63.968,
-   "ttft": 36.943
+   "tps": 62.907,
+   "ttft": 34.104
   },
   "gpt-6-astra": {
    "name": "GPT-6 Astra (max)",
@@ -190,8 +190,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 57.071,
-   "ttft": 228.143
+   "tps": 62.872,
+   "ttft": 190.41
   },
   "gpt-6-astra-xhigh": {
    "name": "GPT-6 Astra (xhigh)",
@@ -221,8 +221,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 54.519,
-   "ttft": 69.787
+   "tps": 53.922,
+   "ttft": 66.164
   },
   "claude-opus-5-5-medium": {
    "name": "Claude Opus 5.5 (Adaptive Reasoning, Medium Effort, Default Fallback)",
@@ -252,8 +252,8 @@
    "price_blended": 8,
    "price_input": 4,
    "price_output": 20,
-   "tps": 76.476,
-   "ttft": 12.27
+   "tps": 78.549,
+   "ttft": 12.691
   },
   "claude-fable-5-1-high": {
    "name": "Claude Fable 5.1 (Adaptive Reasoning, High Effort, Default Fallback)",
@@ -283,8 +283,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 54.463,
-   "ttft": 8.763
+   "tps": 53.187,
+   "ttft": 7.474
   },
   "gpt-6-astra-high": {
    "name": "GPT-6 Astra (high)",
@@ -314,8 +314,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 51.664,
-   "ttft": 22.306
+   "tps": 57.034,
+   "ttft": 23.893
   },
   "claude-opus-5": {
    "name": "Claude Opus 5 (Adaptive Reasoning, Max Effort)",
@@ -438,8 +438,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 49.044,
-   "ttft": 4.931
+   "tps": 54.814,
+   "ttft": 3.732
   },
   "claude-fable-5-1-medium": {
    "name": "Claude Fable 5.1 (Adaptive Reasoning, Medium Effort, Default Fallback)",
@@ -469,8 +469,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 52.809,
-   "ttft": 7.681
+   "tps": 54.78,
+   "ttft": 5.948
   },
   "claude-opus-5-high": {
    "name": "Claude Opus 5 (Adaptive Reasoning, High Effort)",
@@ -531,8 +531,8 @@
    "price_blended": 2,
    "price_input": 1.25,
    "price_output": 4.25,
-   "tps": 164.278,
-   "ttft": 26.816
+   "tps": 158.389,
+   "ttft": 25.209
   },
   "gpt-6-sol": {
    "name": "GPT-6 Sol (max)",
@@ -562,8 +562,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 86.998,
-   "ttft": 98.805
+   "tps": 84.517,
+   "ttft": 100.02
   },
   "gpt-5-6-sol": {
    "name": "GPT-5.6 Sol (max)",
@@ -624,8 +624,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 50.126,
-   "ttft": 3.493
+   "tps": 52.277,
+   "ttft": 3.74
   },
   "grok-4-7": {
    "name": "Grok 4.7 (xhigh)",
@@ -655,8 +655,8 @@
    "price_blended": 3,
    "price_input": 2,
    "price_output": 6,
-   "tps": 69.843,
-   "ttft": 12.728
+   "tps": 71.987,
+   "ttft": 19.929
   },
   "grok-4-7-high": {
    "name": "Grok 4.7 (high)",
@@ -686,8 +686,8 @@
    "price_blended": 3,
    "price_input": 2,
    "price_output": 6,
-   "tps": 65.319,
-   "ttft": 12.609
+   "tps": 80.877,
+   "ttft": 20.529
   },
   "mimo-v2-6-pro": {
    "name": "MiMo-V2.6-Pro",
@@ -717,8 +717,8 @@
    "price_blended": 0.544,
    "price_input": 0.435,
    "price_output": 0.87,
-   "tps": 39.872,
-   "ttft": 2.645
+   "tps": 40.168,
+   "ttft": 2.756
   },
   "gpt-6-astra-low": {
    "name": "GPT-6 Astra (low)",
@@ -748,8 +748,8 @@
    "price_blended": 20,
    "price_input": 10,
    "price_output": 50,
-   "tps": 49.14,
-   "ttft": 1.707
+   "tps": 52.669,
+   "ttft": 1.581
   },
   "qwen3-8-max": {
    "name": "Qwen3.8 Max (0902)",
@@ -779,8 +779,8 @@
    "price_blended": 3,
    "price_input": 2,
    "price_output": 6,
-   "tps": 37.365,
-   "ttft": 1.947
+   "tps": 37.728,
+   "ttft": 1.975
   },
   "muse-spark-1-3-xhigh": {
    "name": "Muse Spark 1.3 (xhigh)",
@@ -810,8 +810,8 @@
    "price_blended": 2,
    "price_input": 1.25,
    "price_output": 4.25,
-   "tps": 261.363,
-   "ttft": 19.829
+   "tps": 162.034,
+   "ttft": 32.612
   },
   "claude-opus-5-medium": {
    "name": "Claude Opus 5 (Adaptive Reasoning, Medium Effort)",
@@ -872,8 +872,8 @@
    "price_blended": 2.15,
    "price_input": 1.4,
    "price_output": 4.4,
-   "tps": 73.236,
-   "ttft": 2.601
+   "tps": 84.314,
+   "ttft": 2.469
   },
   "grok-4-6": {
    "name": "Grok 4.6 (high)",
@@ -903,8 +903,8 @@
    "price_blended": 3,
    "price_input": 2,
    "price_output": 6,
-   "tps": 77.613,
-   "ttft": 26.77
+   "tps": 81,
+   "ttft": 20.418
   },
   "grok-4-6-xhigh": {
    "name": "Grok 4.6 (xhigh)",
@@ -935,7 +935,7 @@
    "price_input": 2,
    "price_output": 6,
    "tps": 77.001,
-   "ttft": 29.127
+   "ttft": 22.687
   },
   "gpt-6-sol-xhigh": {
    "name": "GPT-6 Sol (xhigh)",
@@ -965,8 +965,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 76.472,
-   "ttft": 34.85
+   "tps": 76.223,
+   "ttft": 24.421
   },
   "gpt-5-6-sol-xhigh": {
    "name": "GPT-5.6 Sol (xhigh)",
@@ -1027,8 +1027,8 @@
    "price_blended": 1.425,
    "price_input": 1,
    "price_output": 2.7,
-   "tps": 73.563,
-   "ttft": 2.014
+   "tps": 79.77,
+   "ttft": 2.025
   },
   "kimi-k3": {
    "name": "Kimi K3 (max)",
@@ -1058,8 +1058,8 @@
    "price_blended": 6,
    "price_input": 3,
    "price_output": 15,
-   "tps": 36.78,
-   "ttft": 3.14
+   "tps": 0,
+   "ttft": 0
   },
   "grok-4-6-medium": {
    "name": "Grok 4.6 (medium)",
@@ -1089,8 +1089,8 @@
    "price_blended": 3,
    "price_input": 2,
    "price_output": 6,
-   "tps": 79.378,
-   "ttft": 23.345
+   "tps": 79.704,
+   "ttft": 16.233
   },
   "gpt-6-sol-high": {
    "name": "GPT-6 Sol (high)",
@@ -1120,8 +1120,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 75.931,
-   "ttft": 15.07
+   "tps": 76.055,
+   "ttft": 13.262
   },
   "gpt-5-6-sol-high": {
    "name": "GPT-5.6 Sol (high)",
@@ -1183,7 +1183,7 @@
    "price_input": 4,
    "price_output": 20,
    "tps": 79.161,
-   "ttft": 3.471
+   "ttft": 5.553
   },
   "gpt-5-6-terra": {
    "name": "GPT-5.6 Terra (max)",
@@ -1213,8 +1213,8 @@
    "price_blended": 4.5,
    "price_input": 2,
    "price_output": 12,
-   "tps": 90.455,
-   "ttft": 146.204
+   "tps": 97.871,
+   "ttft": 109.427
   },
   "glm-5-3-flash": {
    "name": "GLM 5.3 Flash",
@@ -1245,7 +1245,7 @@
    "price_input": 0.15,
    "price_output": 0.5,
    "tps": 55.098,
-   "ttft": 2.937
+   "ttft": 2.715
   },
   "claude-opus-4-8": {
    "name": "Claude Opus 4.8 (Adaptive Reasoning, Max Effort)",
@@ -1306,8 +1306,8 @@
    "price_blended": 1.5,
    "price_input": 0.75,
    "price_output": 3.75,
-   "tps": 274.594,
-   "ttft": 8.671
+   "tps": 262.465,
+   "ttft": 10.177
   },
   "claude-opus-4-7": {
    "name": "Claude Opus 4.7 (Adaptive Reasoning, Max Effort)",
@@ -1399,8 +1399,8 @@
    "price_blended": 3,
    "price_input": 2,
    "price_output": 6,
-   "tps": 37.196,
-   "ttft": 1.936
+   "tps": 38.109,
+   "ttft": 1.958
   },
   "qwen3-8-flash-next": {
    "name": "Qwen3.8-Flash-Next",
@@ -1430,8 +1430,8 @@
    "price_blended": 0.23,
    "price_input": 0.15,
    "price_output": 0.47,
-   "tps": 53.442,
-   "ttft": 1.436
+   "tps": 52.702,
+   "ttft": 1.447
   },
   "gpt-6-sol-medium": {
    "name": "GPT-6 Sol (medium)",
@@ -1585,8 +1585,8 @@
    "price_blended": 0.525,
    "price_input": 0.3,
    "price_output": 1.2,
-   "tps": 223.314,
-   "ttft": 0.767
+   "tps": 220.021,
+   "ttft": 0.794
   },
   "claude-opus-5-low": {
    "name": "Claude Opus 5 (Adaptive Reasoning, Low Effort)",
@@ -1802,8 +1802,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 80.407,
-   "ttft": 124.836
+   "tps": 82.175,
+   "ttft": 119.144
   },
   "gpt-5-6-terra-xhigh": {
    "name": "GPT-5.6 Terra (xhigh)",
@@ -1833,8 +1833,39 @@
    "price_blended": 4.5,
    "price_input": 2,
    "price_output": 12,
-   "tps": 87.215,
-   "ttft": 8.797
+   "tps": 96.712,
+   "ttft": 8.309
+  },
+  "mimo-v2-6-flash": {
+   "name": "MiMo-V2.6-Flash",
+   "creator": "xiaomi",
+   "release_date": "2026-09-21",
+   "intelligence": 37.9,
+   "coding": null,
+   "math": null,
+   "agentic": {
+    "tau2": null,
+    "tau_banking": null,
+    "terminalbench_hard": null,
+    "terminalbench_v2_1": null,
+    "lcr": 0.743333333333333
+   },
+   "benchmarks": {
+    "gpqa": null,
+    "hle": 0.351,
+    "livecodebench": null,
+    "scicode": 0.513,
+    "mmlu_pro": null,
+    "math_500": null,
+    "aime": null,
+    "aime_25": null,
+    "ifbench": null
+   },
+   "price_blended": 0.175,
+   "price_input": 0.14,
+   "price_output": 0.28,
+   "tps": 52.073,
+   "ttft": 3.1
   },
   "gpt-5-6-luna": {
    "name": "GPT-5.6 Luna (max)",
@@ -1895,8 +1926,8 @@
    "price_blended": 0.2,
    "price_input": 0.1,
    "price_output": 0.5,
-   "tps": 135.293,
-   "ttft": 122.98
+   "tps": 162.895,
+   "ttft": 72.664
   },
   "gpt-5-5-high": {
    "name": "GPT-5.5 (high)",
@@ -1988,8 +2019,8 @@
    "price_blended": 1.98,
    "price_input": 1.32,
    "price_output": 3.96,
-   "tps": 89.663,
-   "ttft": 1.15
+   "tps": 93.864,
+   "ttft": 1.134
   },
   "grok-4-6-low": {
    "name": "Grok 4.6 (low)",
@@ -2019,8 +2050,8 @@
    "price_blended": 3,
    "price_input": 2,
    "price_output": 6,
-   "tps": 63.996,
-   "ttft": 3.734
+   "tps": 69.21,
+   "ttft": 3.509
   },
   "deepseek-v4-flash-vision": {
    "name": "DeepSeek V4 Flash Vision (Reasoning, Max Effort)",
@@ -2050,8 +2081,8 @@
    "price_blended": 0.66,
    "price_input": 0.44,
    "price_output": 1.32,
-   "tps": 223.617,
-   "ttft": 0.746
+   "tps": 227.845,
+   "ttft": 0.807
   },
   "gpt-5-6-luna-xhigh": {
    "name": "GPT-5.6 Luna (xhigh)",
@@ -2112,8 +2143,8 @@
    "price_blended": 6,
    "price_input": 3,
    "price_output": 15,
-   "tps": 32.608,
-   "ttft": 3.214
+   "tps": 0,
+   "ttft": 0
   },
   "claude-sonnet-5-xhigh": {
    "name": "Claude Sonnet 5 (Adaptive Reasoning, Xhigh Effort)",
@@ -2143,8 +2174,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 72.145,
-   "ttft": 7.826
+   "tps": 69.295,
+   "ttft": 8.607
   },
   "deepseek-v4-flash": {
    "name": "DeepSeek V4 Flash 0731 (Reasoning, Max Effort)",
@@ -2205,8 +2236,8 @@
    "price_blended": 2.15,
    "price_input": 1.4,
    "price_output": 4.4,
-   "tps": 92.883,
-   "ttft": 2.786
+   "tps": 90.934,
+   "ttft": 3.002
   },
   "gpt-5-6-terra-high": {
    "name": "GPT-5.6 Terra (high)",
@@ -2236,8 +2267,8 @@
    "price_blended": 4.5,
    "price_input": 2,
    "price_output": 12,
-   "tps": 82.218,
-   "ttft": 2.218
+   "tps": 91.624,
+   "ttft": 1.843
   },
   "gemini-3-6-flash": {
    "name": "Gemini 3.6 Flash (high)",
@@ -2298,8 +2329,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 73.202,
-   "ttft": 2.178
+   "tps": 76.449,
+   "ttft": 1.777
   },
   "gpt-6-luna-xhigh": {
    "name": "GPT-6 Luna (xhigh)",
@@ -2329,8 +2360,8 @@
    "price_blended": 0.2,
    "price_input": 0.1,
    "price_output": 0.5,
-   "tps": 136.541,
-   "ttft": 16.496
+   "tps": 149.987,
+   "ttft": 14.878
   },
   "gpt-5-5-medium": {
    "name": "GPT-5.5 (medium)",
@@ -2453,8 +2484,8 @@
    "price_blended": 1.125,
    "price_input": 0.5,
    "price_output": 3,
-   "tps": 43.829,
-   "ttft": 1.251
+   "tps": 47.497,
+   "ttft": 1.267
   },
   "gemini-3-5-flash-medium": {
    "name": "Gemini 3.5 Flash (medium)",
@@ -2639,8 +2670,8 @@
    "price_blended": 4.813,
    "price_input": 1.75,
    "price_output": 14,
-   "tps": 115.012,
-   "ttft": 41.862
+   "tps": 113.84,
+   "ttft": 34.882
   },
   "motif-0714": {
    "name": "Motif 3 (Beta)",
@@ -2701,8 +2732,8 @@
    "price_blended": 0.2,
    "price_input": 0.1,
    "price_output": 0.5,
-   "tps": 129.521,
-   "ttft": 13.199
+   "tps": 144.498,
+   "ttft": 7.392
   },
   "gpt-5-6-luna-high": {
    "name": "GPT-5.6 Luna (high)",
@@ -2794,8 +2825,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 66.045,
-   "ttft": 1.878
+   "tps": 66.988,
+   "ttft": 1.962
   },
   "muse-spark": {
    "name": "Muse Spark",
@@ -3042,8 +3073,8 @@
    "price_blended": 4.5,
    "price_input": 2,
    "price_output": 12,
-   "tps": 76.812,
-   "ttft": 1.804
+   "tps": 88.399,
+   "ttft": 1.708
   },
   "claude-sonnet-4-6-adaptive": {
    "name": "Claude Sonnet 4.6 (Adaptive Reasoning, Max Effort)",
@@ -3104,8 +3135,8 @@
    "price_blended": 4.5,
    "price_input": 2,
    "price_output": 12,
-   "tps": 131.21,
-   "ttft": 17.985
+   "tps": 131.428,
+   "ttft": 19.058
   },
   "gpt-6-luna-medium": {
    "name": "GPT-6 Luna (medium)",
@@ -3197,8 +3228,8 @@
    "price_blended": 0.525,
    "price_input": 0.3,
    "price_output": 1.2,
-   "tps": 112.934,
-   "ttft": 0.947
+   "tps": 130.401,
+   "ttft": 0.825
   },
   "claude-opus-4-5-thinking": {
    "name": "Claude Opus 4.5 (Reasoning)",
@@ -3414,8 +3445,8 @@
    "price_blended": 0.525,
    "price_input": 0.3,
    "price_output": 1.2,
-   "tps": 72.701,
-   "ttft": 1.154
+   "tps": 76.824,
+   "ttft": 1.234
   },
   "gpt-6-sol-non-reasoning": {
    "name": "GPT-6 Sol (Non-reasoning)",
@@ -3445,7 +3476,7 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 74.61,
+   "tps": 77.601,
    "ttft": 0.967
   },
   "claude-sonnet-5-medium": {
@@ -3476,8 +3507,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 65.993,
-   "ttft": 1.329
+   "tps": 69.144,
+   "ttft": 1.214
   },
   "gemini-3-pro": {
    "name": "Gemini 3 Pro Preview (high)",
@@ -3569,8 +3600,8 @@
    "price_blended": 0.525,
    "price_input": 0.3,
    "price_output": 1.2,
-   "tps": 219.97,
-   "ttft": 2.261
+   "tps": 230.468,
+   "ttft": 2.006
   },
   "gpt-5-4-low": {
    "name": "GPT-5.4 (low)",
@@ -3631,8 +3662,8 @@
    "price_blended": 1.125,
    "price_input": 0.5,
    "price_output": 3,
-   "tps": 52.345,
-   "ttft": 1.18
+   "tps": 50.204,
+   "ttft": 1.189
   },
   "gpt-5-6-terra-low": {
    "name": "GPT-5.6 Terra (low)",
@@ -3662,8 +3693,8 @@
    "price_blended": 4.5,
    "price_input": 2,
    "price_output": 12,
-   "tps": 74.896,
-   "ttft": 1.865
+   "tps": 93.205,
+   "ttft": 1.57
   },
   "jt-4-1-flash-236b-a21b": {
    "name": "JT-4.1 Flash 236B A21B",
@@ -3817,8 +3848,8 @@
    "price_blended": 0.9,
    "price_input": 0.6,
    "price_output": 1.8,
-   "tps": 166.027,
-   "ttft": 0.547
+   "tps": 167.486,
+   "ttft": 0.507
   },
   "glm-5-turbo": {
    "name": "GLM-5-Turbo",
@@ -4003,8 +4034,8 @@
    "price_blended": 1.125,
    "price_input": 0.5,
    "price_output": 3,
-   "tps": 51.108,
-   "ttft": 1.327
+   "tps": 52.145,
+   "ttft": 1.204
   },
   "glm-5-1": {
    "name": "GLM-5.1 (Reasoning)",
@@ -4065,8 +4096,8 @@
    "price_blended": 11.25,
    "price_input": 5,
    "price_output": 30,
-   "tps": 127.561,
-   "ttft": 0.799
+   "tps": 131.706,
+   "ttft": 0.787
   },
   "deepseek-v4-flash-0420-high": {
    "name": "DeepSeek V4 Flash 0420 (Reasoning, High Effort)",
@@ -4127,8 +4158,8 @@
    "price_blended": 0.544,
    "price_input": 0.435,
    "price_output": 0.87,
-   "tps": 32.477,
-   "ttft": 2.065
+   "tps": 29.905,
+   "ttft": 1.986
   },
   "kimi-k2-7-code": {
    "name": "Kimi K2.7 Code",
@@ -4158,8 +4189,8 @@
    "price_blended": 1.712,
    "price_input": 0.95,
    "price_output": 4,
-   "tps": 57.974,
-   "ttft": 1.003
+   "tps": 0,
+   "ttft": 0
   },
   "grok-4-20": {
    "name": "Grok 4.20 0309 v2 (Reasoning)",
@@ -4251,8 +4282,8 @@
    "price_blended": 0.25,
    "price_input": 0.14,
    "price_output": 0.58,
-   "tps": 90.706,
-   "ttft": 2.028
+   "tps": 91.771,
+   "ttft": 2.001
   },
   "grok-4-20-0309": {
    "name": "Grok 4.20 0309 (Reasoning)",
@@ -4313,8 +4344,8 @@
    "price_blended": 0.175,
    "price_input": 0.14,
    "price_output": 0.28,
-   "tps": 40.014,
-   "ttft": 3.027
+   "tps": 41.473,
+   "ttft": 3.439
   },
   "qwen3-7-plus": {
    "name": "Qwen3.7 Plus",
@@ -4344,8 +4375,8 @@
    "price_blended": 0.7,
    "price_input": 0.4,
    "price_output": 1.6,
-   "tps": 69.201,
-   "ttft": 1.362
+   "tps": 68.351,
+   "ttft": 1.355
   },
   "mimo-v2-omni-0327": {
    "name": "MiMo-V2-Omni-0327",
@@ -4437,8 +4468,8 @@
    "price_blended": 1.762,
    "price_input": 1,
    "price_output": 4.05,
-   "tps": 191.938,
-   "ttft": 2.15
+   "tps": 203.086,
+   "ttft": 2.145
   },
   "ling-3-0-flash": {
    "name": "Ling 3.0 Flash",
@@ -4468,7 +4499,7 @@
    "price_blended": 0.111,
    "price_input": 0.075,
    "price_output": 0.22,
-   "tps": 387.524,
+   "tps": 388.681,
    "ttft": 1.759
   },
   "gpt-5-codex": {
@@ -4686,7 +4717,7 @@
    "price_input": 0.3,
    "price_output": 1.2,
    "tps": 212.435,
-   "ttft": 0.846
+   "ttft": 0.886
   },
   "ling-3-0-flash-vl": {
    "name": "Ling-3.0-flash-VL",
@@ -4716,8 +4747,8 @@
    "price_blended": 0.111,
    "price_input": 0.075,
    "price_output": 0.22,
-   "tps": 149.2,
-   "ttft": 1.158
+   "tps": 149.136,
+   "ttft": 1.136
   },
   "grok-4-3-low": {
    "name": "Grok 4.3 (low)",
@@ -4778,8 +4809,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 61.373,
-   "ttft": 0.995
+   "tps": 65.341,
+   "ttft": 0.94
   },
   "glm-5-1-non-reasoning": {
    "name": "GLM-5.1 (Non-reasoning)",
@@ -5150,8 +5181,8 @@
    "price_blended": 4,
    "price_input": 2,
    "price_output": 10,
-   "tps": 57.375,
-   "ttft": 1.016
+   "tps": 64.922,
+   "ttft": 0.874
   },
   "gpt-5-5-non-reasoning": {
    "name": "GPT-5.5 (Non-reasoning)",
@@ -5243,8 +5274,8 @@
    "price_blended": 1.075,
    "price_input": 0.6,
    "price_output": 2.5,
-   "tps": 185.249,
-   "ttft": 0.955
+   "tps": 199.079,
+   "ttft": 0.888
   },
   "qwen3-5-27b": {
    "name": "Qwen3.5 27B (Reasoning)",
@@ -5522,8 +5553,8 @@
    "price_blended": 0.111,
    "price_input": 0.075,
    "price_output": 0.22,
-   "tps": 163.019,
-   "ttft": 1.503
+   "tps": 161.522,
+   "ttft": 1.336
   },
   "grok-4": {
    "name": "Grok 4",
@@ -5708,8 +5739,8 @@
    "price_blended": 0.85,
    "price_input": 0.3,
    "price_output": 2.5,
-   "tps": 349.626,
-   "ttft": 5.768
+   "tps": 341.888,
+   "ttft": 6.299
   },
   "kimi-k2-thinking": {
    "name": "Kimi K2 Thinking",
@@ -5925,8 +5956,8 @@
    "price_blended": 1.35,
    "price_input": 0.6,
    "price_output": 3.6,
-   "tps": 83.281,
-   "ttft": 1.542
+   "tps": 89.297,
+   "ttft": 1.668
   },
   "qwen3-6-27b": {
    "name": "Qwen3.6 27B (Reasoning)",
@@ -6080,8 +6111,8 @@
    "price_blended": 0.2,
    "price_input": 0.1,
    "price_output": 0.5,
-   "tps": 125.926,
-   "ttft": 2.418
+   "tps": 146.078,
+   "ttft": 1.943
   },
   "deepseek-v4-pro-0424-non-reasoning": {
    "name": "DeepSeek V4 Pro 0424 (Non-reasoning)",
@@ -6204,8 +6235,8 @@
    "price_blended": 4.5,
    "price_input": 2,
    "price_output": 12,
-   "tps": 75.27,
-   "ttft": 0.785
+   "tps": 87.811,
+   "ttft": 0.729
   },
   "gpt-5-4-nano": {
    "name": "GPT-5.4 nano (xhigh)",
@@ -6390,8 +6421,8 @@
    "price_blended": 1.5,
    "price_input": 0.4,
    "price_output": 4.8,
-   "tps": 97.1,
-   "ttft": 1.109
+   "tps": 97.775,
+   "ttft": 1.164
   },
   "gpt-5-1-codex-mini": {
    "name": "GPT-5.1 Codex mini (high)",
@@ -6483,8 +6514,8 @@
    "price_blended": 3.5,
    "price_input": 2,
    "price_output": 8,
-   "tps": 140.275,
-   "ttft": 7.949
+   "tps": 159.377,
+   "ttft": 5.648
   },
   "qwen3-8-27b-non-reasoning": {
    "name": "Qwen3.8 27B (Non-reasoning)",
@@ -6514,8 +6545,8 @@
    "price_blended": 1.125,
    "price_input": 0.5,
    "price_output": 3,
-   "tps": 51.056,
-   "ttft": 1.246
+   "tps": 52.369,
+   "ttft": 1.192
   },
   "gpt-5-4-nano-medium": {
    "name": "GPT-5.4 nano (medium)",
@@ -6669,8 +6700,8 @@
    "price_blended": 0.438,
    "price_input": 0.2,
    "price_output": 1.15,
-   "tps": 183.781,
-   "ttft": 1.541
+   "tps": 202.624,
+   "ttft": 1.539
   },
   "kimi-k2-5-non-reasoning": {
    "name": "Kimi K2.5 (Non-reasoning)",
@@ -6855,8 +6886,8 @@
    "price_blended": 0,
    "price_input": 0,
    "price_output": 0,
-   "tps": 34.795,
-   "ttft": 0.965
+   "tps": 34.735,
+   "ttft": 0.985
   },
   "claude-4-sonnet-thinking": {
    "name": "Claude 4 Sonnet (Reasoning)",
@@ -7103,7 +7134,7 @@
    "price_blended": 1.35,
    "price_input": 0.6,
    "price_output": 3.6,
-   "tps": 85.686,
+   "tps": 89.282,
    "ttft": 1.656
   },
   "mimo-v2-5-pro-non-reasoning": {
@@ -7134,8 +7165,8 @@
    "price_blended": 0.544,
    "price_input": 0.435,
    "price_output": 0.87,
-   "tps": 27.316,
-   "ttft": 1.564
+   "tps": 29.616,
+   "ttft": 1.452
   },
   "gpt-6-luna-non-reasoning": {
    "name": "GPT-6 Luna (Non-reasoning)",
@@ -7165,8 +7196,8 @@
    "price_blended": 0.2,
    "price_input": 0.1,
    "price_output": 0.5,
-   "tps": 127.854,
-   "ttft": 0.707
+   "tps": 143.543,
+   "ttft": 0.697
   },
   "qwen3-6-35b-a3b": {
    "name": "Qwen3.6 35B A3B (Reasoning)",
@@ -7196,8 +7227,8 @@
    "price_blended": 0.844,
    "price_input": 0.375,
    "price_output": 2.25,
-   "tps": 131.412,
-   "ttft": 1.111
+   "tps": 133.892,
+   "ttft": 1.139
   },
   "gpt-5-4-non-reasoning": {
    "name": "GPT-5.4 (Non-reasoning)",
@@ -7320,8 +7351,8 @@
    "price_blended": 1.1,
    "price_input": 0.4,
    "price_output": 3.2,
-   "tps": 146.912,
-   "ttft": 1.017
+   "tps": 148.626,
+   "ttft": 1.002
   },
   "claude-3-7-sonnet-thinking": {
    "name": "Claude 3.7 Sonnet (Reasoning)",
@@ -7382,8 +7413,8 @@
    "price_blended": 0.581,
    "price_input": 0.325,
    "price_output": 1.35,
-   "tps": 111.177,
-   "ttft": 0.51
+   "tps": 135.842,
+   "ttft": 0.526
   },
   "glm-4-7-non-reasoning": {
    "name": "GLM-4.7 (Non-reasoning)",
@@ -7599,8 +7630,8 @@
    "price_blended": 2,
    "price_input": 1,
    "price_output": 5,
-   "tps": 108.561,
-   "ttft": 12.183
+   "tps": 108.201,
+   "ttft": 11.63
   },
   "gpt-5-mini": {
    "name": "GPT-5 mini (high)",
@@ -7723,8 +7754,8 @@
    "price_blended": 0.85,
    "price_input": 0.3,
    "price_output": 2.5,
-   "tps": 117.77,
-   "ttft": 2.046
+   "tps": 121.8,
+   "ttft": 2.148
   },
   "step-3-5-flash-0202": {
    "name": "Step 3.5 Flash",
@@ -8064,8 +8095,8 @@
    "price_blended": 1.1,
    "price_input": 0.4,
    "price_output": 3.2,
-   "tps": 133.334,
-   "ttft": 1.037
+   "tps": 133.632,
+   "ttft": 1.093
   },
   "gemini-3-1-flash-lite-preview": {
    "name": "Gemini 3.1 Flash-Lite",
@@ -8188,7 +8219,7 @@
    "price_blended": 2,
    "price_input": 1,
    "price_output": 5,
-   "tps": 92.35,
+   "tps": 94.035,
    "ttft": 0.483
   },
   "kimi-k2-0905": {
@@ -8250,8 +8281,8 @@
    "price_blended": 0,
    "price_input": 0,
    "price_output": 0,
-   "tps": 34.051,
-   "ttft": 1.587
+   "tps": 38.003,
+   "ttft": 1.583
   },
   "claude-3-7-sonnet": {
    "name": "Claude 3.7 Sonnet (Non-reasoning)",
@@ -8312,8 +8343,8 @@
    "price_blended": 0.844,
    "price_input": 0.375,
    "price_output": 2.25,
-   "tps": 135.125,
-   "ttft": 1.096
+   "tps": 145.275,
+   "ttft": 1.147
   },
   "o1": {
    "name": "o1",
@@ -8498,8 +8529,8 @@
    "price_blended": 0.282,
    "price_input": 0.16,
    "price_output": 0.65,
-   "tps": 77.403,
-   "ttft": 0.276
+   "tps": 77.792,
+   "ttft": 0.279
   },
   "deepseek-v3-1-terminus-reasoning": {
    "name": "DeepSeek V3.1 Terminus (Reasoning)",
@@ -8777,8 +8808,8 @@
    "price_blended": 3,
    "price_input": 1.5,
    "price_output": 7.5,
-   "tps": 158.188,
-   "ttft": 0.632
+   "tps": 170.601,
+   "ttft": 0.611
   },
   "gemma-4-12b": {
    "name": "Gemma 4 12B (Reasoning)",
@@ -8808,7 +8839,7 @@
    "price_blended": 0.15,
    "price_input": 0.1,
    "price_output": 0.3,
-   "tps": 146.823,
+   "tps": 149.447,
    "ttft": 1.394
   },
   "nova-2-0-pro-reasoning-medium": {
@@ -8839,8 +8870,8 @@
    "price_blended": 3.438,
    "price_input": 1.25,
    "price_output": 10,
-   "tps": 125.691,
-   "ttft": 14.736
+   "tps": 125.923,
+   "ttft": 13.437
   },
   "grok-code-fast-1": {
    "name": "Grok Code Fast 1",
@@ -8963,8 +8994,8 @@
    "price_blended": 0.205,
    "price_input": 0.14,
    "price_output": 0.4,
-   "tps": 64.829,
-   "ttft": 0.84
+   "tps": 49.767,
+   "ttft": 1.142
   },
   "deepseek-v3-2-0925": {
    "name": "DeepSeek V3.2 Exp (Non-reasoning)",
@@ -9118,8 +9149,8 @@
    "price_blended": 0.151,
    "price_input": 0.135,
    "price_output": 0.2,
-   "tps": 54.015,
-   "ttft": 1.118
+   "tps": 35.011,
+   "ttft": 1.109
   },
   "nova-2-0-omni-reasoning-medium": {
    "name": "Nova 2.0 Omni (medium)",
@@ -9273,8 +9304,8 @@
    "price_blended": 0.85,
    "price_input": 0.3,
    "price_output": 2.5,
-   "tps": 204.916,
-   "ttft": 12.607
+   "tps": 223.81,
+   "ttft": 11.859
   },
   "gpt-5-1-non-reasoning": {
    "name": "GPT-5.1 (Non-reasoning)",
@@ -9335,8 +9366,8 @@
    "price_blended": 0.19,
    "price_input": 0.17,
    "price_output": 0.25,
-   "tps": 83.418,
-   "ttft": 0.484
+   "tps": 81.781,
+   "ttft": 0.496
   },
   "exaone-4-5-33b": {
    "name": "EXAONE 4.5 33B",
@@ -9397,8 +9428,8 @@
    "price_blended": 0,
    "price_input": 0,
    "price_output": 0,
-   "tps": 143.74,
-   "ttft": 0.224
+   "tps": 172.423,
+   "ttft": 0.247
   },
   "gemma-4-26b-a4b-non-reasoning": {
    "name": "Gemma 4 26B A4B (Non-reasoning)",
@@ -9428,8 +9459,8 @@
    "price_blended": 0.198,
    "price_input": 0.13,
    "price_output": 0.4,
-   "tps": 110.406,
-   "ttft": 0.628
+   "tps": 103.448,
+   "ttft": 0.588
   },
   "qwen3-5-4b": {
    "name": "Qwen3.5 4B (Reasoning)",
@@ -9459,8 +9490,8 @@
    "price_blended": 0.06,
    "price_input": 0.03,
    "price_output": 0.15,
-   "tps": 26.758,
-   "ttft": 0.488
+   "tps": 25.667,
+   "ttft": 0.525
   },
   "deepseek-r1": {
    "name": "DeepSeek R1 0528 (May '25)",
@@ -9583,8 +9614,8 @@
    "price_blended": 0.108,
    "price_input": 0.07,
    "price_output": 0.22,
-   "tps": 269.699,
-   "ttft": 0.455
+   "tps": 257.474,
+   "ttft": 0.467
   },
   "nvidia-nemotron-3-super-120b-a12b": {
    "name": "Nemotron 3 Super 120B A12B (Reasoning)",
@@ -9614,8 +9645,8 @@
    "price_blended": 0.45,
    "price_input": 0.3,
    "price_output": 0.9,
-   "tps": 162.614,
-   "ttft": 0.951
+   "tps": 164.271,
+   "ttft": 0.888
   },
   "nova-2-0-pro-reasoning-low": {
    "name": "Nova 2.0 Pro Preview (low)",
@@ -9645,8 +9676,8 @@
    "price_blended": 3.438,
    "price_input": 1.25,
    "price_output": 10,
-   "tps": 129.786,
-   "ttft": 3.161
+   "tps": 131.728,
+   "ttft": 3.043
   },
   "glm-4.5": {
    "name": "GLM-4.5 (Reasoning)",
@@ -9831,8 +9862,8 @@
    "price_blended": 0.85,
    "price_input": 0.3,
    "price_output": 2.5,
-   "tps": 223.209,
-   "ttft": 12.948
+   "tps": 228.854,
+   "ttft": 9.595
   },
   "gpt-5-nano-medium": {
    "name": "GPT-5 nano (medium)",
@@ -9893,8 +9924,8 @@
    "price_blended": 0.275,
    "price_input": 0.1,
    "price_output": 0.8,
-   "tps": 242.272,
-   "ttft": 1.08
+   "tps": 242.373,
+   "ttft": 1.055
   },
   "o3-mini": {
    "name": "o3-mini",
@@ -10048,8 +10079,8 @@
    "price_blended": 0.375,
    "price_input": 0.25,
    "price_output": 0.75,
-   "tps": 714.347,
-   "ttft": 2.635
+   "tps": 875.296,
+   "ttft": 2.78
   },
   "jt-mini": {
    "name": "JT-MINI",
@@ -10327,8 +10358,8 @@
    "price_blended": 0.85,
    "price_input": 0.3,
    "price_output": 2.5,
-   "tps": 205.082,
-   "ttft": 4.03
+   "tps": 227.995,
+   "ttft": 4.692
   },
   "hypernova-60b": {
    "name": "HyperNova 60B 2605 (high, based on gpt-oss-120b)",
@@ -10513,8 +10544,8 @@
    "price_blended": 0.261,
    "price_input": 0.15,
    "price_output": 0.595,
-   "tps": 194.603,
-   "ttft": 0.502
+   "tps": 223.519,
+   "ttft": 0.544
   },
   "k2-think-v2": {
    "name": "K2 Think V2",
@@ -10761,8 +10792,8 @@
    "price_blended": 0.262,
    "price_input": 0.15,
    "price_output": 0.6,
-   "tps": 160.617,
-   "ttft": 0.582
+   "tps": 172.877,
+   "ttft": 0.573
   },
   "glm-4-6v-reasoning": {
    "name": "GLM-4.6V (Reasoning)",
@@ -10854,8 +10885,8 @@
    "price_blended": 0.412,
    "price_input": 0.15,
    "price_output": 1.2,
-   "tps": 181.637,
-   "ttft": 1.173
+   "tps": 187.868,
+   "ttft": 1.159
   },
   "gpt-5-4-mini-non-reasoning": {
    "name": "GPT-5.4 mini (Non-Reasoning)",
@@ -10978,8 +11009,8 @@
    "price_blended": 0.107,
    "price_input": 0.06,
    "price_output": 0.25,
-   "tps": 82.986,
-   "ttft": 0.369
+   "tps": 75.252,
+   "ttft": 0.379
   },
   "grok-4-fast": {
    "name": "Grok 4 Fast (Non-reasoning)",
@@ -11164,8 +11195,8 @@
    "price_blended": 0.388,
    "price_input": 0.25,
    "price_output": 0.8,
-   "tps": 366.946,
-   "ttft": 1.185
+   "tps": 347.156,
+   "ttft": 1.216
   },
   "qwen3-5-4b-non-reasoning": {
    "name": "Qwen3.5 4B (Non-reasoning)",
@@ -11195,8 +11226,8 @@
    "price_blended": 0.06,
    "price_input": 0.03,
    "price_output": 0.15,
-   "tps": 23.792,
-   "ttft": 0.496
+   "tps": 22.863,
+   "ttft": 0.477
   },
   "intellect-3": {
    "name": "INTELLECT-3 (based on GLM-4.5-Air)",
@@ -11412,8 +11443,8 @@
    "price_blended": 0.42,
    "price_input": 0.195,
    "price_output": 1.095,
-   "tps": 260.584,
-   "ttft": 0.293
+   "tps": 259.953,
+   "ttft": 0.288
   },
   "gpt-oss-120b-low": {
    "name": "gpt-oss-120b (low)",
@@ -11443,8 +11474,8 @@
    "price_blended": 0.249,
    "price_input": 0.15,
    "price_output": 0.545,
-   "tps": 190.338,
-   "ttft": 0.475
+   "tps": 223.116,
+   "ttft": 0.496
   },
   "gpt-4-1-mini": {
    "name": "GPT-4.1 mini",
@@ -11505,8 +11536,8 @@
    "price_blended": 0.422,
    "price_input": 0.26,
    "price_output": 0.91,
-   "tps": 115.417,
-   "ttft": 0.585
+   "tps": 114.265,
+   "ttft": 0.572
   },
   "minimax-m1-40k": {
    "name": "MiniMax M1 40k",
@@ -11567,8 +11598,8 @@
    "price_blended": 3.438,
    "price_input": 1.25,
    "price_output": 10,
-   "tps": 124.905,
-   "ttft": 0.665
+   "tps": 134.058,
+   "ttft": 0.681
   },
   "gpt-oss-20b-low": {
    "name": "gpt-oss-20b (low)",
@@ -11598,8 +11629,8 @@
    "price_blended": 0.106,
    "price_input": 0.07,
    "price_output": 0.215,
-   "tps": 215.99,
-   "ttft": 0.557
+   "tps": 265.059,
+   "ttft": 0.496
   },
   "qwen3-vl-235b-a22b-instruct": {
    "name": "Qwen3 VL 235B A22B Instruct",
@@ -11660,8 +11691,8 @@
    "price_blended": 0,
    "price_input": 0,
    "price_output": 0,
-   "tps": 75.546,
-   "ttft": 0.231
+   "tps": 84.851,
+   "ttft": 0.232
   },
   "gpt-5-mini-minimal": {
    "name": "GPT-5 mini (minimal)",
@@ -11908,8 +11939,8 @@
    "price_blended": 0.412,
    "price_input": 0.15,
    "price_output": 1.2,
-   "tps": 179.167,
-   "ttft": 1.043
+   "tps": 183.498,
+   "ttft": 1.05
   },
   "tri-21b-think-preview": {
    "name": "Tri-21B-think Preview",
@@ -12187,8 +12218,8 @@
    "price_blended": 0.15,
    "price_input": 0.1,
    "price_output": 0.3,
-   "tps": 156.098,
-   "ttft": 1.378
+   "tps": 153.951,
+   "ttft": 1.4
   },
   "gemini-2-5-flash-lite-preview-09-2025": {
    "name": "Gemini 2.5 Flash-Lite Preview (Sep '25) (Non-reasoning)",
@@ -12249,8 +12280,8 @@
    "price_blended": 0.75,
    "price_input": 0.5,
    "price_output": 1.5,
-   "tps": 74.477,
-   "ttft": 0.743
+   "tps": 78.721,
+   "ttft": 0.778
   },
   "qwen3-coder-next": {
    "name": "Qwen3 Coder Next",
@@ -12281,7 +12312,7 @@
    "price_input": 0.35,
    "price_output": 1.2,
    "tps": 119.068,
-   "ttft": 0.9
+   "ttft": 0.882
   },
   "motif-2-12-7b": {
    "name": "Motif-2-12.7B-Reasoning",
@@ -12466,8 +12497,8 @@
    "price_blended": 0.052,
    "price_input": 0.03,
    "price_output": 0.12,
-   "tps": 219.982,
-   "ttft": 0.255
+   "tps": 227.97,
+   "ttft": 0.258
   },
   "magistral-medium": {
    "name": "Magistral Medium 1",
@@ -12652,8 +12683,8 @@
    "price_blended": 0.262,
    "price_input": 0.15,
    "price_output": 0.6,
-   "tps": 149.136,
-   "ttft": 0.58
+   "tps": 157.207,
+   "ttft": 0.568
   },
   "tri-21b-think-v0-5": {
    "name": "Tri-21B-Think",
@@ -12714,8 +12745,8 @@
    "price_blended": 0.098,
    "price_input": 0.07,
    "price_output": 0.18,
-   "tps": 201.214,
-   "ttft": 0.434
+   "tps": 206.839,
+   "ttft": 0.418
   },
   "gpt-4o-chatgpt-03-25": {
    "name": "GPT-4o (March 2025, chatgpt-4o-latest)",
@@ -12869,8 +12900,8 @@
    "price_blended": 0.04,
    "price_input": 0.02,
    "price_output": 0.1,
-   "tps": 60.906,
-   "ttft": 0.363
+   "tps": 65.133,
+   "ttft": 0.353
   },
   "nvidia-nemotron-3-nano-30b-a3b-reasoning": {
    "name": "NVIDIA Nemotron 3 Nano 30B A3B (Reasoning)",
@@ -12900,8 +12931,8 @@
    "price_blended": 0.088,
    "price_input": 0.05,
    "price_output": 0.2,
-   "tps": 194.307,
-   "ttft": 0.546
+   "tps": 170.148,
+   "ttft": 0.55
   },
   "qwen3-4b-2507-instruct-reasoning": {
    "name": "Qwen3 4B 2507 (Reasoning)",
@@ -13055,8 +13086,8 @@
    "price_blended": 0.85,
    "price_input": 0.3,
    "price_output": 2.5,
-   "tps": 221.207,
-   "ttft": 0.766
+   "tps": 228.106,
+   "ttft": 0.843
   },
   "devstral-small-2505": {
    "name": "Devstral Small (May '25)",
@@ -13861,8 +13892,8 @@
    "price_blended": 0.313,
    "price_input": 0.19,
    "price_output": 0.68,
-   "tps": 98.213,
-   "ttft": 0.622
+   "tps": 109.109,
+   "ttft": 0.637
   },
   "qwen-2-5-max": {
    "name": "Qwen2.5 Max",
@@ -14295,8 +14326,8 @@
    "price_blended": 0.43,
    "price_input": 0.25,
    "price_output": 0.97,
-   "tps": 110.708,
-   "ttft": 0.905
+   "tps": 111.042,
+   "ttft": 0.918
   },
   "gpt-4o-2024-08-06": {
    "name": "GPT-4o (Aug '24)",
@@ -14450,8 +14481,8 @@
    "price_blended": 0.712,
    "price_input": 0.71,
    "price_output": 0.72,
-   "tps": 91.055,
-   "ttft": 0.619
+   "tps": 93.891,
+   "ttft": 0.622
   },
   "qwen3-30b-a3b-instruct-reasoning": {
    "name": "Qwen3 30B A3B (Reasoning)",
@@ -14791,8 +14822,8 @@
    "price_blended": 1.5,
    "price_input": 1,
    "price_output": 3,
-   "tps": 44.343,
-   "ttft": 0.697
+   "tps": 44.398,
+   "ttft": 0.699
   },
   "solar-pro-2-reasoning": {
    "name": "Solar Pro 2 (Reasoning)",
@@ -14884,8 +14915,8 @@
    "price_blended": 0.04,
    "price_input": 0.02,
    "price_output": 0.1,
-   "tps": 59.386,
-   "ttft": 0.31
+   "tps": 64.35,
+   "ttft": 0.301
   },
   "granite-4-1-30b": {
    "name": "Granite 4.1 30B",
@@ -14946,8 +14977,8 @@
    "price_blended": 0.07,
    "price_input": 0.04,
    "price_output": 0.16,
-   "tps": 104.685,
-   "ttft": 5.15
+   "tps": 107.396,
+   "ttft": 4.13
   },
   "hermes-4-llama-3-1-405b": {
    "name": "Hermes 4 - Llama-3.1 405B (Non-reasoning)",
@@ -14977,8 +15008,8 @@
    "price_blended": 1.5,
    "price_input": 1,
    "price_output": 3,
-   "tps": 44.414,
-   "ttft": 0.7
+   "tps": 44.097,
+   "ttft": 0.667
   },
   "gemini-2-0-flash-lite-001": {
    "name": "Gemini 2.0 Flash-Lite (Feb '25)",
@@ -15907,8 +15938,8 @@
    "price_blended": 4.375,
    "price_input": 2.5,
    "price_output": 10,
-   "tps": 59.231,
-   "ttft": 0.368
+   "tps": 61.324,
+   "ttft": 0.366
   },
   "qwen3-5-2b": {
    "name": "Qwen3.5 2B (Reasoning)",
@@ -16093,8 +16124,8 @@
    "price_blended": 0.088,
    "price_input": 0.05,
    "price_output": 0.2,
-   "tps": 251.083,
-   "ttft": 0.343
+   "tps": 230.983,
+   "ttft": 0.33
   },
   "nvidia-nemotron-nano-9b-v2": {
    "name": "NVIDIA Nemotron Nano 9B V2 (Non-reasoning)",
@@ -16124,8 +16155,8 @@
    "price_blended": 0.086,
    "price_input": 0.05,
    "price_output": 0.195,
-   "tps": 157.568,
-   "ttft": 1.093
+   "tps": 161.708,
+   "ttft": 1.059
   },
   "mistral-large-2407": {
    "name": "Mistral Large 2 (Jul '24)",
@@ -17085,8 +17116,8 @@
    "price_blended": 0.325,
    "price_input": 0.2,
    "price_output": 0.7,
-   "tps": 2019.613,
-   "ttft": 0.467
+   "tps": 2148.878,
+   "ttft": 0.478
   },
   "grok-1": {
    "name": "Grok-1",
@@ -17178,8 +17209,8 @@
    "price_blended": 0,
    "price_input": 0,
    "price_output": 0,
-   "tps": 46.219,
-   "ttft": 0.323
+   "tps": 47.579,
+   "ttft": 0.327
   },
   "exaone-4-0-32b": {
    "name": "EXAONE 4.0 32B (Non-reasoning)",
@@ -17395,8 +17426,8 @@
    "price_blended": 0.107,
    "price_input": 0.06,
    "price_output": 0.25,
-   "tps": 17.264,
-   "ttft": 27.338
+   "tps": 19.871,
+   "ttft": 19.677
   },
   "ministral-3-14b": {
    "name": "Ministral 3 14B",
@@ -17426,8 +17457,8 @@
    "price_blended": 0.2,
    "price_input": 0.2,
    "price_output": 0.2,
-   "tps": 92.666,
-   "ttft": 0.507
+   "tps": 99.569,
+   "ttft": 0.499
   },
   "jamba-1-5-large": {
    "name": "Jamba 1.5 Large",
@@ -17488,8 +17519,8 @@
    "price_blended": 0.43,
    "price_input": 0.25,
    "price_output": 0.97,
-   "tps": 107.121,
-   "ttft": 0.896
+   "tps": 109.396,
+   "ttft": 0.892
   },
   "hermes-3-llama-3-1-70b": {
    "name": "Hermes 3 - Llama-3.1 70B",
@@ -17736,8 +17767,8 @@
    "price_blended": 0.219,
    "price_input": 0.125,
    "price_output": 0.5,
-   "tps": 43.729,
-   "ttft": 0.972
+   "tps": 44.151,
+   "ttft": 0.977
   },
   "claude-3-sonnet": {
    "name": "Claude 3 Sonnet",
@@ -17798,8 +17829,8 @@
    "price_blended": 0.061,
    "price_input": 0.035,
    "price_output": 0.14,
-   "tps": 292.73,
-   "ttft": 0.571
+   "tps": 281.678,
+   "ttft": 0.573
   },
   "granite-4-1-3b": {
    "name": "Granite 4.1 3B",
@@ -17953,8 +17984,8 @@
    "price_blended": 0.3,
    "price_input": 0.2,
    "price_output": 0.6,
-   "tps": 202.21,
-   "ttft": 0.785
+   "tps": 204.637,
+   "ttft": 0.779
   },
   "gemma-3n-e4b-preview-0520": {
    "name": "Gemma 3n E4B Instruct Preview (May '25)",
@@ -18015,8 +18046,8 @@
    "price_blended": 0,
    "price_input": 0,
    "price_output": 0,
-   "tps": 17.16,
-   "ttft": 0.362
+   "tps": 17.182,
+   "ttft": 0.372
   },
   "qwen2-5-coder-7b-instruct": {
    "name": "Qwen2.5 Coder Instruct 7B",
@@ -18325,8 +18356,8 @@
    "price_blended": 0.35,
    "price_input": 0.2,
    "price_output": 0.8,
-   "tps": 93.892,
-   "ttft": 0.855
+   "tps": 97.605,
+   "ttft": 0.823
   },
   "olmo-3-7b-think": {
    "name": "Olmo 3 7B Think",
@@ -18728,7 +18759,7 @@
    "price_blended": 0.15,
    "price_input": 0.15,
    "price_output": 0.15,
-   "tps": 94.623,
+   "tps": 103.298,
    "ttft": 0.518
   },
   "llama-3-instruct-70b": {
@@ -18883,8 +18914,8 @@
    "price_blended": 0.345,
    "price_input": 0.345,
    "price_output": 0.345,
-   "tps": 15.967,
-   "ttft": 0.824
+   "tps": 14.01,
+   "ttft": 1.189
   },
   "qwen3-5-0-8b-non-reasoning": {
    "name": "Qwen3.5 0.8B (Non-reasoning)",
@@ -20092,8 +20123,8 @@
    "price_blended": 0.1,
    "price_input": 0.1,
    "price_output": 0.1,
-   "tps": 227.78,
-   "ttft": 0.504
+   "tps": 225.191,
+   "ttft": 0.483
   },
   "apertus-8b-instruct": {
    "name": "Apertus 8B Instruct",
@@ -20526,8 +20557,8 @@
    "price_blended": 0,
    "price_input": 0,
    "price_output": 0,
-   "tps": 131.985,
-   "ttft": 0.217
+   "tps": 130.837,
+   "ttft": 0.199
   },
   "gemma-3-12b": {
    "name": "Gemma 3 12B Instruct",
