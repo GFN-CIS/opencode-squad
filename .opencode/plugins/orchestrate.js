@@ -124,15 +124,19 @@ function loadBenchmarks() {
   return _benchCache;
 }
 
-// Background benchmark refresh: once now, then hourly (refreshOnce itself
-// enforces the once-a-day / 5-failures throttle). Fire-and-forget under a hard
-// fetch timeout, so opencode never waits on GitHub; the timer is unref'd so it
-// never keeps the process alive. Started once per process.
+// Background benchmark refresh: first check shortly after startup, then hourly
+// (refreshOnce itself enforces the once-a-day / 5-failures throttle). The first
+// check is delayed so its toast lands after the TUI is up and a one-shot
+// `opencode run` exits before any socket is opened. Fire-and-forget under a
+// hard fetch timeout, so opencode never waits on GitHub; timers are unref'd so
+// they never keep the process alive. Started once per process.
+const BENCH_FIRST_CHECK_MS = 30_000;
 let _benchTimer;
 function startBenchmarkRefresh(client, directory) {
   if (_benchTimer) return;
   loadBenchmarks(); // pin the in-use snapshot before the refresher can replace the cache
   let busy = false;
+  let schemaWarned = false; // the "update the plugin" toast, once per process
   const tick = async () => {
     if (busy) return;
     busy = true;
@@ -143,6 +147,10 @@ function startBenchmarkRefresh(client, directory) {
         now: Date.now(),
         minModels: Math.ceil(_bundledModelCount / 2),
       });
+      if (result.outcome === "schema-ahead") {
+        if (schemaWarned) return;
+        schemaWarned = true;
+      }
       const toast = toastFor(result, _benchGenerated);
       if (toast) {
         await client.tui?.showToast?.({
@@ -156,9 +164,12 @@ function startBenchmarkRefresh(client, directory) {
       busy = false;
     }
   };
-  _benchTimer = setInterval(tick, CHECK_INTERVAL_MS);
+  _benchTimer = setTimeout(() => {
+    void tick();
+    _benchTimer = setInterval(tick, CHECK_INTERVAL_MS);
+    _benchTimer.unref?.();
+  }, BENCH_FIRST_CHECK_MS);
   _benchTimer.unref?.();
-  void tick();
 }
 
 // Hand-editable per-squad-model snapshot, keyed by opencode provider/model id.

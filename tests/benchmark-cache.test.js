@@ -97,7 +97,10 @@ test("loadSnapshot reads the fresher of the bundled file and the cache", () => {
 
 test("loadSnapshot survives missing and corrupt files", () => {
   fs.writeFileSync(path.join(dir, "benchmarks.json"), "{not json");
-  expect(loadSnapshot(path.join(dir, "nope.json"), dir)).toEqual({ snapshot: null, bundledCount: 0 });
+  expect(loadSnapshot(path.join(dir, "nope.json"), dir)).toEqual({
+    snapshot: null,
+    bundledCount: 0,
+  });
 });
 
 // --- shouldAttempt ---------------------------------------------------------
@@ -159,7 +162,20 @@ test("a newer schema is reported, not cached, and its ETag not kept", async () =
   expect(fs.existsSync(path.join(dir, "benchmarks.json"))).toBe(false);
   // Without a kept ETag the next daily check re-downloads and re-warns.
   expect(readMeta().etag).toBeUndefined();
-  expect(readMeta().lastSuccess).toBe(NOW);
+  expect(readMeta()).toMatchObject({ lastSuccess: NOW, upstreamSchema: SCHEMA_VERSION + 1 });
+});
+
+test("a known newer schema keeps being reported between daily checks, offline", async () => {
+  writeMeta({ lastSuccess: NOW - HOUR, upstreamSchema: SCHEMA_VERSION + 1 });
+  const f = fakeFetch(200, snap("2026-09-29"));
+  expect(await run(f)).toEqual({ outcome: "schema-ahead", schema: SCHEMA_VERSION + 1 });
+  expect(f.calls).toHaveLength(0);
+});
+
+test("a readable snapshot clears a remembered newer schema", async () => {
+  writeMeta({ lastSuccess: NOW - 25 * HOUR, upstreamSchema: SCHEMA_VERSION + 1 });
+  await run(fakeFetch(200, snap("2026-09-29")));
+  expect(readMeta().upstreamSchema).toBeUndefined();
 });
 
 test("garbage, HTTP errors and network errors count as failures", async () => {
