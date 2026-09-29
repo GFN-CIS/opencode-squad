@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkSnapshot, SCHEMA_VERSION } from "../src/benchmarks-schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, "..", "src", "benchmarks.json");
@@ -96,6 +97,7 @@ async function main() {
   const { models, scored } = transform(data);
   const snapshot = {
     _meta: {
+      schema: SCHEMA_VERSION,
       source: "artificialanalysis.ai",
       endpoint: ENDPOINT,
       generated: new Date().toISOString().slice(0, 10),
@@ -104,6 +106,13 @@ async function main() {
     },
     models,
   };
+  // Validate before writing: a reshaped AA response must fail here (and fail
+  // the CI refresh) rather than land on master, where installed plugins fetch it.
+  const check = checkSnapshot(snapshot);
+  if (!check.ok) {
+    console.error(`Snapshot failed schema v${SCHEMA_VERSION} validation: ${check.error}`);
+    process.exit(1);
+  }
   fs.writeFileSync(OUT, `${JSON.stringify(snapshot, null, 1)}\n`);
   console.log(`Wrote ${OUT}: ${scored} scored models.`);
 }
