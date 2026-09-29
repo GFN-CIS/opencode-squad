@@ -33,6 +33,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
+import {
+  CHECK_INTERVAL_MS,
+  cacheDir,
+  pickSnapshot,
+  refreshOnce,
+  toastFor,
+} from "../../src/benchmark-cache.js";
 import { formatBench } from "../../src/benchmarks.js";
 import { formatCacheStatus, resolveCacheTtl } from "../../src/cache-status.js";
 import { formatCompactReport, pickCompactionModel, splitModelId } from "../../src/compact.js";
@@ -94,18 +101,69 @@ const _loadRolePrompt = createPromptLoader({
 let _inventoryCache; // undefined = not loaded
 let _hasSquadCache; // undefined = not loaded
 
-// Static AA benchmark snapshot (models object), read once. null if missing.
+// AA benchmark snapshot (models object), read once per process: the fresher of
+// the bundled copy and the one the background refresher downloaded. Fixed for
+// the process lifetime on purpose — see src/benchmark-cache.js. null if neither
+// is usable.
+const BENCH_CACHE_DIR = cacheDir(process.env, os.homedir());
 let _benchCache; // undefined = not loaded
+let _benchGenerated; // `_meta.generated` of the snapshot in use
+let _bundledModelCount = 0;
 function loadBenchmarks() {
   if (_benchCache !== undefined) return _benchCache;
   _benchCache = null;
-  try {
-    const raw = fs.readFileSync(path.join(PACKAGE_ROOT, "src", "benchmarks.json"), "utf8");
-    _benchCache = JSON.parse(raw).models ?? null;
-  } catch {
-    // Best-effort; inventory still works without benchmark numbers.
+  const read = (file) => {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      return undefined;
+    }
+  };
+  const bundled = read(path.join(PACKAGE_ROOT, "src", "benchmarks.json"));
+  _bundledModelCount = Object.keys(bundled?.models ?? {}).length;
+  const snapshot = pickSnapshot(bundled, read(path.join(BENCH_CACHE_DIR, "benchmarks.json")));
+  if (snapshot) {
+    _benchCache = snapshot.models;
+    _benchGenerated = snapshot._meta.generated;
   }
   return _benchCache;
+}
+
+// Background benchmark refresh: once now, then hourly (refreshOnce itself
+// enforces the once-a-day / 5-failures throttle). Fire-and-forget under a hard
+// fetch timeout, so opencode never waits on GitHub; the timer is unref'd so it
+// never keeps the process alive. Started once per process.
+let _benchTimer;
+function startBenchmarkRefresh(client, directory) {
+  if (_benchTimer) return;
+  loadBenchmarks(); // pin the in-use snapshot before the refresher can replace the cache
+  let busy = false;
+  const tick = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const result = await refreshOnce({
+        fetch: globalThis.fetch,
+        dir: BENCH_CACHE_DIR,
+        now: Date.now(),
+        minModels: Math.ceil(_bundledModelCount / 2),
+      });
+      const toast = toastFor(result, _benchGenerated);
+      if (toast) {
+        await client.tui?.showToast?.({
+          query: { directory },
+          body: { ...toast, duration: 10000 },
+        });
+      }
+    } catch {
+      // Best-effort; the next tick tries again.
+    } finally {
+      busy = false;
+    }
+  };
+  _benchTimer = setInterval(tick, CHECK_INTERVAL_MS);
+  _benchTimer.unref?.();
+  void tick();
 }
 
 // Hand-editable per-squad-model snapshot, keyed by opencode provider/model id.
@@ -227,6 +285,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   // Refresh the global model_data.json once at plugin load (opencode startup),
   // before anything reads it. Cheap and best-effort; see the function comment.
   ensureGlobalModelDataFresh();
+  startBenchmarkRefresh(client, directory);
 
   // Rate-limit guard config comes from the plugin-tuple options
   // (["opencode-squad@...", { rate_limit_guard: {...} }]) — NOT a top-level
