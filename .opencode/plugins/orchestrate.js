@@ -33,6 +33,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
+import {
+  CHECK_INTERVAL_MS,
+  cacheDir,
+  loadSnapshot,
+  refreshOnce,
+  toastFor,
+} from "../../src/benchmark-cache.js";
 import { formatBench } from "../../src/benchmarks.js";
 import { formatCacheStatus, resolveCacheTtl } from "../../src/cache-status.js";
 import { formatCompactReport, pickCompactionModel, splitModelId } from "../../src/compact.js";
@@ -94,18 +101,75 @@ const _loadRolePrompt = createPromptLoader({
 let _inventoryCache; // undefined = not loaded
 let _hasSquadCache; // undefined = not loaded
 
-// Static AA benchmark snapshot (models object), read once. null if missing.
+// AA benchmark snapshot (models object), read once per process: the fresher of
+// the bundled copy and the one the background refresher downloaded. Fixed for
+// the process lifetime on purpose — see src/benchmark-cache.js. null if neither
+// is usable.
+const BENCH_CACHE_DIR = cacheDir(process.env, os.homedir());
 let _benchCache; // undefined = not loaded
+let _benchGenerated; // `_meta.generated` of the snapshot in use
+let _bundledModelCount = 0;
 function loadBenchmarks() {
   if (_benchCache !== undefined) return _benchCache;
   _benchCache = null;
-  try {
-    const raw = fs.readFileSync(path.join(PACKAGE_ROOT, "src", "benchmarks.json"), "utf8");
-    _benchCache = JSON.parse(raw).models ?? null;
-  } catch {
-    // Best-effort; inventory still works without benchmark numbers.
+  const { snapshot, bundledCount } = loadSnapshot(
+    path.join(PACKAGE_ROOT, "src", "benchmarks.json"),
+    BENCH_CACHE_DIR,
+  );
+  _bundledModelCount = bundledCount;
+  if (snapshot) {
+    _benchCache = snapshot.models;
+    _benchGenerated = snapshot._meta.generated;
   }
   return _benchCache;
+}
+
+// Background benchmark refresh: first check shortly after startup, then hourly
+// (refreshOnce itself enforces the once-a-day / 5-failures throttle). The first
+// check is delayed so its toast lands after the TUI is up and a one-shot
+// `opencode run` exits before any socket is opened. Fire-and-forget under a
+// hard fetch timeout, so opencode never waits on GitHub; timers are unref'd so
+// they never keep the process alive. Started once per process.
+const BENCH_FIRST_CHECK_MS = 30_000;
+let _benchTimer;
+function startBenchmarkRefresh(client, directory) {
+  if (_benchTimer) return;
+  loadBenchmarks(); // pin the in-use snapshot before the refresher can replace the cache
+  let busy = false;
+  let schemaWarned = false; // the "update the plugin" toast, once per process
+  const tick = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const result = await refreshOnce({
+        fetch: globalThis.fetch,
+        dir: BENCH_CACHE_DIR,
+        now: Date.now(),
+        minModels: Math.ceil(_bundledModelCount / 2),
+      });
+      if (result.outcome === "schema-ahead") {
+        if (schemaWarned) return;
+        schemaWarned = true;
+      }
+      const toast = toastFor(result, _benchGenerated);
+      if (toast) {
+        await client.tui?.showToast?.({
+          query: { directory },
+          body: { ...toast, duration: 10000 },
+        });
+      }
+    } catch {
+      // Best-effort; the next tick tries again.
+    } finally {
+      busy = false;
+    }
+  };
+  _benchTimer = setTimeout(() => {
+    void tick();
+    _benchTimer = setInterval(tick, CHECK_INTERVAL_MS);
+    _benchTimer.unref?.();
+  }, BENCH_FIRST_CHECK_MS);
+  _benchTimer.unref?.();
 }
 
 // Hand-editable per-squad-model snapshot, keyed by opencode provider/model id.
@@ -227,6 +291,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   // Refresh the global model_data.json once at plugin load (opencode startup),
   // before anything reads it. Cheap and best-effort; see the function comment.
   ensureGlobalModelDataFresh();
+  startBenchmarkRefresh(client, directory);
 
   // Rate-limit guard config comes from the plugin-tuple options
   // (["opencode-squad@...", { rate_limit_guard: {...} }]) — NOT a top-level
