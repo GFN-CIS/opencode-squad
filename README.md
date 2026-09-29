@@ -35,7 +35,7 @@ The bootstrap carries live session facts resolved at injection time — the curr
 grunt-openai-gpt-5-5 … (model: openai/gpt-5.5 · ctx 400k — AA intel 55 · code 75 · agentic 89 · $11.25/M)
 ```
 
-The AA data is a static snapshot (`src/benchmarks.json`, refreshable via `scripts/refresh-benchmarks.mjs`); no raw sub-benchmarks or speed metrics are shown.
+The AA data is a snapshot that CI refreshes on `master` daily (`scripts/refresh-benchmarks.mjs`). The copy bundled with the plugin (`src/benchmarks.json`) is only the fallback: in the background the plugin pulls the current one from GitHub into `~/.cache/opencode-squad/` (hard 5s timeout, at most one successful check a day, up to 5 failed attempts a day, never on the startup path) and uses whichever is fresher. A download applies on the **next** opencode start — the inventory is fixed per process so the prompt cache survives — and a toast tells you to restart. If the upstream snapshot moved to a schema this plugin version can't read, the toast asks you to update opencode-squad instead and the plugin keeps using the data it has. No raw sub-benchmarks or speed metrics are shown.
 
 If a `model_data.json` exists (in the project's `.opencode/` or the global `~/.config/opencode/`), the inventory reads its perf from **there** instead of the raw AA dump. It's a small, hand-editable snapshot holding **only the models that have a grunt-/drill- agent**, keyed by the opencode `provider/model` id, with the AA indices copied in plus an `info` note you fill yourself ("good for coding, weak at long context") — which then shows up inline in the inventory so the orchestrator routes on your guidance, not just the numbers. Without the file, the inventory falls back to `benchmarks.json` exactly as before.
 

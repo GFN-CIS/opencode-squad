@@ -6,9 +6,11 @@
 //   node squad-file-performance.mjs [--dir <agentDir>] [--out <file>]
 //
 // Scans the agent dir for grunt-/drill- agents, collects the models they
-// target, copies the decision-useful Artificial Analysis indices from
-// src/benchmarks.json, and writes them — plus a hand-editable `info` field —
-// to model_data.json next to the agent dir (global: ~/.config/opencode/).
+// target, copies the decision-useful Artificial Analysis indices from the
+// benchmark snapshot opencode runs on (the fresher of src/benchmarks.json and
+// the copy the plugin downloads into ~/.cache/opencode-squad), and writes them
+// — plus a hand-editable `info` field — to model_data.json next to the agent
+// dir (global: ~/.config/opencode/).
 //
 // MANUAL ONLY by design: opencode never runs this. Re-running refreshes the
 // perf numbers but PRESERVES your `info` edits (and any other field you add).
@@ -20,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { cacheDir, loadSnapshot } from "../src/benchmark-cache.js";
 import { buildModelData, readModelData } from "../src/model-data.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,13 +50,12 @@ function parseArgs(argv) {
 function main() {
   const { dir, out } = parseArgs(process.argv.slice(2));
 
-  let benchmarksModels;
-  try {
-    benchmarksModels = JSON.parse(fs.readFileSync(BENCHMARKS, "utf8")).models;
-  } catch (e) {
-    console.error(`Cannot read benchmarks at ${BENCHMARKS}: ${e.message}`);
+  const { snapshot: bench } = loadSnapshot(BENCHMARKS, cacheDir(process.env, os.homedir()));
+  if (!bench) {
+    console.error(`No usable benchmark snapshot (${BENCHMARKS} or the download cache).`);
     process.exit(1);
   }
+  const benchmarksModels = bench.models;
 
   const existing = readModelData(out) || {};
   const generated = new Date().toISOString().slice(0, 10);
