@@ -122,10 +122,17 @@ export async function refreshOnce({
   const metaFile = path.join(dir, META_FILE);
   const cacheFile = path.join(dir, CACHE_FILE);
   const meta = readJson(metaFile) ?? {};
-  if (!shouldAttempt(meta, now)) return { outcome: "skipped" };
+  if (!shouldAttempt(meta, now)) {
+    // Keep reporting a known-unreadable upstream between daily checks, so a
+    // warning lost at startup (no TUI yet, headless run) resurfaces later.
+    if (meta.upstreamSchema > SCHEMA_VERSION) {
+      return { outcome: "schema-ahead", schema: meta.upstreamSchema };
+    }
+    return { outcome: "skipped" };
+  }
 
-  const succeed = (etag) => {
-    writeJsonAtomic(metaFile, { etag, lastSuccess: now, failures: 0 });
+  const succeed = (etag, extra = {}) => {
+    writeJsonAtomic(metaFile, { etag, lastSuccess: now, failures: 0, ...extra });
   };
 
   try {
@@ -147,7 +154,7 @@ export async function refreshOnce({
     if (!check.ok && check.reason === "schema-ahead") {
       // No ETag kept: the next daily check downloads again and warns again,
       // until the plugin is updated.
-      succeed(undefined);
+      succeed(undefined, { upstreamSchema: check.schema });
       return { outcome: "schema-ahead", schema: check.schema };
     }
     if (!check.ok) throw new Error(check.error);
