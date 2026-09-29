@@ -78,6 +78,22 @@ function readJson(file) {
   }
 }
 
+/**
+ * The snapshot to run on: the fresher of the bundled file and the cached copy
+ * in `dir`. Never throws. `bundledCount` sizes the refresher's minModels guard.
+ *
+ * @param {string} bundledFile
+ * @param {string} dir  cache dir (see cacheDir)
+ * @returns {{snapshot: any|null, bundledCount: number}}
+ */
+export function loadSnapshot(bundledFile, dir) {
+  const bundled = readJson(bundledFile);
+  return {
+    snapshot: pickSnapshot(bundled, readJson(path.join(dir, CACHE_FILE))),
+    bundledCount: Object.keys(bundled?.models ?? {}).length,
+  };
+}
+
 /** tmp + rename so a concurrent reader never sees a half-written file. */
 function writeJsonAtomic(file, value) {
   const tmp = `${file}.${process.pid}.tmp`;

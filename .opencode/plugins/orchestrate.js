@@ -36,7 +36,7 @@ import { tool } from "@opencode-ai/plugin";
 import {
   CHECK_INTERVAL_MS,
   cacheDir,
-  pickSnapshot,
+  loadSnapshot,
   refreshOnce,
   toastFor,
 } from "../../src/benchmark-cache.js";
@@ -112,16 +112,11 @@ let _bundledModelCount = 0;
 function loadBenchmarks() {
   if (_benchCache !== undefined) return _benchCache;
   _benchCache = null;
-  const read = (file) => {
-    try {
-      return JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-      return undefined;
-    }
-  };
-  const bundled = read(path.join(PACKAGE_ROOT, "src", "benchmarks.json"));
-  _bundledModelCount = Object.keys(bundled?.models ?? {}).length;
-  const snapshot = pickSnapshot(bundled, read(path.join(BENCH_CACHE_DIR, "benchmarks.json")));
+  const { snapshot, bundledCount } = loadSnapshot(
+    path.join(PACKAGE_ROOT, "src", "benchmarks.json"),
+    BENCH_CACHE_DIR,
+  );
+  _bundledModelCount = bundledCount;
   if (snapshot) {
     _benchCache = snapshot.models;
     _benchGenerated = snapshot._meta.generated;

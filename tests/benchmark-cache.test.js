@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import {
   cacheDir,
+  loadSnapshot,
   MAX_FAILURES,
   pickSnapshot,
   REFRESH_INTERVAL_MS,
@@ -79,6 +80,24 @@ test("an invalid or missing cache falls back to the bundled snapshot", () => {
   expect(pickSnapshot(snap("2026-09-22"), { junk: true })._meta.generated).toBe("2026-09-22");
   expect(pickSnapshot(snap("2026-09-22"), undefined)._meta.generated).toBe("2026-09-22");
   expect(pickSnapshot(undefined, undefined)).toBeNull();
+});
+
+// --- loadSnapshot ----------------------------------------------------------
+
+test("loadSnapshot reads the fresher of the bundled file and the cache", () => {
+  const bundledFile = path.join(dir, "bundled.json");
+  fs.writeFileSync(bundledFile, JSON.stringify(snap("2026-09-22")));
+  expect(loadSnapshot(bundledFile, dir)).toMatchObject({
+    snapshot: { _meta: { generated: "2026-09-22" } },
+    bundledCount: 2,
+  });
+  writeCache(snap("2026-09-28"));
+  expect(loadSnapshot(bundledFile, dir).snapshot._meta.generated).toBe("2026-09-28");
+});
+
+test("loadSnapshot survives missing and corrupt files", () => {
+  fs.writeFileSync(path.join(dir, "benchmarks.json"), "{not json");
+  expect(loadSnapshot(path.join(dir, "nope.json"), dir)).toEqual({ snapshot: null, bundledCount: 0 });
 });
 
 // --- shouldAttempt ---------------------------------------------------------
