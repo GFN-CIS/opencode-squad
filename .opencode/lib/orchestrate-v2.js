@@ -1,8 +1,8 @@
 /**
  * opencode-squad plugin entry for OpenCode 2.
  *
- * Same responsibilities as orchestrate.js (the OpenCode 1 entry); read its
- * header for the why. This file is only the OpenCode 2 wiring:
+ * Same responsibilities as ../plugins/orchestrate.js (the OpenCode 1 entry);
+ * read its header for the why. This file is only the OpenCode 2 wiring:
  *
  *   - skills: registered via ctx.skill.transform (V2 has no config hook);
  *   - bootstrap + context-budget line: the `context` session hook, gated on
@@ -97,6 +97,7 @@ export default {
 
     // Same option slot as V1: { package: "opencode-squad", options: { rate_limit_guard } }.
     const guardConfig = normalizeGuardConfig(ctx.options?.rate_limit_guard);
+    const directory = ctx.location?.directory;
 
     // --- lazy, process-lifetime lookups (V1 caches the same things) ---
 
@@ -133,7 +134,7 @@ export default {
       const agents = await getAgents();
       squadDrafted = hasSquad(agents ?? []);
       inventory = agents
-        ? formatInventory(agents, buildPerfLookup(), await getLimitMap())
+        ? formatInventory(agents, buildPerfLookup(directory), await getLimitMap())
         : "(no subagents available)";
       return inventory;
     };
@@ -200,7 +201,7 @@ export default {
         modelID: model?.modelID,
         usage,
         resultEmpty: isTaskResultEmpty(output),
-        modelData: loadModelData(),
+        modelData: loadModelData(directory),
         limitMap: await getLimitMap(),
         now: Date.now(),
       });

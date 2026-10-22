@@ -68,7 +68,7 @@ import {
   SKILLS_DIR,
   startBenchmarkRefresh,
   turnMemo,
-} from "./runtime.js";
+} from "../lib/runtime.js";
 
 // Cache the subagent inventory string (and whether a squad has been drafted)
 // per process — neither changes at runtime. The bootstrap itself is assembled
