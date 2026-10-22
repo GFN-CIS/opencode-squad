@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "description": "OpenCode plugin that turns the build agent into a PDCA orchestrator (sarge) over grunt/drill subagents",
   "type": "module",
-  "main": ".opencode/plugins/orchestrate.js",
+  "main": "index.js",
   "files": [
+    "index.js",
     ".opencode",
     "src",
     "prompts",
