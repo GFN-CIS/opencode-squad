@@ -114,12 +114,14 @@ export function startBenchmarkRefresh(notify) {
 // Looked for beside the agent dirs opencode merges: the project's .opencode
 // first, then the global config dir. null if neither exists (we then fall back
 // to the raw AA benchmarks). Read once per process.
-let _modelDataCache; // undefined = not loaded
-export function loadModelData() {
-  if (_modelDataCache !== undefined) return _modelDataCache;
-  _modelDataCache = null;
+// Keyed by project directory: one OpenCode 2 service process hosts plugin
+// instances for several projects, and its cwd is none of them.
+const _modelDataCache = new Map(); // directory -> merged models | null
+/** @param {string} [directory] project root; defaults to the process cwd (V1) */
+export function loadModelData(directory = process.cwd()) {
+  if (_modelDataCache.has(directory)) return _modelDataCache.get(directory);
   const candidates = [
-    path.join(process.cwd(), ".opencode", "model_data.json"),
+    path.join(directory, ".opencode", "model_data.json"),
     path.join(os.homedir(), ".config", "opencode", "model_data.json"),
   ];
   const merged = {};
@@ -132,14 +134,15 @@ export function loadModelData() {
       Object.assign(merged, md.models);
     }
   }
-  if (found) _modelDataCache = merged;
-  return _modelDataCache;
+  _modelDataCache.set(directory, found ? merged : null);
+  return _modelDataCache.get(directory);
 }
 
 // Per-model capability tail for the inventory: model_data entry if we have one
 // (precomputed indices + hand-written note), else the raw AA benchmark lookup.
-export function buildPerfLookup() {
-  const modelData = loadModelData();
+/** @param {string} [directory] see loadModelData */
+export function buildPerfLookup(directory) {
+  const modelData = loadModelData(directory);
   const benchmarks = loadBenchmarks();
   return (modelId) => {
     const entry = modelData?.[modelId];

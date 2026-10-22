@@ -1,10 +1,10 @@
 // Package entry for both OpenCode generations (OpenCode 1 >= 1.18.29).
 //
-// OpenCode 2 calls `setup` (.opencode/plugins/orchestrate-v2.js). OpenCode 1
+// OpenCode 2 calls `setup` (.opencode/lib/orchestrate-v2.js). OpenCode 1
 // calls `server`, which lazy-imports the V1 entry: that module imports
 // `@opencode-ai/plugin`, which an OpenCode 2 host does not provide, so it must
 // never load there.
-import v2 from "./.opencode/plugins/orchestrate-v2.js";
+import v2 from "./.opencode/lib/orchestrate-v2.js";
 
 export default {
   ...v2,
