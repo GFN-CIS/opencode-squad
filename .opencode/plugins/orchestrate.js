@@ -70,6 +70,12 @@ import {
   turnMemo,
 } from "./runtime.js";
 
+// Cache the subagent inventory string (and whether a squad has been drafted)
+// per process — neither changes at runtime. The bootstrap itself is assembled
+// per injection so the live facts (current time, current model) stay fresh.
+let _inventoryCache; // undefined = not loaded
+let _hasSquadCache; // undefined = not loaded
+
 // Configured orchestrator model, captured from config (fallback for turn 1,
 // before any assistant message reveals the actual model).
 let _orchestratorModel = null;
