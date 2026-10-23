@@ -16,6 +16,28 @@ Add one line to `~/.config/opencode/opencode.json`:
 
 That is all. On next start, OpenCode registers the skills and bootstrap automatically. There is no bundled grunt/drill agent — run the `squad-draft` skill once to generate the per-model squad the orchestrator delegates to.
 
+### OpenCode 2
+
+The same package works on OpenCode 2. Use the plural `plugins` key; plugin options (e.g. `rate_limit_guard`) go in the object form:
+
+```json
+{
+  "plugins": [
+    {
+      "package": "opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git",
+      "options": { "rate_limit_guard": { "max_wait_seconds": 1800 } }
+    }
+  ]
+}
+```
+
+The package entry (`index.js`) carries both generations: OpenCode 2 calls its `setup` (`.opencode/lib/orchestrate-v2.js`), OpenCode 1 (>= 1.18.29) its `server`, which loads the V1 entry `.opencode/plugins/orchestrate.js`. Both run the same `src/` modules. Differences on 2:
+
+- The delegation tool is `subagent`; the `[TASK OUTCOME]` / `[CACHE STATUS]` notes are appended to its result.
+- The rate-limit guard vetoes the retry through OpenCode 2's `retry` hook instead of aborting the subagent, and steers its explanation into the orchestrator's running turn.
+- No toasts: an OpenCode 2 server plugin has no TUI handle (the benchmark refresh still runs, silently).
+- `squad_compact` cannot choose the summarising model — OpenCode 2 compaction takes none — and says so in its report.
+
 ---
 
 ## What you get
