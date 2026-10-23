@@ -29,30 +29,12 @@
  */
 
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
-import {
-  CHECK_INTERVAL_MS,
-  cacheDir,
-  loadSnapshot,
-  refreshOnce,
-  toastFor,
-} from "../../src/benchmark-cache.js";
-import { formatBench } from "../../src/benchmarks.js";
-import { formatCacheStatus, resolveCacheTtl } from "../../src/cache-status.js";
 import { formatCompactReport, pickCompactionModel, splitModelId } from "../../src/compact.js";
-import {
-  buildLimitMap,
-  buildVariantMap,
-  estimateContextTokens,
-  formatLocalDateTime,
-} from "../../src/context.js";
+import { buildLimitMap, buildVariantMap, estimateContextTokens } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
-import { applyOrchestratorTransform, createTurnMemo } from "../../src/message-transform.js";
-import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
-import { applySystemPromptTransform, createPromptLoader } from "../../src/prompt-inject.js";
+import { applyOrchestratorTransform } from "../../src/message-transform.js";
+import { applySystemPromptTransform } from "../../src/prompt-inject.js";
 import {
   evaluateRetry,
   formatGuardNote,
@@ -68,173 +50,31 @@ import {
   formatApplyReport,
   readSquad,
 } from "../../src/squad-apply.js";
-import { formatTaskOutcome, isTaskResultEmpty } from "../../src/task-outcome.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PACKAGE_ROOT = path.resolve(__dirname, "../..");
-const SKILLS_DIR = path.join(PACKAGE_ROOT, "skills");
-
-// The primary agent that acts as the orchestrator. Injection targets only this
-// agent's sessions (verified via message.info.agent in the Task 0 spike).
-const ORCHESTRATOR_AGENT = "build";
-
-// Holds the rendered injection block for the turn in flight, so every model
-// call within one turn sends byte-identical text and the provider's prompt
-// cache survives. See createTurnMemo for the measurements behind it.
-const _turnMemo = createTurnMemo();
-
-// Serves the CURRENT bundled role prompt to every generated grunt/drill agent,
-// overriding the copy frozen into its file when the squad was drafted. Cached
-// on (size, mtime) so an edit to prompts/<role>.md goes live without a restart
-// while costing one stat per request instead of a read. See src/prompt-inject.js.
-const _loadRolePrompt = createPromptLoader({
-  readFile: (role) => fs.readFileSync(path.join(PACKAGE_ROOT, "prompts", `${role}.md`), "utf8"),
-  statKey: (role) => {
-    const st = fs.statSync(path.join(PACKAGE_ROOT, "prompts", `${role}.md`));
-    return `${st.size}:${st.mtimeMs}`;
-  },
-});
+import {
+  ARG_DESCRIPTIONS,
+  formatVariantLines,
+  isSubagentCaller,
+  TOOL_DESCRIPTIONS,
+  validateVariants,
+} from "../../src/squad-tools.js";
+import { subagentUsage, taskNotes } from "../../src/task-notes.js";
+import { isTaskResultEmpty } from "../../src/task-outcome.js";
+import {
+  buildPerfLookup,
+  ensureGlobalModelDataFresh,
+  loadModelData,
+  loadRolePrompt,
+  ORCHESTRATOR_AGENT,
+  SKILLS_DIR,
+  startBenchmarkRefresh,
+  turnMemo,
+} from "../lib/runtime.js";
 
 // Cache the subagent inventory string (and whether a squad has been drafted)
 // per process — neither changes at runtime. The bootstrap itself is assembled
 // per injection so the live facts (current time, current model) stay fresh.
 let _inventoryCache; // undefined = not loaded
 let _hasSquadCache; // undefined = not loaded
-
-// AA benchmark snapshot (models object), read once per process: the fresher of
-// the bundled copy and the one the background refresher downloaded. Fixed for
-// the process lifetime on purpose — see src/benchmark-cache.js. null if neither
-// is usable.
-const BENCH_CACHE_DIR = cacheDir(process.env, os.homedir());
-let _benchCache; // undefined = not loaded
-let _benchGenerated; // `_meta.generated` of the snapshot in use
-let _bundledModelCount = 0;
-function loadBenchmarks() {
-  if (_benchCache !== undefined) return _benchCache;
-  _benchCache = null;
-  const { snapshot, bundledCount } = loadSnapshot(
-    path.join(PACKAGE_ROOT, "src", "benchmarks.json"),
-    BENCH_CACHE_DIR,
-  );
-  _bundledModelCount = bundledCount;
-  if (snapshot) {
-    _benchCache = snapshot.models;
-    _benchGenerated = snapshot._meta.generated;
-  }
-  return _benchCache;
-}
-
-// Background benchmark refresh: first check shortly after startup, then hourly
-// (refreshOnce itself enforces the once-a-day / 5-failures throttle). The first
-// check is delayed so its toast lands after the TUI is up and a one-shot
-// `opencode run` exits before any socket is opened. Fire-and-forget under a
-// hard fetch timeout, so opencode never waits on GitHub; timers are unref'd so
-// they never keep the process alive. Started once per process.
-const BENCH_FIRST_CHECK_MS = 30_000;
-let _benchTimer;
-function startBenchmarkRefresh(client, directory) {
-  if (_benchTimer) return;
-  loadBenchmarks(); // pin the in-use snapshot before the refresher can replace the cache
-  let busy = false;
-  let schemaWarned = false; // the "update the plugin" toast, once per process
-  const tick = async () => {
-    if (busy) return;
-    busy = true;
-    try {
-      const result = await refreshOnce({
-        fetch: globalThis.fetch,
-        dir: BENCH_CACHE_DIR,
-        now: Date.now(),
-        minModels: Math.ceil(_bundledModelCount / 2),
-      });
-      if (result.outcome === "schema-ahead") {
-        if (schemaWarned) return;
-        schemaWarned = true;
-      }
-      const toast = toastFor(result, _benchGenerated);
-      if (toast) {
-        await client.tui?.showToast?.({
-          query: { directory },
-          body: { ...toast, duration: 10000 },
-        });
-      }
-    } catch {
-      // Best-effort; the next tick tries again.
-    } finally {
-      busy = false;
-    }
-  };
-  _benchTimer = setTimeout(() => {
-    void tick();
-    _benchTimer = setInterval(tick, CHECK_INTERVAL_MS);
-    _benchTimer.unref?.();
-  }, BENCH_FIRST_CHECK_MS);
-  _benchTimer.unref?.();
-}
-
-// Hand-editable per-squad-model snapshot, keyed by opencode provider/model id.
-// Looked for beside the agent dirs opencode merges: the project's .opencode
-// first, then the global config dir. null if neither exists (we then fall back
-// to the raw AA benchmarks). Read once per process.
-let _modelDataCache; // undefined = not loaded
-function loadModelData() {
-  if (_modelDataCache !== undefined) return _modelDataCache;
-  _modelDataCache = null;
-  const candidates = [
-    path.join(process.cwd(), ".opencode", "model_data.json"),
-    path.join(os.homedir(), ".config", "opencode", "model_data.json"),
-  ];
-  const merged = {};
-  let found = false;
-  // Global first, then project on top, so project entries win on overlap.
-  for (const file of [...candidates].reverse()) {
-    const md = readModelData(file);
-    if (md) {
-      found = true;
-      Object.assign(merged, md.models);
-    }
-  }
-  if (found) _modelDataCache = merged;
-  return _modelDataCache;
-}
-
-// Per-model capability tail for the inventory: model_data entry if we have one
-// (precomputed indices + hand-written note), else the raw AA benchmark lookup.
-function buildPerfLookup() {
-  const modelData = loadModelData();
-  const benchmarks = loadBenchmarks();
-  return (modelId) => {
-    const entry = modelData?.[modelId];
-    if (entry) return formatPerf(entry);
-    return benchmarks ? formatBench(modelId, benchmarks) : null;
-  };
-}
-
-// Startup auto-regen of the GLOBAL model_data.json: rescan the squad, refresh
-// perf from benchmarks, MERGE (preserving hand-written `info`), and write ONLY
-// when the models actually changed — so a new grunt/drill or fresh benchmarks
-// land automatically without clobbering edits or churning the file every boot.
-// Best-effort: any failure is swallowed so it can never break startup. No-op
-// when there is no squad yet (0 models). Only the global agent dir is scanned;
-// a project's .opencode/model_data.json stays fully manual (via the script's
-// --dir). Runs before the inventory cache is built, so the fresh file is read.
-function ensureGlobalModelDataFresh() {
-  try {
-    const benchmarks = loadBenchmarks();
-    if (!benchmarks) return;
-    const configDir = path.join(os.homedir(), ".config", "opencode");
-    const agentDir = path.join(configDir, "agent");
-    const file = path.join(configDir, "model_data.json");
-    const existing = readModelData(file) || {};
-    const generated = new Date().toISOString().slice(0, 10);
-    const snapshot = buildModelData(agentDir, benchmarks, existing, generated);
-    if (Object.keys(snapshot.models).length === 0) return; // no squad -> nothing
-    if (!modelsChanged(existing, snapshot)) return; // unchanged -> no write
-    fs.writeFileSync(file, `${JSON.stringify(snapshot, null, 2)}\n`);
-  } catch {
-    // Best-effort; the inventory falls back to benchmarks.json regardless.
-  }
-}
 
 // Configured orchestrator model, captured from config (fallback for turn 1,
 // before any assistant message reveals the actual model).
@@ -291,7 +131,9 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   // Refresh the global model_data.json once at plugin load (opencode startup),
   // before anything reads it. Cheap and best-effort; see the function comment.
   ensureGlobalModelDataFresh();
-  startBenchmarkRefresh(client, directory);
+  startBenchmarkRefresh((toast) =>
+    client.tui?.showToast?.({ query: { directory }, body: { ...toast, duration: 10000 } }),
+  );
 
   // Rate-limit guard config comes from the plugin-tuple options
   // (["opencode-squad@...", { rate_limit_guard: {...} }]) — NOT a top-level
@@ -393,44 +235,13 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
 
   // --- Cache-status hint (see src/cache-status.js) ---
 
-  // Two facts about a subagent session, from one messages fetch:
-  //   lastHitMs      — the most recent assistant message's request-start time,
-  //                    i.e. when this session last actually hit its provider.
-  //   contextTokens  — how big its context grew (last completed turn).
-  // Queried fresh rather than tracked in memory: this only needs to be right
-  // at the one moment a `task` call just completed, not continuously.
+  // Facts about a subagent session from one messages fetch (see subagentUsage
+  // in src/task-notes.js). Queried fresh rather than tracked in memory: this
+  // only needs to be right at the one moment a `task` call just completed.
   const getSubagentUsage = async (sessionID) => {
     try {
       const res = await client.session.messages({ path: { id: sessionID }, query: { directory } });
-      const msgs = res?.data ?? [];
-      let lastHitMs = null;
-      let finish;
-      let outputTokens;
-      let reasoningTokens;
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const info = msgs[i]?.info;
-        if (info?.role !== "assistant") continue;
-        if (lastHitMs === null && typeof info?.time?.created === "number") {
-          lastHitMs = info.time.created;
-        }
-        // The finish reason and token split come from the last assistant turn
-        // that actually COMPLETED — a session can end with a stub assistant
-        // record (no finish, all-zero tokens) after an abort, and reading the
-        // outcome off that stub would report "no finish reason" for every
-        // cancelled task. Deliberately a separate scan from lastHitMs, which
-        // wants the newest provider contact whether or not it finished.
-        if (finish === undefined && typeof info?.finish === "string" && info.finish.length > 0) {
-          finish = info.finish;
-          outputTokens = info?.tokens?.output;
-          reasoningTokens = info?.tokens?.reasoning;
-        }
-        if (lastHitMs !== null && finish !== undefined) break;
-      }
-      // Missing usage must not suppress the cache-status line — it degrades to
-      // the note without the size clause.
-      const ctx = estimateContextTokens(msgs);
-
-      return { lastHitMs, contextTokens: ctx?.used, finish, outputTokens, reasoningTokens };
+      return subagentUsage(res?.data ?? []);
     } catch {
       // Best-effort for the cache hint. `usageUnknown` matters more: without it
       // the missing finish reason would read downstream as "finished normally",
@@ -441,84 +252,30 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     }
   };
 
-  // Appends a [CACHE STATUS] line to a completed `task` call's result, so the
-  // orchestrator has what it needs to decide whether passing this task_id
-  // back in (to reuse the subagent session) still hits a warm provider
-  // cache, or whether the cache has gone cold and a fresh session is no
-  // worse. cache_ttl_seconds is a hand-editable model_data.json field (same
-  // pattern as `info`/`billing` — see src/model-data.js); left unset for
+  // Appends [TASK OUTCOME] and [CACHE STATUS] to a completed `task` call's
+  // result, so the orchestrator has what it needs to decide whether passing
+  // this task_id back in (to reuse the subagent session) still hits a warm
+  // provider cache. cache_ttl_seconds is a hand-editable model_data.json field
+  // (same pattern as `info`/`billing` — see src/model-data.js); left unset for
   // providers with no published TTL, reported honestly as "unknown" rather
-  // than guessed.
+  // than guessed. See src/task-notes.js.
   const handleTaskToolAfter = async (input, output) => {
     if (input?.tool !== "task") return;
     const meta = /** @type {any} */ (output)?.metadata;
     const taskId = meta?.sessionId;
-    const providerID = meta?.model?.providerID;
-    const modelID = meta?.model?.modelID;
     if (!taskId) return;
 
-    const { lastHitMs, contextTokens, finish, outputTokens, reasoningTokens, usageUnknown } =
-      await getSubagentUsage(taskId);
-
-    // [TASK OUTCOME] first, and on its own terms: an empty or truncated result
-    // is a fact about THIS call the orchestrator has to act on, whereas the
-    // cache status is advice about a possible next one. It is appended even
-    // when the model is unknown or the session has no usable timestamp —
-    // suppressing it there would silently restore the exact blind spot it
-    // exists to close. See src/task-outcome.js.
-    const outcome = formatTaskOutcome({
+    const notes = taskNotes({
       taskId,
-      providerModelId: providerID && modelID ? `${providerID}/${modelID}` : undefined,
-      finish,
-      outputTokens,
-      reasoningTokens,
+      providerID: meta?.model?.providerID,
+      modelID: meta?.model?.modelID,
+      usage: await getSubagentUsage(taskId),
       resultEmpty: isTaskResultEmpty(/** @type {any} */ (output)?.output),
-      usageUnknown,
-    });
-    if (outcome) output.output = `${output.output}\n\n${outcome}`;
-
-    if (!providerID || !modelID) return;
-    if (lastHitMs === null) return;
-
-    // model_data.json wins when the user has filled it in; otherwise resolve
-    // from the provider. Without that fallback the hint degraded to "TTL isn't
-    // published — judge for yourself" for every anthropic model, because the
-    // hand-edited field was simply never filled in.
-    const modelData = loadModelData();
-    const configuredTtl = modelData?.[`${providerID}/${modelID}`]?.cache_ttl_seconds;
-    const ttl =
-      typeof configuredTtl === "number"
-        ? { seconds: configuredTtl, source: /** @type {const} */ ("published") }
-        : resolveCacheTtl(providerID);
-
-    const limitMap = await getLimitMap();
-    const contextLimit = limitMap?.[`${providerID}/${modelID}`] ?? limitMap?.[modelID];
-
-    const note = formatCacheStatus({
-      taskId,
-      providerModelId: `${providerID}/${modelID}`,
-      lastHitMs,
-      // Absolute wall clock in the same format/zone the bootstrap stamps its
-      // own "now" with, so the orchestrator can recompute the gap at the next
-      // delegation instead of trusting a stale relative age.
-      lastHitAtText:
-        formatLocalDateTime(
-          new Date(lastHitMs),
-          Intl.DateTimeFormat().resolvedOptions().timeZone,
-        ) ?? undefined,
-      // The orchestrator's own clock is frozen at the start of its turn (see
-      // src/message-transform.js), so this stamp is the tighter lower bound on
-      // "now" when it computes a reuse gap later in the same turn.
-      nowAtText:
-        formatLocalDateTime(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone) ??
-        undefined,
-      ttlSeconds: ttl.seconds,
-      ttlSource: ttl.source,
-      contextTokens,
-      contextLimit,
+      modelData: loadModelData(),
+      limitMap: await getLimitMap(),
       now: Date.now(),
     });
-    output.output = `${output.output}\n\n${note}`;
+    for (const note of notes) output.output = `${output.output}\n\n${note}`;
   };
 
   const waitForIdle = (sessionID, timeoutMs = 20_000) =>
@@ -733,46 +490,16 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
   // One agent's settings, shared by both role maps. Every field is optional:
   // `{}` is a perfectly good entry meaning "this model, role defaults".
   const agentEntry = tool.schema.object({
-    variant: tool.schema
-      .string()
-      .optional()
-      .describe(
-        "Reasoning level. Must be one of THIS model's own `reasoning_options` values in " +
-          "models.dev (glm-5.3: low|high|max; claude-opus-5: low|medium|high|xhigh|max) — " +
-          "opencode silently ignores an unrecognized one, so a typo buys silence rather than " +
-          "an error. Omit for models that publish no reasoning options. Setting it does not " +
-          "suppress reasoning: it bounds a reasoner otherwise limited only by the output " +
-          "cap. Per AGENT, so a drill may think harder than the grunt on the same model.",
-      ),
-    description: tool.schema
-      .string()
-      .optional()
-      .describe(
-        "What this agent is for, in one line. The orchestrator reads exactly this in its " +
-          "subagent inventory when choosing who to dispatch, so make it say WHEN to pick " +
-          "this model — 'cheap, mechanical edits', 'strong analysis, slow'. Omit to keep the " +
-          "generic role default, which carries no routing signal at all.",
-      ),
-    notes: tool.schema
-      .string()
-      .optional()
-      .describe(
-        "Extra instructions appended to this agent's prompt only — per-model quirks and " +
-          "workarounds. Round-trips through squad_dump.",
-      ),
+    variant: tool.schema.string().optional().describe(ARG_DESCRIPTIONS["agent.variant"]),
+    description: tool.schema.string().optional().describe(ARG_DESCRIPTIONS["agent.description"]),
+    notes: tool.schema.string().optional().describe(ARG_DESCRIPTIONS["agent.notes"]),
     steps: tool.schema
       .number()
       .int()
       .positive()
       .optional()
-      .describe("Max agentic iterations before opencode forces a text-only response."),
-    disable: tool.schema
-      .boolean()
-      .optional()
-      .describe(
-        "Park this agent without deleting it: it stops being dispatchable but its settings " +
-          "survive. Prefer this over deleting an agent you may want back.",
-      ),
+      .describe(ARG_DESCRIPTIONS["agent.steps"]),
+    disable: tool.schema.boolean().optional().describe(ARG_DESCRIPTIONS["agent.disable"]),
   });
   const agentMap = tool.schema.record(tool.schema.string(), agentEntry);
 
@@ -856,37 +583,17 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     // assemble by hand.
     tool: {
       squad_compact: tool({
-        description:
-          "Compact a subagent session BEFORE reusing it for a new, unrelated task: replaces its " +
-          "history with a summary, so the next dispatch re-reads a small context instead of the " +
-          "whole transcript. Use when you are about to send a LONG task down a session whose " +
-          "context is already large and mostly irrelevant to it — the size is in that session's " +
-          "last [CACHE STATUS] line. Not free: one full pass of the summarising model over the " +
-          "history, and the session's provider cache goes cold afterwards, so it pays off only " +
-          "when several turns follow. If the old history is worthless to the new task, a FRESH " +
-          "session is cheaper than compacting. opencode's own auto-compaction fires only at the " +
-          "context limit, which is far later than the moment this is for.",
+        description: TOOL_DESCRIPTIONS.squad_compact,
         args: {
-          task_id: tool.schema
-            .string()
-            .describe(
-              "The subagent session to compact — the task_id from its [CACHE STATUS] line.",
-            ),
-          model: tool.schema
-            .string()
-            .optional()
-            .describe(
-              "`provider/model` that writes the summary. Defaults to the cheapest model the squad " +
-                "has an agent for (a flat-rate one first), NOT the session's own model — " +
-                "summarising is mechanical and does not need the expensive model that did the work.",
-            ),
+          task_id: tool.schema.string().describe(ARG_DESCRIPTIONS["compact.task_id"]),
+          model: tool.schema.string().optional().describe(ARG_DESCRIPTIONS["compact.model"]),
         },
         async execute(args, ctx) {
           // Rewriting another session's history is strictly more destructive
           // than a roster write, so it takes the same caller guard: a drill is
           // read-only by contract and must not be able to edit a grunt's
           // transcript.
-          if (/^(?:grunt|drill)-/.test(ctx?.agent ?? "")) {
+          if (isSubagentCaller(ctx?.agent)) {
             return (
               `Refused: ${ctx.agent} is a subagent, and compacting a session is the ` +
               "orchestrator's call. Say in your result that your context is large; sarge " +
@@ -965,19 +672,9 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       }),
 
       squad_dump: tool({
-        description:
-          "Read the current squad roster: every generated agent, grouped as `grunts` and " +
-          "`drills` and keyed by model id, with its per-agent settings. ALWAYS call this " +
-          "before squad_patch — the roster is a document you edit, not one you retype. " +
-          "Returns JSON.",
+        description: TOOL_DESCRIPTIONS.squad_dump,
         args: {
-          directory: tool.schema
-            .string()
-            .optional()
-            .describe(
-              "Agent directory to read. Defaults to the global ~/.config/opencode/agent. " +
-                "Pass a project's .opencode/agent to scope the squad to one project.",
-            ),
+          directory: tool.schema.string().optional().describe(ARG_DESCRIPTIONS["dump.directory"]),
         },
         async execute(args) {
           const dir = args.directory || defaultAgentDir();
@@ -992,27 +689,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
           // which silently under-reports: claude-haiku-4-5 publishes only a
           // budget_tokens option, so an effort-values reading says "none" while
           // opencode in fact accepts high and max.
-          const variantMap = await getVariantMap();
-          const ids = new Set([
-            ...Object.keys(roster.grunts ?? {}),
-            ...Object.keys(roster.drills ?? {}),
-          ]);
-          const variantLines =
-            variantMap === null
-              ? "\n\nAccepted variants: could not be read from opencode — treat as UNKNOWN and " +
-                "leave variants alone rather than guessing."
-              : ids.size === 0
-                ? ""
-                : `\n\nVariants opencode accepts (authoritative — do not guess, and do not derive\nthese from models.dev):\n${[
-                    ...ids,
-                  ]
-                    .sort()
-                    .map((id) => {
-                      const v = variantMap[id];
-                      if (v === undefined) return `  ${id}: unknown (model not in this install)`;
-                      return `  ${id}: ${v.length ? v.join(" | ") : "(none — leave variant unset)"}`;
-                    })
-                    .join("\n")}`;
+          const variantLines = formatVariantLines(await getVariantMap(), roster);
           return {
             title: `squad: ${count} agent(s)`,
             output:
@@ -1025,42 +702,21 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
       }),
 
       squad_patch: tool({
-        description:
-          "Write the squad roster: one agent per entry under `grunts` / `drills`, keyed by " +
-          "model id. This is the COMPLETE intended squad, not a delta — an agent absent from " +
-          "it is DELETED, so start from squad_dump and edit that. Deleting an agent the user " +
-          "did not ask you to delete is refused, not performed.",
+        description: TOOL_DESCRIPTIONS.squad_patch,
         args: {
-          grunts: agentMap
-            .optional()
-            .describe("Executors, keyed by model id. `{}` is a valid entry: role defaults."),
-          drills: agentMap
-            .optional()
-            .describe(
-              "Reviewers, keyed by model id. A drill's verdict is what the orchestrator acts " +
-                "on, so give one only to a model that can actually review — a weak reviewer " +
-                "rubber-stamps the work or invents faults, and both are worse than no review " +
-                "because they launder a bad change as an approved one. Cheap and small " +
-                "models belong in `grunts` alone.",
-            ),
+          grunts: agentMap.optional().describe(ARG_DESCRIPTIONS["patch.grunts"]),
+          drills: agentMap.optional().describe(ARG_DESCRIPTIONS["patch.drills"]),
           allow_remove: tool.schema
             .boolean()
             .optional()
-            .describe(
-              "Permit deleting agents present in the current squad but absent from this " +
-                "roster. Pass true ONLY when the user asked for that deletion — never to " +
-                "get past the refusal.",
-            ),
-          directory: tool.schema
-            .string()
-            .optional()
-            .describe("Agent directory to write. Defaults to the global ~/.config/opencode/agent."),
+            .describe(ARG_DESCRIPTIONS["patch.allow_remove"]),
+          directory: tool.schema.string().optional().describe(ARG_DESCRIPTIONS["patch.directory"]),
         },
         async execute(args, ctx) {
           // A grunt or drill rewriting the squad mid-task is never intended, and
           // the damage outlives the session. Same reasoning as the deletion
           // guard: make the destructive path require the right caller.
-          if (/^(?:grunt|drill)-/.test(ctx?.agent ?? "")) {
+          if (isSubagentCaller(ctx?.agent)) {
             return {
               title: "squad_patch refused",
               output:
@@ -1072,32 +728,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
           const dir = args.directory || defaultAgentDir();
           const roster = { grunts: args.grunts ?? {}, drills: args.drills ?? {} };
           const errors = validateRoster(roster);
-          // A variant opencode does not recognize is DROPPED by it without any
-          // error, so a typo would otherwise land as a silently ineffective
-          // config. We can ask opencode what it accepts, so refuse instead —
-          // but only when the lookup worked: our inability to check must not
-          // block a legitimate edit.
-          const variantMap = await getVariantMap();
-          if (variantMap) {
-            for (const [key, map] of Object.entries({
-              grunts: roster.grunts,
-              drills: roster.drills,
-            })) {
-              for (const [id, entry] of Object.entries(map ?? {})) {
-                const want = entry?.variant;
-                if (!want) continue;
-                const accepted = variantMap[id];
-                if (accepted === undefined) continue; // model not in this install
-                if (!accepted.includes(want)) {
-                  errors.push(
-                    `${key}["${id}"].variant "${want}" is not accepted by opencode for this ` +
-                      `model — it would be ignored silently. Accepted: ` +
-                      `${accepted.length ? accepted.join(" | ") : "(none: leave it unset)"}`,
-                  );
-                }
-              }
-            }
-          }
+          errors.push(...validateVariants(roster, await getVariantMap()));
           if (errors.length) {
             return {
               title: "squad_patch rejected",
@@ -1127,7 +758,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
     // starting with the grunt body), and no-ops on anything without our fence —
     // sarge and hand-authored agents included.
     "experimental.chat.system.transform": async (_input, output) => {
-      applySystemPromptTransform(output.system, _loadRolePrompt);
+      applySystemPromptTransform(output.system, loadRolePrompt);
     },
 
     "experimental.chat.messages.transform": async (_input, output) => {
@@ -1137,7 +768,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
         getLimitMap,
         getHasSquad: () => _hasSquadCache,
         orchestratorModel: _orchestratorModel,
-        turnMemo: _turnMemo,
+        turnMemo,
       });
     },
   };
