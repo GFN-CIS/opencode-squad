@@ -1,7 +1,7 @@
 // Pure formatting for the [CACHE STATUS] note appended to a completed task's
-// result (see the `tool.execute.after` hook on "task" in the plugin).
+// result (see the `execute.after` hook on "subagent" in the plugin).
 //
-// Goal: when a `task` tool call finishes, tell the orchestrator how long ago
+// Goal: when a `subagent` tool call finishes, tell the orchestrator how long ago
 // that subagent session last actually hit its provider, and whether that's
 // still inside the provider's prompt-cache TTL — so it can decide whether
 // passing this session's task_id back in (to reuse the cache) is still worth
@@ -14,7 +14,7 @@
 // all.
 //
 // When that field is absent, `resolveCacheTtl()` below supplies a number
-// anyway. That fallback lives here (read on every completed `task` call)
+// anyway. That fallback lives here (read on every completed `subagent` call)
 // rather than in scripts/squad-file-performance.mjs, which is manual-only by
 // design and so would leave the field unset exactly as it was before.
 //

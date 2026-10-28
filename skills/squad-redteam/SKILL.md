@@ -29,8 +29,8 @@ hallucination is still a hallucination if none of them show real evidence.
 
 <CRITICAL>
 The moment this skill is loaded, you are in redteam mode until dispatch. Until
-step 3's `task` calls are sent:
-- You MUST NOT use `read`, `grep`, `glob`, `bash`, `webfetch`, `mcpproxy_*`, or
+step 3's `subagent` calls are sent:
+- You MUST NOT use `read`, `grep`, `glob`, `shell`, `webfetch`, `mcpproxy_*`, or
   any other investigation tool to look at the artifact yourself. That is the
   panel's job, not yours — self-investigating here defeats the entire point of
   a cross-model check and is exactly the failure mode this skill exists to
@@ -99,7 +99,7 @@ comparable.
 
 ## 3. Dispatch (parallel, identical brief)
 
-For each selected grunt, invoke it via the `task` tool — **all calls in one
+For each selected grunt, invoke it via the `subagent` tool — **all calls in one
 message**, never sequential. Every grunt gets the SAME:
 - task brief (what to fetch and look at — URLs, MR links, rule docs, verbatim),
 - the investigation-only guardrail from the `<CRITICAL>` block above,

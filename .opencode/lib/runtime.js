@@ -1,7 +1,4 @@
-// Process-wide state and file-backed lookups shared by both plugin entries:
-// orchestrate.js (OpenCode 1) and orchestrate-v2.js (OpenCode 2). Kept apart
-// from either entry because orchestrate.js imports `@opencode-ai/plugin`, which
-// an OpenCode 2 host does not provide.
+// Process-wide state and file-backed lookups for the OpenCode 2 plugin.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -12,7 +9,6 @@ import {
   cacheDir,
   loadSnapshot,
   refreshOnce,
-  toastFor,
 } from "../../src/benchmark-cache.js";
 import { formatBench } from "../../src/benchmarks.js";
 import { createTurnMemo } from "../../src/message-transform.js";
@@ -24,7 +20,7 @@ const PACKAGE_ROOT = path.resolve(__dirname, "../..");
 export const SKILLS_DIR = path.join(PACKAGE_ROOT, "skills");
 
 // The primary agent that acts as the orchestrator. Injection targets only this
-// agent's sessions (verified via message.info.agent in the Task 0 spike).
+// agent's sessions (the context hook carries its agent id).
 export const ORCHESTRATOR_AGENT = "build";
 
 // Holds the rendered injection block for the turn in flight, so every model
@@ -50,7 +46,6 @@ export const loadRolePrompt = createPromptLoader({
 // is usable.
 const BENCH_CACHE_DIR = cacheDir(process.env, os.homedir());
 let _benchCache; // undefined = not loaded
-let _benchGenerated; // `_meta.generated` of the snapshot in use
 let _bundledModelCount = 0;
 function loadBenchmarks() {
   if (_benchCache !== undefined) return _benchCache;
@@ -62,40 +57,32 @@ function loadBenchmarks() {
   _bundledModelCount = bundledCount;
   if (snapshot) {
     _benchCache = snapshot.models;
-    _benchGenerated = snapshot._meta.generated;
   }
   return _benchCache;
 }
 
 // Background benchmark refresh: first check shortly after startup, then hourly
 // (refreshOnce itself enforces the once-a-day / 5-failures throttle). The first
-// check is delayed so its toast lands after the TUI is up and a one-shot
-// `opencode run` exits before any socket is opened. Fire-and-forget under a
+// check is delayed so a one-shot `opencode run` exits before any socket is
+// opened. Fire-and-forget under a
 // hard fetch timeout, so opencode never waits on GitHub; timers are unref'd so
 // they never keep the process alive. Started once per process.
 const BENCH_FIRST_CHECK_MS = 30_000;
 let _benchTimer;
-export function startBenchmarkRefresh(notify) {
+export function startBenchmarkRefresh() {
   if (_benchTimer) return;
   loadBenchmarks(); // pin the in-use snapshot before the refresher can replace the cache
   let busy = false;
-  let schemaWarned = false; // the "update the plugin" toast, once per process
   const tick = async () => {
     if (busy) return;
     busy = true;
     try {
-      const result = await refreshOnce({
+      await refreshOnce({
         fetch: globalThis.fetch,
         dir: BENCH_CACHE_DIR,
         now: Date.now(),
         minModels: Math.ceil(_bundledModelCount / 2),
       });
-      if (result.outcome === "schema-ahead") {
-        if (schemaWarned) return;
-        schemaWarned = true;
-      }
-      const toast = toastFor(result, _benchGenerated);
-      if (toast) await notify?.(toast);
     } catch {
       // Best-effort; the next tick tries again.
     } finally {
@@ -117,7 +104,7 @@ export function startBenchmarkRefresh(notify) {
 // Keyed by project directory: one OpenCode 2 service process hosts plugin
 // instances for several projects, and its cwd is none of them.
 const _modelDataCache = new Map(); // directory -> merged models | null
-/** @param {string} [directory] project root; defaults to the process cwd (V1) */
+/** @param {string} [directory] project root; defaults to the process cwd */
 export function loadModelData(directory = process.cwd()) {
   if (_modelDataCache.has(directory)) return _modelDataCache.get(directory);
   const candidates = [

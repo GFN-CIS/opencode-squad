@@ -6,12 +6,13 @@ license: MIT
 
 # squad-draft — the per-model squad (grunts + drills)
 
-opencode's `task` tool takes only `subagent_type` (no model), so the only way to
+OpenCode's `subagent` tool dispatches by agent id (not model), so the only way to
 let sarge choose a model — for execution OR review — is a named agent per model:
 a `grunt-<provider>-<model>` (executor) and a `drill-<provider>-<model>`
 (read-only reviewer with allowlisted git/gh/glab inspection and web access).
 
-The shell allowlist is OpenCode 2 only; OpenCode 1 keeps the legacy no-shell drill policy.
+Requires OpenCode 2. Generated files use native `permissions:`, `model: provider/model#variant`
+and `disabled: true`. Existing legacy agent files are read and migrated on re-apply.
 
 The squad is edited through two tools, `squad_dump` and `squad_patch`. The
 roster they speak is one map per role, keyed by model id:
@@ -67,7 +68,7 @@ job. (If they hand you an explicit list, honor it.)
 
 3. **Write a real `description` for every agent.** This is the one field sarge
    actually reads at the moment of choice: it goes verbatim into the subagent
-   inventory line the orchestrator scans when picking `subagent_type`. Left out,
+   inventory line the orchestrator scans when picking an agent id. Left out,
    it falls back to a generic role sentence — and a squad where all ten grunts
    say "Per-model grunt (worker) for the sarge PDCA cycle" gives sarge nothing to
    choose on but the model name. Write when to pick this one: "cheap, 1M context,
@@ -151,10 +152,8 @@ job. (If they hand you an explicit list, honor it.)
 7. **Report** the applied diff (`+added / -removed / ~changed / =unchanged`),
    echo the variants that were written — opencode ignores an unrecognized one
    without erroring, so this is the only place a typo shows up — and tell the
-   user to reload opencode (restart the TUI / start a new run) so the new
-   agents load. That reload is about the agent FILES (a new model, a changed
-   variant or description); role prompt bodies refresh by themselves and need
-   no reload. The generic `grunt` / `drill` remain as the default.
+   user that OpenCode reloads changed agent files automatically, so no restart is
+   needed. Role prompt bodies refresh on every request without re-apply.
 
 ## Notes
 
@@ -162,8 +161,8 @@ job. (If they hand you an explicit list, honor it.)
   `drill-<provider>-<model>`, non-alphanumerics collapsed to `-` (e.g.
   `openai/gpt-5.5` → `grunt-openai-gpt-5-5`). One agent per model per role, so
   changing a level does not rename anything and sarge keeps dispatching by the
-  same `subagent_type`.
-- grunts get `edit`/`bash`; drills deny everything by default, allowing local
+  same agent id.
+- grunts get `edit`/`shell` and explicitly deny `subagent`; drills deny everything by default, allowing local
   reads/searches, skills, `webfetch`/`websearch` and only allowlisted read-only
   git/gh/glab commands and text filters. MCP, Code Mode, edits and subagents
   stay denied. That contract is NOT roster-settable — a writable reviewer is
@@ -174,13 +173,13 @@ job. (If they hand you an explicit list, honor it.)
 - To change behavior for ALL agents of a role, edit the bundled
   `prompts/grunt.md` / `prompts/drill.md`. **No re-apply is needed**: the agent
   file holds only a fenced placeholder, and the plugin injects the current
-  prompt on every request (`experimental.chat.system.transform`, see
+  prompt on every request (the session `context` hook, see
   `src/prompt-inject.js`), so an edit is live for the next model call — even
   mid-session. The prompt is NOT copied into the file, deliberately: one source
   of truth, and nothing on disk that can quietly disagree with what was sent.
   Without the plugin an agent has no role prompt at all — the placeholder tells
   it to stop and say so, which is the right failure for a grunt holding
-  `edit`/`bash`. Two limits: an agent generated before the fence existed needs
+  `edit`/`shell`. Two limits: an agent generated before the fence existed needs
   ONE re-apply to opt in, and everything in the frontmatter — `model`,
   `variant`, `description`, `steps`, `disable`, permissions, adding or removing
   a model — still only changes by re-applying the roster.

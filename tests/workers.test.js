@@ -23,7 +23,7 @@ test("slug is stable and trimmed (no leading/trailing/doubled dashes)", () => {
   expect(slugForModel("  Foo//Bar..Baz  ", "drill")).toBe("drill-foo-bar-baz");
 });
 
-test("grunt markdown: edit/bash allowed, frontmatter, model, marker, body", () => {
+test("grunt markdown: native ordered edit/shell allows and explicit subagent deny", () => {
   const body = "You are grunt, a worker subagent.";
   const { slug, filename, content } = agentMarkdown("grunt", "anthropic/claude-opus-4-7");
   expect(slug).toBe("grunt-anthropic-claude-opus-4-7");
@@ -32,13 +32,12 @@ test("grunt markdown: edit/bash allowed, frontmatter, model, marker, body", () =
   expect(content).toContain("mode: subagent");
   expect(content).toContain("model: anthropic/claude-opus-4-7");
   expect(content).toContain("hidden: true");
-  expect(content).toContain("edit: allow");
-  expect(content).toContain("bash: allow");
-  expect(content).toContain("'*': deny");
   expect(content).toContain(
-    "permission:\n  edit: allow\n  bash: allow\n  task:\n    '*': deny\n---",
+    'permissions:\n  - {"action":"edit","resource":"*","effect":"allow"}\n' +
+      '  - {"action":"shell","resource":"*","effect":"allow"}\n' +
+      '  - {"action":"subagent","resource":"*","effect":"deny"}\n---',
   );
-  expect(content).not.toContain("permissions:");
+  expect(content).not.toContain("permission:");
   expect(content).toContain(GENERATED_MARKER);
   expect(content).toContain(promptOpen("grunt"));
   expect(content.trimEnd().endsWith(PROMPT_CLOSE)).toBe(true);
@@ -46,7 +45,7 @@ test("grunt markdown: edit/bash allowed, frontmatter, model, marker, body", () =
 });
 
 test("V2 drill markdown denies by default, allowing only local reads, web and narrow shell inspection", () => {
-  const { slug, content } = agentMarkdown("drill", "openai/gpt-5.5", {}, { hostGeneration: 2 });
+  const { slug, content } = agentMarkdown("drill", "openai/gpt-5.5");
   expect(slug).toBe("drill-openai-gpt-5-5");
   expect(content).toContain("permissions:\n");
   expect(content).not.toContain("permission:");
@@ -133,7 +132,7 @@ test("V2 drill markdown denies by default, allowing only local reads, web and na
 });
 
 test("V2 write guards and env exceptions come after their broad allows", () => {
-  const { content } = agentMarkdown("drill", "a/b", {}, { hostGeneration: 2 });
+  const { content } = agentMarkdown("drill", "a/b");
   const rules = content
     .split("permissions:\n")[1]
     .split("\n---")[0]
@@ -151,67 +150,31 @@ test("V2 write guards and env exceptions come after their broad allows", () => {
   expect(index("read", "*.env.example")).toBeGreaterThan(index("read", "*.env.*"));
 });
 
-test.each([undefined, 1])("host %s defaults to the legacy drill policy", (hostGeneration) => {
-  const { content } = agentMarkdown(
-    "drill",
-    "openai/gpt-5.5",
-    { variant: "high", disable: true },
-    { hostGeneration },
-  );
-  expect(content.split("\n---")[0]).toBe(
-    [
-      "---",
-      `# ${GENERATED_MARKER}`,
-      `description: ${defaultDescriptions().drill}`,
-      "mode: subagent",
-      "model: openai/gpt-5.5",
-      "variant: high",
-      "disable: true",
-      "hidden: true",
-      "permission:",
-      "  edit: deny",
-      "  bash: deny",
-      "  webfetch: allow",
-      "  task:",
-      "    '*': deny",
-    ].join("\n"),
-  );
-});
-
-test("host generation never changes grunt output", () => {
-  const opts = { variant: "high", disable: true };
-  expect(agentMarkdown("grunt", "a/b", opts, { hostGeneration: 2 })).toEqual(
-    agentMarkdown("grunt", "a/b", opts),
-  );
-});
-
-test("native drill frontmatter preserves variant and disable overrides through a roster round trip", () => {
-  const { content } = agentMarkdown(
-    "drill",
-    "openai/gpt-5.5",
-    {
+test.each(["grunt", "drill"])(
+  "native %s preserves overrides through a roster round trip",
+  (role) => {
+    const { content } = agentMarkdown(role, "openai/gpt-5.5", {
       variant: "high",
       disable: true,
       steps: 12,
       notes: "inspect edge cases",
-    },
-    { hostGeneration: 2 },
-  );
-  expect(content).toContain("model: openai/gpt-5.5#high\n");
-  expect(content).toContain("disabled: true\n");
-  expect(content).not.toContain("\nvariant:");
-  expect(content).not.toContain("\ndisable:");
-  expect(parseAgentFile(content)).toEqual({
-    modelId: "openai/gpt-5.5",
-    entry: {
-      description: defaultDescriptions().drill,
-      variant: "high",
-      disable: true,
-      steps: 12,
-      notes: "inspect edge cases",
-    },
-  });
-});
+    });
+    expect(content).toContain("model: openai/gpt-5.5#high\n");
+    expect(content).toContain("disabled: true\n");
+    expect(content).not.toContain("\nvariant:");
+    expect(content).not.toContain("\ndisable:");
+    expect(parseAgentFile(content)).toEqual({
+      modelId: "openai/gpt-5.5",
+      entry: {
+        description: defaultDescriptions()[role],
+        variant: "high",
+        disable: true,
+        steps: 12,
+        notes: "inspect edge cases",
+      },
+    });
+  },
+);
 
 test("unknown role throws", () => {
   expect(() => agentMarkdown("captain", "openai/gpt-5.5")).toThrow();
@@ -226,7 +189,7 @@ test("agentMarkdown emits variant only when one is given", () => {
   const withVariant = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", {
     variant: "high",
   }).content;
-  expect(withVariant).toContain("model: zai-coding-plan/glm-5.3\nvariant: high\n");
+  expect(withVariant).toContain("model: zai-coding-plan/glm-5.3#high\n");
 
   const without = agentMarkdown("grunt", "anthropic/claude-opus-5").content;
   expect(without).not.toContain("variant:");
@@ -254,9 +217,9 @@ test("agentMarkdown writes the per-agent overrides, and only those that were giv
     disable: true,
   });
   expect(content).toContain("description: cheap long-context coder");
-  expect(content).toContain("variant: high");
+  expect(content).toContain("model: zai-coding-plan/glm-5.3#high\n");
   expect(content).toContain("steps: 40");
-  expect(content).toContain("disable: true");
+  expect(content).toContain("disabled: true");
   expect(content).toContain(NOTES_OPEN);
   expect(content).toContain("prefer the write tool over bash heredocs");
   expect(content).toContain(NOTES_CLOSE);

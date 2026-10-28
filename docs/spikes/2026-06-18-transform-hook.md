@@ -1,7 +1,7 @@
 # Spike: transform-hook injection & filter mechanism
 
 **Date:** 2026-06-18
-**Environment:** opencode 1.17.7, `@opencode-ai/plugin@1.15.10` types
+**Environment:** opencode 1.17.7 (pre-OpenCode-2 host), V1 plugin SDK 1.15.10 types
 **Method:** throwaway plugin in `/tmp/opencode/spike-orchestrate/.opencode/plugins/spike.js`
 logging real hook payloads over live `opencode run` sessions.
 

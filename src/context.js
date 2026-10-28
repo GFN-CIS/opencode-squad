@@ -50,25 +50,6 @@ export function estimateContextTokens(messages) {
 }
 
 /**
- * Resolve the orchestrator's actual model from the latest assistant turn
- * (exact), as `providerID/modelID`. Null on the first turn (no assistant yet),
- * where the caller falls back to the configured agent model.
- *
- * @param {Array<{info?:{role?:string,modelID?:string,providerID?:string}}>} messages
- * @returns {string|null}
- */
-export function resolveOrchestratorModel(messages) {
-  if (!Array.isArray(messages)) return null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const info = messages[i]?.info;
-    if (info?.role === "assistant" && info.modelID) {
-      return info.providerID ? `${info.providerID}/${info.modelID}` : info.modelID;
-    }
-  }
-  return null;
-}
-
-/**
  * Format a Date as `YYYY-MM-DD HH:mm:ss (TimeZone)` in the given IANA zone.
  * sv-SE gives an ISO-like, locale-stable rendering. Returns null if formatting
  * is unavailable.
@@ -121,7 +102,7 @@ export function formatContextLine(used, limit) {
 
 /**
  * Build a {modelID/providerID -> context window} lookup from the resolved
- * provider list (`client.config.providers()` → `data.providers`), keyed both as
+ * normalized provider list, keyed both as
  * `providerID/modelID` and bare `modelID`. Using the resolved list (not raw
  * user config) is what makes built-in models like opus-4-7 (1M) resolve to
  * their real window instead of the fallback.

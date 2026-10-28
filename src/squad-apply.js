@@ -72,10 +72,10 @@ export function readSquad(dir) {
  * that would have been added get written, so a rejected apply leaves the squad
  * exactly as it was.
  *
- * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean, hostGeneration?: 1|2}} input
+ * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean}} input
  * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[]}, written: Array<{role:string,id:string,variant?:string,filename:string}>, pruned: string[], conflicts: string[], dir: string}}
  */
-export function applySquad({ roster, dir, allowRemove = false, hostGeneration = 1 }) {
+export function applySquad({ roster, dir, allowRemove = false }) {
   const { roster: current, conflicts, filesByAgent } = readSquad(dir);
   const diff = diffRoster(current, roster);
 
@@ -92,7 +92,7 @@ export function applySquad({ roster, dir, allowRemove = false, hostGeneration = 
   const written = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
     for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
-      const { filename, content } = agentMarkdown(role, modelId, entry ?? {}, { hostGeneration });
+      const { filename, content } = agentMarkdown(role, modelId, entry ?? {});
       fs.writeFileSync(path.join(dir, filename), content);
       written.push({ role, id: modelId, variant: entry?.variant, filename });
     }
@@ -158,9 +158,9 @@ export function formatApplyReport(result) {
   }
   lines.push(
     "",
-    "Reload opencode (restart the TUI / start a new run) to pick up the new agents.",
+    "OpenCode reloads changed agent files automatically; no restart is needed.",
     "Role prompt bodies do NOT need this: the plugin refreshes them from the bundled",
-    "prompts/<role>.md on every request. The reload is for the frontmatter written here.",
+    "prompts/<role>.md on every request.",
   );
   return lines.join("\n");
 }
