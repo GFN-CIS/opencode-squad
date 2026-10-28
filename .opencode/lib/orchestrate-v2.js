@@ -1,8 +1,7 @@
 /**
  * opencode-squad plugin entry for OpenCode 2.
  *
- * Same responsibilities as ../plugins/orchestrate.js (the OpenCode 1 entry);
- * read its header for the why. This file is only the OpenCode 2 wiring:
+ * Host wiring over pure decision modules in src/:
  *
  *   - skills: registered via ctx.skill.transform (V2 has no config hook);
  *   - bootstrap + context-budget line: the `context` session hook, gated on
@@ -12,16 +11,15 @@
  *   - squad_compact / squad_dump / squad_patch: ctx.tool.transform with JSON
  *     Schema inputs (src/v2/schemas.js);
  *   - rate-limit guard: the `retry` session hook vetoes the retry outright
- *     (V1 had to abort the session from an event), the event stream covers
+ *     while the event stream covers
  *     terminal errors and silent hangs.
  *
- * Differences from OpenCode 1, by design of the V2 API:
+ * Host API constraints:
  *   - no toasts: a server plugin has no TUI handle in V2;
  *   - squad_compact cannot choose the summarising model: V2 compaction takes
  *     no model, so the session's compaction settings apply.
  *
- * Must not import `@opencode-ai/plugin` or zod (an OpenCode 2 host provides
- * neither). Never awaits a domain read during setup: reads happen lazily in
+ * Never awaits a domain read during setup: reads happen lazily in
  * hooks and tools.
  */
 
@@ -56,11 +54,11 @@ import {
   applyOrchestratorTransformV2,
   applySystemPartsTransform,
   lastAssistantModel,
+  normalizeAgents,
+  normalizeProviders,
+  normalizeUsageMessages,
   retryToStatus,
   subagentOutcome,
-  toV1Agents,
-  toV1Providers,
-  toV1UsageMessages,
 } from "../../src/v2/adapt.js";
 import { SQUAD_COMPACT_INPUT, SQUAD_DUMP_INPUT, SQUAD_PATCH_INPUT } from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
@@ -95,28 +93,28 @@ export default {
     ensureGlobalModelDataFresh();
     startBenchmarkRefresh();
 
-    // Same option slot as V1: { package: "opencode-squad", options: { rate_limit_guard } }.
+    // { package: "opencode-squad", options: { rate_limit_guard } }.
     const guardConfig = normalizeGuardConfig(ctx.options?.rate_limit_guard);
     const directory = ctx.location?.directory;
 
-    // --- lazy, process-lifetime lookups (V1 caches the same things) ---
+    // --- lazy, process-lifetime lookups ---
 
-    /** @type {Promise<ReturnType<typeof toV1Agents> | null> | undefined} */
+    /** @type {Promise<ReturnType<typeof normalizeAgents> | null> | undefined} */
     let agentsPromise;
     const getAgents = () => {
       agentsPromise ??= ctx.agent
         .list()
-        .then((r) => toV1Agents(unwrap(r)))
+        .then((r) => normalizeAgents(unwrap(r)))
         .catch(() => null);
       return agentsPromise;
     };
 
-    /** @type {Promise<ReturnType<typeof toV1Providers> | null> | undefined} */
+    /** @type {Promise<ReturnType<typeof normalizeProviders> | null> | undefined} */
     let providersPromise;
     const getProviders = () => {
       providersPromise ??= ctx.model
         .list()
-        .then((r) => toV1Providers(unwrap(r)))
+        .then((r) => normalizeProviders(unwrap(r)))
         .catch(() => null);
       return providersPromise;
     };
@@ -170,11 +168,11 @@ export default {
           getInventory,
           getLimitMap,
           getHasSquad: () => squadDrafted,
-          getUsageMessages: async () => toV1UsageMessages(await readContext(event.sessionID)),
+          getUsageMessages: async () => normalizeUsageMessages(await readContext(event.sessionID)),
           turnMemo,
         });
       } catch {
-        // Best-effort, like V1: the turn goes out without the bootstrap.
+        // Best-effort: the turn goes out without the bootstrap.
       }
     });
 
@@ -189,7 +187,7 @@ export default {
       let model = null;
       try {
         const messages = await readContext(taskId);
-        usage = subagentUsage(toV1UsageMessages(messages));
+        usage = subagentUsage(normalizeUsageMessages(messages));
         model = lastAssistantModel(messages);
       } catch {
         usage = { lastHitMs: null, contextTokens: undefined, usageUnknown: true };
@@ -235,7 +233,7 @@ export default {
           }
           const size = async () => {
             try {
-              return estimateContextTokens(toV1UsageMessages(await readContext(taskId)))?.used;
+              return estimateContextTokens(normalizeUsageMessages(await readContext(taskId)))?.used;
             } catch {
               return undefined;
             }
@@ -266,20 +264,16 @@ export default {
             ? undefined
             : await size().then((n) => (n === before ? undefined : n));
 
-          const ignored = input?.model
-            ? ` The requested model ${input.model} was not used: OpenCode 2 compaction takes no model choice.`
-            : "";
           return {
-            content:
-              formatCompactReport({
-                taskId,
-                agent: agentName,
-                before,
-                after,
-                model: "OpenCode's compaction model",
-                why: "OpenCode 2 picks it; squad_compact cannot choose",
-                timedOut,
-              }) + ignored,
+            content: formatCompactReport({
+              taskId,
+              agent: agentName,
+              before,
+              after,
+              model: "OpenCode's compaction model",
+              why: "OpenCode 2's compaction settings pick it; squad_compact cannot choose",
+              timedOut,
+            }),
           };
         },
       });
@@ -327,7 +321,11 @@ export default {
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
           }
-          const result = applySquad({ roster, dir, allowRemove: input?.allow_remove === true });
+          const result = applySquad({
+            roster,
+            dir,
+            allowRemove: input?.allow_remove === true,
+          });
           if (result.ok) {
             // The inventory lists the squad; let the next turn see the change.
             inventory = undefined;

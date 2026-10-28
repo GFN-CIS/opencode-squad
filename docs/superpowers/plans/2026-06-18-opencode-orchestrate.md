@@ -1,5 +1,11 @@
 # opencode-orchestrate Implementation Plan
 
+> Historical plan: the no-shell reviewer policy and test examples below are
+> superseded for generated `drill-*` agents. Their current deny-default policy
+> allows local reads, skills, web access and allowlisted read-only git/gh/glab
+> commands and text filters, but no MCP or Code Mode. See `src/workers.js` and
+> `tests/workers.test.js`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build an OpenCode plugin package (`opencode-orchestrate`) that turns the `build` agent into a PDCA orchestrator delegating to bundled `worker`/`work-reviewer` subagents.

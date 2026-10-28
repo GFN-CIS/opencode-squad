@@ -109,10 +109,12 @@ paying full price to re-establish that context cold in a grunt — even though
 "offload it" sounds like the frugal move. Weigh the actual marginal cost of
 each path, not just "which one gets it off my plate."
 
-**Reusing a subagent session (`task_id`) — it is not free, and it compounds.**
-When a `task` call finishes, its result carries a `[CACHE STATUS]` line with two
+**Reusing a subagent session (`sessionID`) — it is not free, and it compounds.**
+When a `subagent` call finishes, its result carries a `[CACHE STATUS]` line with two
 facts: how long ago that session last hit its provider (vs the provider's cache
 TTL), and how big its context has grown. Use both.
+The note calls the session id `task_id`; pass that value as `sessionID` to
+`subagent`, or as `task_id` to `squad_compact`.
 
 - Reuse is the *right* default for a genuine continuation — the same
   investigation, the next step of the same fix — inside the cache TTL. The
@@ -148,16 +150,18 @@ TTL), and how big its context has grown. Use both.
     session buys nothing and loses detail.
 
   `squad_compact` is not free and the numbers decide, not the instinct: it is
-  one full pass of a cheap model over the history, and it leaves that session's
-  cache COLD, so the next dispatch re-uploads the compacted context once. It
+  one full pass of OpenCode's compaction model over the history (OpenCode 2's
+  compaction settings pick the model — the tool takes no model argument), and
+  it leaves that session's cache COLD, so the next dispatch re-uploads the
+  compacted context once. It
   pays off when several turns follow — for a single short dispatch a fresh
   session is cheaper. Decide BEFORE dispatching: compacting mid-task wastes the
   pass. Note that opencode's own auto-compaction only fires at the context
   LIMIT (around a million tokens on a 1M model), which is long past the point
   where reuse got expensive — so it will not do this for you.
 
-**An empty result is a diagnosis you do NOT get to guess at.** When a `task`
-call comes back with an empty `<task_result>`, or with a result that stops
+**An empty result is a diagnosis you do NOT get to guess at.** When a `subagent`
+call comes back with empty output, or with a result that stops
 mid-sentence, its result also carries a `[TASK OUTCOME]` line saying which
 failure it actually was. Read it before you react, and react to what it says:
 
@@ -207,7 +211,7 @@ operations, schema/data migrations:
   explicit user confirmation, and only then apply — yourself, or via a grunt
   under a tight brief with the confirmed commands.
 - Never hand an unsupervised production write to the cheap `grunt`. Its broad
-  `bash`/`edit` permissions mean it will execute without a second opinion.
+  `shell`/`edit` permissions mean it will execute without a second opinion.
 - When in doubt about reversibility, treat it as high-risk.
 
 ## 2. Formulate the work
@@ -268,7 +272,7 @@ investigation, skip drill (see §1) and go straight to your own sanity-check.
 
 For iteration N = 1..3:
 
-1. Invoke `grunt` (via the task tool) with: task brief, definition of done,
+1. Invoke `grunt` (via the `subagent` tool) with: task brief, definition of done,
    context, return format, and — if N > 1 — drill's previous feedback.
 2. If grunt returns empty/garbage, treat it as FAIL without calling drill;
    retry with "previous attempt returned no usable output".
@@ -287,14 +291,16 @@ never actually checked. For a review that matters, dispatch a drill on a strong
 model (`drill-<provider>-<model>` from the inventory), the same way you pick
 grunts — a cheap drill rubber-stamps. Either way, read the verdict critically:
 
-- Does each `check` carry a real **`where`** — a `path:line`, a URL — and an
+- Does each `check` carry a real **`where`** — a `path:line`, a URL, or the exact
+  command for `how: ran` — and an
   `evidence` string quoting what was actually there? A check whose evidence would read the same had drill never
   opened the file = drill probably didn't look.
 - Does the evidence merely echo grunt's own self-report? Then it wasn't
   independently verified.
 - Is `unverified` non-empty? That is drill being honest, not drill failing.
-  drill is read-only and cannot run anything, so every check that needs a test
-  run or a command lands there as `kind: needs_execution` BY DESIGN — those are
+  drill can run allowlisted read-only inspection, but not tests, builds,
+  migrations or state-changing commands. Checks needing those land there as
+  `kind: needs_execution` BY DESIGN — those are
   yours to execute, which is what makes the PASS sanity-check below load-bearing
   rather than a formality. A `kind: blocked` entry is the other thing entirely:
   drill could not get at the artifact, so that part of the DoD is unestablished
@@ -336,11 +342,11 @@ turns out to be the wrong call mid-flight. Do not dogmatically complete the loop
 In your final answer to the user, briefly state the delegation outcome, e.g.
 "delegated to grunt (2 iterations), drill approved".
 
-**Before every `task` call where a prior subagent session could plausibly
+**Before every `subagent` call where a prior subagent session could plausibly
 continue this work, state the reuse judgement out loud — one line, before the
 call.** Not for a first-time delegation: if there is no candidate session there
 is nothing to judge, and a vacuous "no prior session — fresh" is noise. But
-whenever there IS a session you could pass `task_id` to, the decision must be
+whenever there IS a session you could pass `sessionID` to, the decision must be
 visible, with the numbers it rests on:
 
 ```

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { expect, test } from "vitest";
+import { afterEach, expect, test } from "vitest";
 import {
   buildModelData,
   discoverSquadModels,
@@ -19,13 +19,20 @@ const BENCH = {
     name: "GPT-5.5",
     intelligence: 54.8,
     coding: 74.9,
-    agentic: { tau2: 0.9, terminalbench_v2_1: 0.8 },
+    agentic: { tau2: 0.9, terminalbench_v2_1: 0.8, terminalbench_v4_0: 0.8 },
     price_blended: 11.25,
   },
 };
 
+const dirs = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tmpdir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "squad-md-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squad-md-"));
+  dirs.push(dir);
+  return dir;
 }
 
 test("extractModelId reads the frontmatter model line only", () => {
@@ -35,6 +42,28 @@ test("extractModelId reads the frontmatter model line only", () => {
 
 test("extractModelId returns null when absent", () => {
   expect(extractModelId("---\nmode: subagent\n---\nbody")).toBeNull();
+});
+
+test("extractModelId strips the native V2 variant suffix", () => {
+  expect(extractModelId("---\nmodel: openai/gpt-5.5#high\n---\n")).toBe("openai/gpt-5.5");
+});
+
+test("native drill variants dedupe with grunts and preserve drill-only model data", () => {
+  const dir = tmpdir();
+  try {
+    fs.writeFileSync(path.join(dir, "grunt-shared.md"), "---\nmodel: openai/gpt-5.5\n---\n");
+    fs.writeFileSync(path.join(dir, "drill-shared.md"), "---\nmodel: openai/gpt-5.5#high\n---\n");
+    fs.writeFileSync(path.join(dir, "drill-only.md"), "---\nmodel: local/reviewer#high\n---\n");
+    expect(discoverSquadModels(dir)).toEqual(["local/reviewer", "openai/gpt-5.5"]);
+    const snapshot = buildModelData(dir, BENCH, {
+      models: { "local/reviewer": { info: "keep this note" } },
+    });
+    expect(Object.keys(snapshot.models)).toEqual(["local/reviewer", "openai/gpt-5.5"]);
+    expect(snapshot.models["local/reviewer"].info).toBe("keep this note");
+    expect(snapshot.models["openai/gpt-5.5"].coding).toBe(75);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("discoverSquadModels dedupes grunt+drill of one model and ignores others", () => {
@@ -56,7 +85,7 @@ test("perfFromBenchmark copies indices and the matched aa slug", () => {
   expect(p.aa_slug).toBe("gpt-5-5");
   expect(p.intelligence).toBe(55);
   expect(p.coding).toBe(75);
-  expect(p.agentic).toBe(85);
+  expect(p.agentic).toBe(80);
   expect(p.price_blended).toBe(11.25);
   expect("info" in p).toBe(false); // perf overlay must not carry info
 });

@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { opencodeConfigDir } from "./paths.js";
 import { buildRoster, diffRoster, parseAgentFile, ROLE_KEYS } from "./roster.js";
 import { agentMarkdown, defaultDescriptions, GENERATED_MARKER_DETECT } from "./workers.js";
 
@@ -16,7 +17,7 @@ const GENERATED_FILE_RE = /^(grunt|drill|worker)-.*\.md$/;
 
 /** The global agent dir opencode merges; the default target for the squad. */
 export function defaultAgentDir() {
-  return path.join(os.homedir(), ".config", "opencode", "agent");
+  return path.join(opencodeConfigDir(process.env, os.homedir()), "agent");
 }
 
 /**
@@ -158,9 +159,9 @@ export function formatApplyReport(result) {
   }
   lines.push(
     "",
-    "Reload opencode (restart the TUI / start a new run) to pick up the new agents.",
+    "OpenCode reloads changed agent files automatically; no restart is needed.",
     "Role prompt bodies do NOT need this: the plugin refreshes them from the bundled",
-    "prompts/<role>.md on every request. The reload is for the frontmatter written here.",
+    "prompts/<role>.md on every request.",
   );
   return lines.join("\n");
 }

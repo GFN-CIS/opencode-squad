@@ -6,7 +6,7 @@
 // synchronously, and refreshes in the background under a hard timeout. A
 // fetched snapshot applies from the NEXT opencode start — swapping benchmark
 // numbers mid-process would change the injected inventory and bust the prompt
-// cache — so a successful refresh only asks the user to restart.
+// cache — so a successful refresh applies to the next plugin instance.
 //
 // Throttle: at most one successful check per day; after MAX_FAILURES failed
 // attempts the checker goes quiet until that failure window is a day old.
@@ -178,31 +178,4 @@ export async function refreshOnce({
     }
     return { outcome: "failed" };
   }
-}
-
-/**
- * The toast a refresh result deserves, or null.
- *
- * @param {Awaited<ReturnType<typeof refreshOnce>>} result
- * @param {string|undefined} loadedGenerated  `_meta.generated` this process runs on
- * @returns {{title: string, message: string, variant: "info"|"warning"}|null}
- */
-export function toastFor(result, loadedGenerated) {
-  if (result.outcome === "cached" && result.generated > (loadedGenerated ?? "")) {
-    return {
-      title: "Squad benchmarks updated",
-      message: `Benchmarks from ${result.generated} downloaded — restart opencode to use them.`,
-      variant: "info",
-    };
-  }
-  if (result.outcome === "schema-ahead") {
-    return {
-      title: "Squad benchmarks and schema updated",
-      message:
-        `Fresh benchmarks use schema v${result.schema}, this plugin reads v${SCHEMA_VERSION} — ` +
-        "update the opencode-squad plugin and restart opencode.",
-      variant: "warning",
-    };
-  }
-  return null;
 }

@@ -47,8 +47,9 @@ describe("squad-tools", () => {
 });
 
 describe("V2 schemas", () => {
-  test("mirror the V1 arguments and carry the shared wording", () => {
+  test("declare tool arguments and carry the shared wording", () => {
     expect(SQUAD_COMPACT_INPUT.required).toEqual(["task_id"]);
+    expect(Object.keys(SQUAD_COMPACT_INPUT.properties)).toEqual(["task_id"]);
     expect(Object.keys(SQUAD_PATCH_INPUT.properties).sort()).toEqual([
       "allow_remove",
       "directory",
@@ -168,13 +169,17 @@ describe("V2 skills", () => {
     fs.writeFileSync(path.join(dir, "bare", "SKILL.md"), "no frontmatter");
     fs.mkdirSync(path.join(dir, "empty"));
     fs.writeFileSync(path.join(dir, "file.txt"), "x");
-    expect(loadSkills([path.join(dir, "missing"), dir])).toEqual([
-      {
-        id: "bare",
-        name: "bare",
-        path: path.join(dir, "bare", "SKILL.md"),
-        content: "no frontmatter",
-      },
-    ]);
+    try {
+      expect(loadSkills([path.join(dir, "missing"), dir])).toEqual([
+        {
+          id: "bare",
+          name: "bare",
+          path: path.join(dir, "bare", "SKILL.md"),
+          content: "no frontmatter",
+        },
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

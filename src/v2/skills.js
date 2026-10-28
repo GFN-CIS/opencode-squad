@@ -1,8 +1,7 @@
 /**
  * Bundled skills for OpenCode 2 (shared verbatim with opencode-time-logger).
  *
- * OpenCode 1 let a plugin append a directory to `config.skills.paths`; OpenCode
- * 2 has no config hook, so the plugin reads each `<dir>/<skill>/SKILL.md`
+ * OpenCode 2 has no config hook, so the plugin reads each `<dir>/<skill>/SKILL.md`
  * itself and registers it through `ctx.skill.transform`. The registered entry
  * mirrors what OpenCode 2 builds for a discovered skill: frontmatter `name` and
  * `description`, the absolute file path, and the body without frontmatter as

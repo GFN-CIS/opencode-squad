@@ -1,9 +1,5 @@
-// Host-independent text and decisions for the squad_* tools.
-//
-// The OpenCode 1 entry (.opencode/plugins/orchestrate.js) declares the tool
-// arguments with zod via `tool.schema`; the OpenCode 2 entry declares them as
-// JSON Schema. Both read their wording from here so the two cannot drift, and
-// both use the same variant reporting/validation below.
+// Text, variant reporting and validation for the squad_* tools.
+// Input JSON Schemas read their wording from here.
 
 /** Tool descriptions, keyed by tool name. */
 export const TOOL_DESCRIPTIONS = {
@@ -16,7 +12,8 @@ export const TOOL_DESCRIPTIONS = {
     "history, and the session's provider cache goes cold afterwards, so it pays off only " +
     "when several turns follow. If the old history is worthless to the new task, a FRESH " +
     "session is cheaper than compacting. opencode's own auto-compaction fires only at the " +
-    "context limit, which is far later than the moment this is for.",
+    "context limit, which is far later than the moment this is for. The summarising " +
+    "model is chosen by OpenCode 2's compaction settings — this tool cannot pick one.",
   squad_dump:
     "Read the current squad roster: every generated agent, grouped as `grunts` and " +
     "`drills` and keyed by model id, with its per-agent settings. ALWAYS call this " +
@@ -51,12 +48,9 @@ export const ARG_DESCRIPTIONS = {
     "Park this agent without deleting it: it stops being dispatchable but its settings " +
     "survive. Prefer this over deleting an agent you may want back.",
   "compact.task_id": "The subagent session to compact — the task_id from its [CACHE STATUS] line.",
-  "compact.model":
-    "`provider/model` that writes the summary. Defaults to the cheapest model the squad " +
-    "has an agent for (a flat-rate one first), NOT the session's own model — " +
-    "summarising is mechanical and does not need the expensive model that did the work.",
   "dump.directory":
-    "Agent directory to read. Defaults to the global ~/.config/opencode/agent. " +
+    "Agent directory to read. Defaults to the global ~/.config/opencode/agent " +
+    "(or $XDG_CONFIG_HOME/opencode/agent). " +
     "Pass a project's .opencode/agent to scope the squad to one project.",
   "patch.grunts": "Executors, keyed by model id. `{}` is a valid entry: role defaults.",
   "patch.drills":
@@ -69,7 +63,9 @@ export const ARG_DESCRIPTIONS = {
     "Permit deleting agents present in the current squad but absent from this " +
     "roster. Pass true ONLY when the user asked for that deletion — never to " +
     "get past the refusal.",
-  "patch.directory": "Agent directory to write. Defaults to the global ~/.config/opencode/agent.",
+  "patch.directory":
+    "Agent directory to write. Defaults to the global ~/.config/opencode/agent " +
+    "(or $XDG_CONFIG_HOME/opencode/agent).",
 };
 
 /**

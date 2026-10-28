@@ -8,11 +8,13 @@
 // meaning/type or goes away — older installed plugins then stop applying fresh
 // snapshots and tell the user to update instead of misreading them.
 
-import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
 
-const z = tool.schema;
-
-export const SCHEMA_VERSION = 1;
+// 2 since the AA Intelligence Index v5 migration (2026-10-27): `intelligence`
+// was re-scored on an incomparable scale, most `agentic.*` fields went null and
+// the snapshot shrank to the re-scored models only — 0.2.x plugins (schema 1)
+// must not read a v5 snapshot as if the numbers meant the same thing.
+export const SCHEMA_VERSION = 2;
 
 const num = z.number().nullable();
 const str = z.string().nullable();

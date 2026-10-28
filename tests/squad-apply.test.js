@@ -51,8 +51,60 @@ test("one model can be a grunt at one level and a drill at another", () => {
     grunts: { "a/b": { variant: "high" } },
     drills: { "a/b": { variant: "max" } },
   });
-  expect(read("grunt-a-b.md")).toContain("variant: high");
-  expect(read("drill-a-b.md")).toContain("variant: max");
+  expect(read("grunt-a-b.md")).toContain("model: a/b#high\n");
+  expect(read("drill-a-b.md")).toContain("model: a/b#max\n");
+});
+
+test("legacy grunt and drill files read losslessly and regenerate entirely in native format", () => {
+  const roster = {
+    grunts: { "a/b": { variant: "high", steps: 12, notes: "keep me" } },
+    drills: { "a/b": { variant: "max", disable: true } },
+  };
+  for (const [role, variant] of [
+    ["grunt", "high"],
+    ["drill", "max"],
+  ]) {
+    fs.writeFileSync(
+      path.join(dir, `${role}-a-b.md`),
+      [
+        "---",
+        "# generated-by: opencode-orchestrate workers-draft",
+        "model: a/b",
+        `variant: ${variant}`,
+        ...(role === "drill" ? ["disable: true"] : ["steps: 12"]),
+        "permission:",
+        `  edit: ${role === "grunt" ? "allow" : "deny"}`,
+        `  bash: ${role === "grunt" ? "allow" : "deny"}`,
+        "  task:",
+        "    '*': deny",
+        "---",
+        ...(role === "grunt" ? ["<!-- squad:notes -->", "keep me", "<!-- /squad:notes -->"] : []),
+      ].join("\n"),
+    );
+  }
+  expect(readSquad(dir).roster).toEqual(roster);
+  expect(apply(readSquad(dir).roster)).toMatchObject({ ok: true, pruned: [] });
+  for (const role of ["grunt", "drill"]) {
+    const content = read(`${role}-a-b.md`);
+    expect(content).toContain(`model: a/b#${role === "grunt" ? "high" : "max"}\n`);
+    expect(content).toContain("permissions:\n");
+    expect(content).not.toMatch(/\n(?:variant|disable|permission):/);
+  }
+  expect(read("drill-a-b.md")).toContain("disabled: true\n");
+  expect(readSquad(dir).roster).toEqual(roster);
+});
+
+test("old generated marker still participates in deletion guards and pruning", () => {
+  fs.writeFileSync(
+    path.join(dir, "drill-a-old.md"),
+    "---\n# generated-by: opencode-orchestrate workers-draft\nmodel: a/old\npermission:\n  bash: deny\n---\n",
+  );
+  expect(apply({ grunts: {}, drills: {} }).ok).toBe(false);
+  expect(apply({ grunts: {}, drills: {} }, true)).toMatchObject({
+    ok: true,
+    pruned: ["drill-a-old.md"],
+  });
+  expect(ls()).toEqual([]);
 });
 
 test("a model can be a grunt with no drill at all", () => {
@@ -109,7 +161,7 @@ test("a legacy worker- file round-trips as a grunt instead of vanishing", () => 
 
 test("disable is written as frontmatter and survives the round trip", () => {
   apply({ grunts: { "a/b": { disable: true } } });
-  expect(read("grunt-a-b.md")).toContain("disable: true");
+  expect(read("grunt-a-b.md")).toContain("disabled: true");
   expect(readSquad(dir).roster.grunts["a/b"]).toEqual({ disable: true });
 });
 

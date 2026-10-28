@@ -1,7 +1,7 @@
 {
   "name": "opencode-squad",
-  "version": "0.2.0",
-  "description": "OpenCode plugin that turns the build agent into a PDCA orchestrator (sarge) over grunt/drill subagents",
+  "version": "0.3.0",
+  "description": "OpenCode 2 plugin that turns the build agent into a PDCA orchestrator (sarge) over grunt/drill subagents",
   "type": "module",
   "main": "index.js",
   "files": [
@@ -35,14 +35,16 @@
     "type": "git",
     "url": "git+https://github.com/GFN-CIS/opencode-squad.git"
   },
-  "peerDependencies": {
-    "@opencode-ai/plugin": "^1.4.0"
+  "engines": {
+    "opencode": ">=2.0.0"
+  },
+  "dependencies": {
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",
-    "@opencode-ai/plugin": "^1.15.10",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.5",
     "knip": "^6.32.1",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.5"
   }
 }
