@@ -6,7 +6,7 @@
 // ceiling), or a 30s-capped exponential backoff when no header is present.
 // There is no config surface for this in opencode core — confirmed by reading
 // the schema and the retry policy itself. For a subagent (dispatched via the
-// `task` tool), that means the orchestrator sits blocked for however long the
+// `subagent` tool), that means the orchestrator sits blocked for however long the
 // provider says to wait, with no way to know it could just pick a different
 // model instead.
 //

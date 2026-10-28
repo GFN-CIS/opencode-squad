@@ -24,13 +24,14 @@ import { fileURLToPath } from "node:url";
 
 import { cacheDir, loadSnapshot } from "../src/benchmark-cache.js";
 import { buildModelData, readModelData } from "../src/model-data.js";
+import { opencodeConfigDir } from "../src/paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
 const BENCHMARKS = path.join(PACKAGE_ROOT, "src", "benchmarks.json");
 
 function parseArgs(argv) {
-  let dir = path.join(os.homedir(), ".config", "opencode", "agent");
+  let dir = path.join(opencodeConfigDir(process.env, os.homedir()), "agent");
   let out = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];

@@ -4,9 +4,8 @@ import { NOTES_CLOSE, NOTES_OPEN } from "./roster.js";
 // Pure helpers for scaffolding per-model squad subagents — both grunts (workers)
 // and drills (reviewers) — from one model list.
 //
-// opencode has no way to pass a model when dispatching via the `task` tool (its
-// input is {description, prompt, subagent_type, ...} — no model). The only lever
-// the orchestrator has is `subagent_type`. So to give it a choice of models we
+// The `subagent` tool dispatches by agent id rather than by model. To give the
+// orchestrator a choice of models we
 // materialize one named agent per model per role; each shows up in the inventory
 // with its model and is dispatched by name.
 
@@ -20,16 +19,86 @@ export const GENERATED_MARKER = `${GENERATED_MARKER_PREFIX} squad-draft`;
 // rename too, so regenerating cleanly migrates older generated agents.
 export const GENERATED_MARKER_DETECT = "generated-by: opencode-";
 
-// Per-role config: name prefix, description, and YAML permission lines. grunt
-// executes (edit/bash); drill reviews read-only (matches the bundled agents).
+const DRILL_SHELL_COMMANDS = [
+  "git log",
+  "git show",
+  "git diff",
+  "git blame",
+  "git status",
+  "git grep",
+  "git ls-files",
+  "git ls-tree",
+  "git cat-file",
+  "git rev-parse",
+  "git merge-base",
+  "git describe",
+  "git shortlog",
+  "gh pr view",
+  "gh pr diff",
+  "gh pr list",
+  "gh pr checks",
+  "gh issue view",
+  "gh issue list",
+  "gh run view",
+  "gh run list",
+  "gh repo view",
+  "gh release view",
+  "gh release list",
+  "glab mr view",
+  "glab mr diff",
+  "glab mr list",
+  "glab issue view",
+  "glab issue list",
+  "glab ci list",
+  "glab ci get",
+  "glab repo view",
+  "head",
+  "tail",
+  "wc",
+  "grep",
+  "sort",
+  "uniq",
+  "cut",
+];
+
+// Drills override the base allow-all, including MCP and Code Mode.
 const ROLES = {
   grunt: {
     description: "Per-model grunt (worker) for the sarge PDCA cycle.",
-    permission: ["  edit: allow", "  bash: allow", "  task:", "    '*': deny"],
+    permissions: [
+      { action: "edit", resource: "*", effect: "allow" },
+      { action: "shell", resource: "*", effect: "allow" },
+      { action: "subagent", resource: "*", effect: "deny" },
+    ],
   },
   drill: {
     description: "Per-model drill (reviewer) for the sarge PDCA cycle.",
-    permission: ["  edit: deny", "  bash: deny", "  webfetch: allow", "  task:", "    '*': deny"],
+    permissions: [
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "read", resource: "*", effect: "allow" },
+      { action: "read", resource: "*.env", effect: "ask" },
+      { action: "read", resource: "*.env.*", effect: "ask" },
+      { action: "read", resource: "*.env.example", effect: "allow" },
+      // external_directory: reads outside the project (grunt handoffs in /tmp,
+      // worktrees); edit stays denied, so this grants no write.
+      ...["glob", "grep", "list", "skill", "webfetch", "websearch", "external_directory"].map(
+        (action) => ({
+          action,
+          resource: "*",
+          effect: "allow",
+        }),
+      ),
+      { action: "shell", resource: "*", effect: "deny" },
+      ...DRILL_SHELL_COMMANDS.map((command) => ({
+        action: "shell",
+        resource: `${command} *`,
+        effect: "allow",
+      })),
+      // Last match wins: git diff/log --output can write even during inspection.
+      { action: "shell", resource: "*--output*", effect: "deny" },
+      { action: "shell", resource: "sort *-o*", effect: "deny" },
+      { action: "shell", resource: "*>*", effect: "deny" },
+    ],
   },
 };
 
@@ -113,16 +182,15 @@ export function agentMarkdown(role, modelId, opts = {}) {
     `# ${GENERATED_MARKER}`,
     `description: ${description}`,
     "mode: subagent",
-    `model: ${modelId}`,
+    `model: ${modelId}${variant ? `#${variant}` : ""}`,
     // Each emitted only when asked for: an absent key leaves opencode on its
     // own default, which is the right behaviour for a model that publishes no
     // reasoning options, or an agent nobody has capped.
-    ...(variant ? [`variant: ${variant}`] : []),
     ...(typeof opts.steps === "number" ? [`steps: ${opts.steps}`] : []),
-    ...(opts.disable ? ["disable: true"] : []),
+    ...(opts.disable ? ["disabled: true"] : []),
     "hidden: true",
-    "permission:",
-    ...cfg.permission,
+    "permissions:",
+    ...cfg.permissions.map((rule) => `  - ${JSON.stringify(rule)}`),
     "---",
     "",
     body,

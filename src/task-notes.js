@@ -1,8 +1,6 @@
 // The [TASK OUTCOME] and [CACHE STATUS] notes appended to a finished subagent
-// call, as pure functions over already-fetched data. Shared by the OpenCode 1
-// entry (the `task` tool) and the OpenCode 2 entry (the `subagent` tool); each
-// entry only fetches the subagent's messages and converts them to V1 `{info}`
-// items.
+// call, as pure functions over already-fetched data. The plugin fetches the
+// subagent's messages and normalizes them to internal `{info}` records.
 
 import { formatCacheStatus, resolveCacheTtl } from "./cache-status.js";
 import { estimateContextTokens, formatLocalDateTime } from "./context.js";
@@ -23,7 +21,7 @@ import { formatTaskOutcome } from "./task-outcome.js";
  *                   usage must not suppress the cache-status line — it degrades
  *                   to the note without the size clause.
  *
- * @param {Array<{info?: any}>} messages V1 `{info}` items
+ * @param {Array<{info?: any}>} messages normalized usage records
  */
 export function subagentUsage(messages) {
   let lastHitMs = null;

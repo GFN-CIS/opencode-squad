@@ -3,10 +3,8 @@
 //
 // WHY. Reuse of a subagent session is all-or-nothing today: pass the task_id and
 // the whole history is re-read on every step, or start fresh and throw the
-// history away. The middle option exists in opencode and nothing was reaching
-// for it — `POST /session/{id}/summarize` runs the same compaction the prompt
-// loop runs on overflow (`compaction.create({auto:false})` + a prompt loop),
-// and it takes any session id, a subagent's included.
+// history away. The middle option is OpenCode's session.compact, which accepts
+// subagent sessions too and uses the host's compaction model settings.
 //
 // The orchestrator's case is exactly the one auto-compaction does not cover:
 // auto only fires at the context LIMIT (`usable = model.limit.input - reserved`,
@@ -21,70 +19,6 @@
 //     the next request re-uploads the compacted context.
 // It pays off when many turns follow. For one short dispatch, a fresh session
 // is cheaper.
-
-/** Cheap-first ordering: a flat-rate subscription model has ~$0 marginal cost. */
-const SUBSCRIPTION = "subscription";
-
-/**
- * Pick the model that will WRITE the summary.
- *
- * Summarising is mechanical next to the work the session did, so the default
- * deliberately does not reuse the session's own (often expensive) model: it
- * takes the cheapest model the squad actually has an agent for, preferring a
- * flat-rate one. The session model is the last resort, not the first choice —
- * an opus grunt re-reading 600k of its own history to write a summary is the
- * exact bill this feature exists to avoid.
- *
- * @param {object} input
- * @param {string} [input.explicit]  caller-supplied `provider/model`, wins outright
- * @param {Record<string, {price_blended?: number|null, billing?: string}>} [input.models]
- *   model_data.json `models` map, keyed by `provider/model`
- * @param {Set<string>|string[]} [input.available]  model ids that have an agent
- * @param {string} [input.sessionModel]  `provider/model` of the session itself
- * @returns {{id: string, why: string} | null}
- */
-export function pickCompactionModel({ explicit, models, available, sessionModel } = {}) {
-  const parse = (id) => {
-    const s = String(id ?? "").trim();
-    const at = s.indexOf("/");
-    return at > 0 && at < s.length - 1 ? s : null;
-  };
-
-  const chosen = parse(explicit);
-  if (chosen) return { id: chosen, why: "explicitly requested" };
-
-  const pool = available instanceof Set ? available : new Set(available ?? []);
-  const entries = Object.entries(models ?? {}).filter(([id]) => pool.size === 0 || pool.has(id));
-
-  const subscription = entries.filter(([, m]) => m?.billing === SUBSCRIPTION);
-  if (subscription.length > 0) {
-    // Among flat-rate models the price field says nothing about what this call
-    // costs, so pick deterministically by id rather than pretending to rank.
-    const id = subscription.map(([id]) => id).sort()[0];
-    return { id, why: "flat-rate (subscription) — ~$0 marginal cost for the pass" };
-  }
-
-  const priced = entries
-    .filter(([, m]) => typeof m?.price_blended === "number")
-    .sort((a, b) => a[1].price_blended - b[1].price_blended || a[0].localeCompare(b[0]));
-  if (priced.length > 0) {
-    return { id: priced[0][0], why: `cheapest squad model at $${priced[0][1].price_blended}/M` };
-  }
-
-  const fallback = parse(sessionModel);
-  if (fallback) {
-    return { id: fallback, why: "no pricing data — fell back to the session's own model" };
-  }
-  return null;
-}
-
-/** Split `provider/model` for the summarize payload. */
-export function splitModelId(id) {
-  const s = String(id ?? "");
-  const at = s.indexOf("/");
-  if (at <= 0 || at >= s.length - 1) return null;
-  return { providerID: s.slice(0, at), modelID: s.slice(at + 1) };
-}
 
 const k = (n) => `${Math.round(n / 1000)}k`;
 

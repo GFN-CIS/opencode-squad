@@ -1,6 +1,5 @@
-// JSON Schema inputs for the squad_* tools on OpenCode 2, mirroring the zod
-// declarations in .opencode/plugins/orchestrate.js (OpenCode 2 takes plain
-// JSON Schema and does not provide zod). Wording comes from src/squad-tools.js.
+// JSON Schema inputs for the squad_* tools on OpenCode 2.
+// Wording comes from src/squad-tools.js.
 
 import { ARG_DESCRIPTIONS } from "../squad-tools.js";
 
@@ -27,7 +26,6 @@ export const SQUAD_COMPACT_INPUT = {
   type: "object",
   properties: {
     task_id: { type: "string", description: ARG_DESCRIPTIONS["compact.task_id"] },
-    model: { type: "string", description: ARG_DESCRIPTIONS["compact.model"] },
   },
   required: ["task_id"],
   additionalProperties: false,

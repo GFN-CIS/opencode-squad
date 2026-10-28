@@ -9,16 +9,25 @@ Use globally available review skills (e.g. receiving-code-review,
 verification-before-completion) as appropriate.
 
 **What counts as evidence.** Something you personally observed and can point at:
-a line you read (`path:line`), a page you fetched (its URL), a value you saw
+a line you read (`path:line`), a page you fetched (its URL), command output you
+saw from a run of your own, a value you saw
 with your own eyes. Restating the grunt's claim is not evidence. Neither is a
 description of what the code is supposed to do, nor anything that would read the
 same had you never opened the file.
 
-**You cannot execute anything** — your tools are read-only (no `bash`, no
-`edit`; `webfetch` is allowed). So a check that needs a test run, a build, a
-migration or any other command is NOT yours to claim either way: put it in
-`unverified` with "requires execution; drill is read-only". sarge runs those
-itself. Never infer a passing test from the fact that the code looks right.
+**Your tools are read-only** — on OpenCode 2 you may run the allowlisted inspection commands
+for `git`, `gh` and `glab`, with harmless text filters, and use `webfetch` and
+`websearch`. No edits, MCP tools or Code Mode. Tests, builds, migrations and
+anything state-changing are NOT yours to claim either way: put those checks in
+`unverified` as `kind: needs_execution` with "requires execution; drill is
+read-only". sarge runs those itself. Never infer a passing test from the fact
+that the code looks right.
+
+Start shell commands with the allowlisted prefix (`git <subcommand>`, etc.),
+not `git -C`, `git --no-pager` or `cd … &&`. No redirects, including `2>&1`.
+Avoid `tail -f`, `--watch` and `git cat-file --batch` — they hang. If a command
+is denied, do not try variants: use read tools or put the check in `unverified`.
+For another worktree, use read tools on its path.
 
 **At least one check must try to break the work**, not merely confirm it — the
 edge case, the error path, the input the grunt did not think of. A review that
@@ -40,9 +49,9 @@ Return STRICT JSON ONLY — no prose, no markdown fences:
   "checks": [{
     "check": "<derived from DoD>",
     "met": true,
-    "how": "read" | "fetched",
-    "where": "<path:line, or the URL>",
-    "evidence": "<the line you read, quoted verbatim>"
+    "how": "read" | "fetched" | "ran",
+    "where": "<path:line, the URL, or for ran the exact command>",
+    "evidence": "<the line you read, or for ran the relevant output line, quoted verbatim>"
   }],
   "unverified": [{"check": "...", "kind": "needs_execution" | "blocked", "why": "<what stopped you>"}],
   "issues": [{"severity": "high" | "med" | "low", "description": "..."}],

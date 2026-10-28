@@ -34,7 +34,7 @@ export function extractModelId(content) {
   const fm = txt.match(/^---\n([\s\S]*?)\n---/);
   const scope = fm ? fm[1] : txt;
   const m = scope.match(/^model:\s*(.+?)\s*$/m);
-  return m ? m[1].trim() : null;
+  return m ? m[1].split("#")[0].trim() : null;
 }
 
 /**

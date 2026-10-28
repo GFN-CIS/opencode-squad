@@ -30,9 +30,10 @@ import {
   deriveTtl,
   formatProviderReport,
 } from "../src/cache-ttl-measure.js";
+import { opencodeDataDir } from "../src/paths.js";
 
 function parseArgs(argv) {
-  let db = path.join(os.homedir(), ".local", "share", "opencode", "opencode.db");
+  let db = path.join(opencodeDataDir(process.env, os.homedir()), "opencode.db");
   let perModel = false;
   let asJson = false;
   for (let i = 0; i < argv.length; i++) {

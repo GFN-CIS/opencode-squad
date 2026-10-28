@@ -11,11 +11,11 @@ import {
   applySystemPartsTransform,
   findV2InjectionTarget,
   lastAssistantModel,
+  normalizeAgents,
+  normalizeProviders,
+  normalizeUsageMessages,
   retryToStatus,
   subagentOutcome,
-  toV1Agents,
-  toV1Providers,
-  toV1UsageMessages,
 } from "../src/v2/adapt.js";
 
 // Payload shapes trimmed from OpenCode 2.1.3 captures.
@@ -60,8 +60,8 @@ const childContext = [
 ];
 
 describe("agents and providers", () => {
-  test("toV1Agents uses the id as the name and reshapes the model", () => {
-    const agents = toV1Agents(v2Agents);
+  test("normalizeAgents uses the id as the name and reshapes the model", () => {
+    const agents = normalizeAgents(v2Agents);
     expect(agents[1]).toEqual({
       name: "grunt-glm",
       mode: "subagent",
@@ -71,23 +71,23 @@ describe("agents and providers", () => {
     expect(agents[0].model).toBeUndefined();
     expect(hasSquad(agents)).toBe(true);
     expect(formatInventory(agents)).toContain("`grunt-glm`: cheap edits (model: zai/glm-5.3)");
-    expect(toV1Agents(undefined)).toEqual([]);
+    expect(normalizeAgents(undefined)).toEqual([]);
   });
 
-  test("toV1Providers feeds buildLimitMap and buildVariantMap", () => {
-    const providers = toV1Providers(v2Models);
+  test("normalizeProviders feeds buildLimitMap and buildVariantMap", () => {
+    const providers = normalizeProviders(v2Models);
     expect(buildLimitMap(providers)).toMatchObject({ "zai/glm-5.3": 200000, "glm-5.3": 200000 });
     expect(buildVariantMap(providers)).toEqual({
       "zai/glm-5.3": ["low", "max"],
       "opencode/big-pickle": [],
     });
-    expect(toV1Providers(null)).toEqual([]);
+    expect(normalizeProviders(null)).toEqual([]);
   });
 });
 
 describe("messages", () => {
-  test("toV1UsageMessages keeps what the usage scans read", () => {
-    const items = toV1UsageMessages(childContext);
+  test("normalizeUsageMessages keeps what the usage scans read", () => {
+    const items = normalizeUsageMessages(childContext);
     expect(items).toHaveLength(2);
     expect(items[1].info).toMatchObject({
       role: "assistant",
@@ -100,7 +100,7 @@ describe("messages", () => {
       modelID: "glm-5.3",
       providerID: "zai",
     });
-    expect(toV1UsageMessages("nope")).toEqual([]);
+    expect(normalizeUsageMessages("nope")).toEqual([]);
   });
 
   test("lastAssistantModel reads the newest assistant message", () => {
@@ -200,7 +200,7 @@ describe("orchestrator injection", () => {
         getHasSquad: () => true,
         getUsageMessages: async () => {
           calls.usage += 1;
-          return toV1UsageMessages(childContext);
+          return normalizeUsageMessages(childContext);
         },
         turnMemo: createTurnMemo(),
       },
@@ -243,6 +243,31 @@ describe("orchestrator injection", () => {
     expect(second.messages[2].content).toEqual(first.messages[2].content);
     expect(calls.inventory).toBe(1);
     expect(calls.usage).toBe(1);
+  });
+
+  test("a new turn rebuilds the inventory instead of reusing the previous block", async () => {
+    const { opts, calls } = baseOpts();
+    const first = request();
+    await applyOrchestratorTransformV2(first, opts);
+    opts.getInventory = async () => "- `grunt-new`: new roster";
+    const next = request();
+    next.messages[2].id = "m4";
+    await applyOrchestratorTransformV2(next, opts);
+    expect(next.messages[2].content[0].text).toContain("grunt-new");
+    expect(next.messages[2].content[0].text).not.toBe(first.messages[2].content[0].text);
+    expect(calls.usage).toBe(2);
+  });
+
+  test("a target without an id rebuilds instead of caching under a shared missing key", async () => {
+    const { opts, calls } = baseOpts();
+    for (let i = 0; i < 2; i++) {
+      const event = request();
+      delete event.messages[2].id;
+      await applyOrchestratorTransformV2(event, opts);
+      expect(event.messages[2].content[0].text).toContain(BOOTSTRAP_MARKER);
+    }
+    expect(calls.inventory).toBe(2);
+    expect(calls.usage).toBe(2);
   });
 
   test("skips other agents, already-injected targets, and empty requests", async () => {
