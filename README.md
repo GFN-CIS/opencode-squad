@@ -89,7 +89,7 @@ Unspecified fields keep the generated definition. There are no generic fallback 
 
 ## Per-model squad (grunts + drills)
 
-OpenCode's `subagent` tool dispatches by agent id rather than model, so model choice requires a named agent per model per role. The `squad-draft` skill discovers available models (`opencode models`), proposes a tiered roster, asks what to change, then — on your OK — writes a hidden **grunt** (executor) and **drill** (read-only reviewer) per selected model into `~/.config/opencode/agent/`. Existing legacy agent files can be read and regenerated in native format without losing roster settings.
+OpenCode's `subagent` tool dispatches by agent id rather than model, so model choice requires a named agent per model per role. The `squad-draft` skill discovers available models (`opencode models`), proposes a tiered roster, asks what to change, then — on your OK — writes a hidden **grunt** (executor) and **drill** (read-only reviewer) per selected model into `~/.config/opencode/agent/` (or `$XDG_CONFIG_HOME/opencode/agent`). Existing legacy agent files can be read and regenerated in native format without losing roster settings.
 
 ```
 openai/gpt-5.5  →  grunt-openai-gpt-5-5   (executor: edit/shell)

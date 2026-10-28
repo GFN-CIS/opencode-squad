@@ -13,6 +13,7 @@ import {
 import { formatBench } from "../../src/benchmarks.js";
 import { createTurnMemo } from "../../src/message-transform.js";
 import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
+import { opencodeConfigDir } from "../../src/paths.js";
 import { createPromptLoader } from "../../src/prompt-inject.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -109,7 +110,7 @@ export function loadModelData(directory = process.cwd()) {
   if (_modelDataCache.has(directory)) return _modelDataCache.get(directory);
   const candidates = [
     path.join(directory, ".opencode", "model_data.json"),
-    path.join(os.homedir(), ".config", "opencode", "model_data.json"),
+    path.join(opencodeConfigDir(process.env, os.homedir()), "model_data.json"),
   ];
   const merged = {};
   let found = false;
@@ -150,7 +151,7 @@ export function ensureGlobalModelDataFresh() {
   try {
     const benchmarks = loadBenchmarks();
     if (!benchmarks) return;
-    const configDir = path.join(os.homedir(), ".config", "opencode");
+    const configDir = opencodeConfigDir(process.env, os.homedir());
     const agentDir = path.join(configDir, "agent");
     const file = path.join(configDir, "model_data.json");
     const existing = readModelData(file) || {};

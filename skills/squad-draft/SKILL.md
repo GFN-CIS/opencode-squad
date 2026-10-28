@@ -145,7 +145,7 @@ job. (If they hand you an explicit list, honor it.)
    - Prefer `disable: true` over deleting an agent the user may want back — it
      stops being dispatchable but keeps its settings.
    - `directory` targets a project's `.opencode/agent` instead of the global
-     `~/.config/opencode/agent`.
+     `~/.config/opencode/agent` (or `$XDG_CONFIG_HOME/opencode/agent`).
    - Hand-authored agents are invisible to both tools: never dumped, never
      pruned.
 
