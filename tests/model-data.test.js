@@ -19,7 +19,7 @@ const BENCH = {
     name: "GPT-5.5",
     intelligence: 54.8,
     coding: 74.9,
-    agentic: { tau2: 0.9, terminalbench_v2_1: 0.8 },
+    agentic: { tau2: 0.9, terminalbench_v2_1: 0.8, terminalbench_v4_0: 0.8 },
     price_blended: 11.25,
   },
 };
@@ -56,7 +56,7 @@ test("perfFromBenchmark copies indices and the matched aa slug", () => {
   expect(p.aa_slug).toBe("gpt-5-5");
   expect(p.intelligence).toBe(55);
   expect(p.coding).toBe(75);
-  expect(p.agentic).toBe(85);
+  expect(p.agentic).toBe(80);
   expect(p.price_blended).toBe(11.25);
   expect("info" in p).toBe(false); // perf overlay must not carry info
 });
