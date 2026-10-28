@@ -327,7 +327,12 @@ export default {
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
           }
-          const result = applySquad({ roster, dir, allowRemove: input?.allow_remove === true });
+          const result = applySquad({
+            roster,
+            dir,
+            allowRemove: input?.allow_remove === true,
+            hostGeneration: 2,
+          });
           if (result.ok) {
             // The inventory lists the squad; let the next turn see the change.
             inventory = undefined;

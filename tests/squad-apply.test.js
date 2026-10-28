@@ -55,6 +55,26 @@ test("one model can be a grunt at one level and a drill at another", () => {
   expect(read("drill-a-b.md")).toContain("variant: max");
 });
 
+test.each([undefined, 1, 2])("threads host generation %s", (hostGeneration) => {
+  const roster = {
+    grunts: { "a/b": { variant: "high" } },
+    drills: { "a/b": { variant: "max", disable: true } },
+  };
+  applySquad({ roster, dir, hostGeneration });
+  const drill = read("drill-a-b.md");
+  if (hostGeneration === 2) {
+    expect(drill).toContain("permissions:\n");
+    expect(drill).toContain("model: a/b#max\n");
+    expect(drill).toContain("disabled: true\n");
+  } else {
+    expect(drill).toContain("permission:\n  edit: deny\n  bash: deny\n");
+    expect(drill).toContain("variant: max\n");
+    expect(drill).toContain("disable: true\n");
+  }
+  expect(read("grunt-a-b.md")).toContain("variant: high\n");
+  expect(readSquad(dir).roster).toEqual(roster);
+});
+
 test("a model can be a grunt with no drill at all", () => {
   apply({ grunts: { "a/weak": {} }, drills: {} });
   expect(ls()).toEqual(["grunt-a-weak.md"]);

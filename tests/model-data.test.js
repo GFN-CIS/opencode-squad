@@ -37,6 +37,28 @@ test("extractModelId returns null when absent", () => {
   expect(extractModelId("---\nmode: subagent\n---\nbody")).toBeNull();
 });
 
+test("extractModelId strips the native V2 variant suffix", () => {
+  expect(extractModelId("---\nmodel: openai/gpt-5.5#high\n---\n")).toBe("openai/gpt-5.5");
+});
+
+test("native drill variants dedupe with grunts and preserve drill-only model data", () => {
+  const dir = tmpdir();
+  try {
+    fs.writeFileSync(path.join(dir, "grunt-shared.md"), "---\nmodel: openai/gpt-5.5\n---\n");
+    fs.writeFileSync(path.join(dir, "drill-shared.md"), "---\nmodel: openai/gpt-5.5#high\n---\n");
+    fs.writeFileSync(path.join(dir, "drill-only.md"), "---\nmodel: local/reviewer#high\n---\n");
+    expect(discoverSquadModels(dir)).toEqual(["local/reviewer", "openai/gpt-5.5"]);
+    const snapshot = buildModelData(dir, BENCH, {
+      models: { "local/reviewer": { info: "keep this note" } },
+    });
+    expect(Object.keys(snapshot.models)).toEqual(["local/reviewer", "openai/gpt-5.5"]);
+    expect(snapshot.models["local/reviewer"].info).toBe("keep this note");
+    expect(snapshot.models["openai/gpt-5.5"].coding).toBe(75);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("discoverSquadModels dedupes grunt+drill of one model and ignores others", () => {
   const dir = tmpdir();
   fs.writeFileSync(path.join(dir, "grunt-openai-gpt-5-5.md"), "---\nmodel: openai/gpt-5.5\n---\n");

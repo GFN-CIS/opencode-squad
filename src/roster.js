@@ -42,8 +42,8 @@ export const ROLE_KEYS = /** @type {const} */ ({ grunts: "grunt", drills: "drill
  * Per-agent fields the roster owns.
  *
  * Deliberately NOT exposed, though opencode's agent schema has them:
- * `permission` (the read-only contract of a drill is a safety property, not a
- * preference), `mode`/`hidden`/`color` (ours), and `temperature`/`top_p`/
+ * `permission`/`permissions` (the read-only contract of a drill is a safety
+ * property, not a preference), `mode`/`hidden`/`color` (ours), and `temperature`/`top_p`/
  * `options` — nobody has needed those, and `options` in particular can override
  * the variant silently, which is the opposite of what this roster is for.
  */
@@ -81,11 +81,14 @@ export function parseAgentFile(text) {
       const m = line.match(/^([a-z_]+):\s*(\S.*?)\s*$/);
       if (!m) continue;
       const [, key, value] = m;
-      if (key === "model") modelId = value;
-      else if (key === "variant") entry.variant = value;
+      if (key === "model") {
+        const [id, variant] = value.split("#");
+        modelId = id;
+        if (variant) entry.variant = variant;
+      } else if (key === "variant") entry.variant = value;
       else if (key === "description") entry.description = value;
       else if (key === "steps") entry.steps = Number(value);
-      else if (key === "disable" && value === "true") entry.disable = true;
+      else if ((key === "disable" || key === "disabled") && value === "true") entry.disable = true;
     }
   }
   const open = src.indexOf(NOTES_OPEN);
@@ -165,7 +168,7 @@ export function validateRoster(doc) {
     }
     for (const [modelId, raw] of Object.entries(map)) {
       const at = `${key}["${modelId}"]`;
-      if (!/^[^/]+\/.+$/.test(modelId)) {
+      if (!/^[^/#]+\/[^#]+$/.test(modelId)) {
         errors.push(`${at}: "${modelId}" is not a provider/model id`);
       }
       if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {

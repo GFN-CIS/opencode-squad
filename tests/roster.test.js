@@ -126,6 +126,19 @@ test("validateRoster accepts a well-formed document, including empty entries", (
   expect(validateRoster({ grunts: {} })).toEqual([]);
 });
 
+test("permissions remain a safety property, not a roster override", () => {
+  expect(validateRoster({ drills: { "a/b": { permissions: [], permission: {} } } })).toEqual([
+    'drills["a/b"] has unknown key "permissions"',
+    'drills["a/b"] has unknown key "permission"',
+  ]);
+});
+
+test.each(["a/b#high", "a#bad/b", "a/b#"])("rejects model id %s", (modelId) => {
+  expect(validateRoster({ drills: { [modelId]: {} } })).toEqual([
+    expect.stringContaining("is not a provider/model id"),
+  ]);
+});
+
 test("validateRoster reports every problem at once", () => {
   const errors = validateRoster({
     models: [],
