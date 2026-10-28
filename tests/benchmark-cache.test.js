@@ -10,7 +10,6 @@ import {
   REFRESH_INTERVAL_MS,
   refreshOnce,
   shouldAttempt,
-  toastFor,
 } from "../src/benchmark-cache.js";
 import { SCHEMA_VERSION } from "../src/benchmarks-schema.js";
 
@@ -220,26 +219,4 @@ test("an unwritable cache dir never throws", async () => {
   fs.writeFileSync(file, "");
   const r = await refreshOnce({ fetch: fakeFetch(200, snap("2026-09-29")), dir: file, now: NOW });
   expect(r.outcome).toBe("failed");
-});
-
-// --- toastFor --------------------------------------------------------------
-
-test("fresher cached data asks for an opencode restart", () => {
-  const t = toastFor({ outcome: "cached", generated: "2026-09-29" }, "2026-09-22");
-  expect(t.message).toMatch(/restart opencode/i);
-  expect(t.message).not.toMatch(/update/i);
-});
-
-test("a newer schema asks to update the plugin and restart", () => {
-  const t = toastFor({ outcome: "schema-ahead", schema: 2 }, "2026-09-22");
-  expect(t.message).toMatch(/update the opencode-squad plugin/i);
-  expect(t.message).toMatch(/restart opencode/i);
-  expect(t.variant).toBe("warning");
-});
-
-test("no toast when nothing new arrived", () => {
-  expect(toastFor({ outcome: "cached", generated: "2026-09-22" }, "2026-09-22")).toBeNull();
-  for (const outcome of ["skipped", "not-modified", "failed"]) {
-    expect(toastFor({ outcome }, "2026-09-22")).toBeNull();
-  }
 });

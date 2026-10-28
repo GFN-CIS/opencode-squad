@@ -1,25 +1,19 @@
 // Keep a generated agent's role prompt live: swap the body that was frozen
 // into its file at generation time for the one bundled with the plugin RIGHT
-// NOW, on every request, via `experimental.chat.system.transform`.
+// NOW, on every request, via the session `context` hook.
 //
-// WHY. A generated agent file exists per model, because opencode's `task` tool
-// takes only a `subagent_type` and the file is the only place a model can be
+// WHY. A generated agent file exists per model, because the `subagent` tool
+// dispatches by agent id and the file is the place a model can be
 // pinned. The role prompt used to be INLINED into each of those files, which
 // made every file a copy: editing the bundled prompt changed nothing for a
 // squad already on disk until someone re-ran squad-draft by hand — a manual
 // step nobody remembers, and the copies drifted silently.
 //
-// opencode builds the system prompt per request as
-//   system[0] = [agent.prompt, ...system, user.system].join("\n")
-// and then triggers the hook with that array (verified in the 1.18 bundle,
-// `LLMRequestPrep.prepare`, and observed firing for a real grunt subagent
-// session, not just primary agents). So the fix is a string splice on
-// system[0].
+// The context hook supplies SystemPart[]; the adapter applies this string
+// splice to the text part that carries a role fence.
 //
 // The role travels INSIDE the text, in the fence markers written by
-// `agentMarkdown`. That is deliberate: the hook's input carries only
-// {sessionID, model} — no agent name — so the alternative was an async lookup
-// of the session's agent on every request. A fence is self-describing, needs no
+// `agentMarkdown`. A fence is self-describing, needs no
 // lookup, works for project-scoped agents, and its absence is the correct
 // no-op for sarge and for hand-authored agents.
 //
@@ -31,7 +25,7 @@
 //      soft landing when the plugin is absent at the price of two states, and
 //      of not being able to tell from the file what the model actually got.
 //      The placeholder instead tells the agent to STOP and say so — a missing
-//      plugin is a broken install, and a grunt with `edit`/`bash` guessing its
+//      plugin is a broken install, and a grunt with `edit`/`shell` guessing its
 //      way through a task without its role prompt is worse than a loud failure.
 //
 //   2. Nothing volatile goes in. This text sits in the cache prefix, so a clock

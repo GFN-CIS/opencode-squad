@@ -27,8 +27,7 @@ Start shell commands with the allowlisted prefix (`git <subcommand>`, etc.),
 not `git -C`, `git --no-pager` or `cd … &&`. No redirects, including `2>&1`.
 Avoid `tail -f`, `--watch` and `git cat-file --batch` — they hang. If a command
 is denied, do not try variants: use read tools or put the check in `unverified`.
-For another worktree, use read tools on its path. On OpenCode 1, shell access
-is disabled entirely; hand those checks back to sarge.
+For another worktree, use read tools on its path.
 
 **At least one check must try to break the work**, not merely confirm it — the
 edge case, the error path, the input the grunt did not think of. A review that

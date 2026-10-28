@@ -4,9 +4,8 @@ import { NOTES_CLOSE, NOTES_OPEN } from "./roster.js";
 // Pure helpers for scaffolding per-model squad subagents — both grunts (workers)
 // and drills (reviewers) — from one model list.
 //
-// opencode has no way to pass a model when dispatching via the `task` tool (its
-// input is {description, prompt, subagent_type, ...} — no model). The only lever
-// the orchestrator has is `subagent_type`. So to give it a choice of models we
+// The `subagent` tool dispatches by agent id rather than by model. To give the
+// orchestrator a choice of models we
 // materialize one named agent per model per role; each shows up in the inventory
 // with its model and is dispatched by name.
 
@@ -62,16 +61,18 @@ const DRILL_SHELL_COMMANDS = [
   "cut",
 ];
 
-// Grunts keep their V1 policy; V2 drills override the base allow-all, including
-// MCP and Code Mode. Unknown hosts keep the legacy no-shell drill policy.
+// Drills override the base allow-all, including MCP and Code Mode.
 const ROLES = {
   grunt: {
     description: "Per-model grunt (worker) for the sarge PDCA cycle.",
-    permission: ["  edit: allow", "  bash: allow", "  task:", "    '*': deny"],
+    permissions: [
+      { action: "edit", resource: "*", effect: "allow" },
+      { action: "shell", resource: "*", effect: "allow" },
+      { action: "subagent", resource: "*", effect: "deny" },
+    ],
   },
   drill: {
     description: "Per-model drill (reviewer) for the sarge PDCA cycle.",
-    permission: ["  edit: deny", "  bash: deny", "  webfetch: allow", "  task:", "    '*': deny"],
     permissions: [
       { action: "*", resource: "*", effect: "deny" },
       { action: "read", resource: "*", effect: "allow" },
@@ -163,13 +164,11 @@ export function slugForModel(modelId, role = "grunt") {
  * @param {"grunt"|"drill"} role
  * @param {string} modelId  e.g. "anthropic/claude-opus-4-7"
  * @param {{variant?: string, description?: string, notes?: string, steps?: number, disable?: boolean}} [opts]
- * @param {{hostGeneration?: 1|2}} [host] Host-owned, never a roster override.
  * @returns {{slug:string, filename:string, content:string}}
  */
-export function agentMarkdown(role, modelId, opts = {}, { hostGeneration = 1 } = {}) {
+export function agentMarkdown(role, modelId, opts = {}) {
   const cfg = ROLES[role];
   if (!cfg) throw new Error(`unknown role: ${role}`);
-  const native = hostGeneration === 2 && !!cfg.permissions;
   const slug = slugForModel(modelId, role);
   const variant = opts.variant?.trim();
   const description = opts.description?.trim() || cfg.description;
@@ -183,17 +182,15 @@ export function agentMarkdown(role, modelId, opts = {}, { hostGeneration = 1 } =
     `# ${GENERATED_MARKER}`,
     `description: ${description}`,
     "mode: subagent",
-    `model: ${modelId}${native && variant ? `#${variant}` : ""}`,
+    `model: ${modelId}${variant ? `#${variant}` : ""}`,
     // Each emitted only when asked for: an absent key leaves opencode on its
     // own default, which is the right behaviour for a model that publishes no
     // reasoning options, or an agent nobody has capped.
-    ...(!native && variant ? [`variant: ${variant}`] : []),
     ...(typeof opts.steps === "number" ? [`steps: ${opts.steps}`] : []),
-    ...(opts.disable ? [native ? "disabled: true" : "disable: true"] : []),
+    ...(opts.disable ? ["disabled: true"] : []),
     "hidden: true",
-    ...(native
-      ? ["permissions:", ...cfg.permissions.map((rule) => `  - ${JSON.stringify(rule)}`)]
-      : ["permission:", ...cfg.permission]),
+    "permissions:",
+    ...cfg.permissions.map((rule) => `  - ${JSON.stringify(rule)}`),
     "---",
     "",
     body,

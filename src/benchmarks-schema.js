@@ -8,9 +8,7 @@
 // meaning/type or goes away — older installed plugins then stop applying fresh
 // snapshots and tell the user to update instead of misreading them.
 
-import { tool } from "@opencode-ai/plugin";
-
-const z = tool.schema;
+import { z } from "zod";
 
 export const SCHEMA_VERSION = 1;
 

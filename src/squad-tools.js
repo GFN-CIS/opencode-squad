@@ -1,9 +1,5 @@
-// Host-independent text and decisions for the squad_* tools.
-//
-// The OpenCode 1 entry (.opencode/plugins/orchestrate.js) declares the tool
-// arguments with zod via `tool.schema`; the OpenCode 2 entry declares them as
-// JSON Schema. Both read their wording from here so the two cannot drift, and
-// both use the same variant reporting/validation below.
+// Text, variant reporting and validation for the squad_* tools.
+// Input JSON Schemas read their wording from here.
 
 /** Tool descriptions, keyed by tool name. */
 export const TOOL_DESCRIPTIONS = {
@@ -52,9 +48,8 @@ export const ARG_DESCRIPTIONS = {
     "survive. Prefer this over deleting an agent you may want back.",
   "compact.task_id": "The subagent session to compact — the task_id from its [CACHE STATUS] line.",
   "compact.model":
-    "`provider/model` that writes the summary. Defaults to the cheapest model the squad " +
-    "has an agent for (a flat-rate one first), NOT the session's own model — " +
-    "summarising is mechanical and does not need the expensive model that did the work.",
+    "Accepted for existing callers but ignored: OpenCode 2 selects the compaction model " +
+    "from its own compaction settings. The tool reports when a supplied model was not used.",
   "dump.directory":
     "Agent directory to read. Defaults to the global ~/.config/opencode/agent. " +
     "Pass a project's .opencode/agent to scope the squad to one project.",

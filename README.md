@@ -1,24 +1,25 @@
 # opencode-squad
 
-An OpenCode plugin that turns the built-in `build` agent into a PDCA orchestrator. On every request it states an explicit `SELF`/`DELEGATE` verdict: trivial work it does itself; real work it hands to a per-model `grunt-*` subagent — routing changes through the matching `drill-*` (the Deming check), and investigations straight back to itself. A live context-usage signal feeds the decision so a heavy task isn't burned into an already-full context.
+An OpenCode 2 plugin that turns the built-in `build` agent into a PDCA orchestrator. On every request it states an explicit `SELF`/`DELEGATE` verdict: trivial work it does itself; real work it hands to a per-model `grunt-*` subagent — routing changes through the matching `drill-*` (the Deming check), and investigations straight back to itself. A live context-usage signal feeds the decision so a heavy task isn't burned into an already-full context.
 
 ---
 
 ## Install
 
-Add one line to `~/.config/opencode/opencode.json`:
+Requires **OpenCode 2**. Add to `~/.config/opencode/opencode.json` (or a project's `opencode.json`):
 
 ```json
 {
-  "plugin": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"]
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"]
 }
 ```
 
-That is all. On next start, OpenCode registers the skills and bootstrap automatically. There is no bundled grunt/drill agent — run the `squad-draft` skill once to generate the per-model squad the orchestrator delegates to.
+OpenCode registers the skills and bootstrap automatically. There is no bundled grunt/drill agent — run the `squad-draft` skill once to generate the per-model squad the orchestrator delegates to.
 
-### OpenCode 2
+### Plugin options
 
-The same package works on OpenCode 2. Use the plural `plugins` key; plugin options (e.g. `rate_limit_guard`) go in the object form:
+Plugin options (e.g. `rate_limit_guard`) go in the object form:
 
 ```json
 {
@@ -31,7 +32,7 @@ The same package works on OpenCode 2. Use the plural `plugins` key; plugin optio
 }
 ```
 
-The package entry (`index.js`) carries both generations: OpenCode 2 calls its `setup` (`.opencode/lib/orchestrate-v2.js`), OpenCode 1 (>= 1.18.29) its `server`, which loads the V1 entry `.opencode/plugins/orchestrate.js`. Both run the same `src/` modules. Differences on 2:
+The package entry (`index.js`) exports the OpenCode 2 `setup` in `.opencode/lib/orchestrate-v2.js`, backed by decision modules in `src/`:
 
 - The delegation tool is `subagent`; the `[TASK OUTCOME]` / `[CACHE STATUS]` notes are appended to its result.
 - The rate-limit guard vetoes the retry through OpenCode 2's `retry` hook instead of aborting the subagent, and steers its explanation into the orchestrator's running turn.
@@ -57,7 +58,7 @@ The bootstrap carries live session facts resolved at injection time — the curr
 grunt-openai-gpt-5-5 … (model: openai/gpt-5.5 · ctx 400k — AA intel 55 · code 75 · agentic 89 · $11.25/M)
 ```
 
-The AA data is a snapshot that CI refreshes on `master` daily (`scripts/refresh-benchmarks.mjs`). The copy bundled with the plugin (`src/benchmarks.json`) is only the fallback: in the background the plugin pulls the current one from GitHub into `~/.cache/opencode-squad/` (hard 5s timeout, at most one successful check a day, up to 5 failed attempts a day, never on the startup path) and uses whichever is fresher. A download applies on the **next** opencode start — the inventory is fixed per process so the prompt cache survives — and a toast tells you to restart. If the upstream snapshot moved to a schema this plugin version can't read, the toast asks you to update opencode-squad instead and the plugin keeps using the data it has. No raw sub-benchmarks or speed metrics are shown.
+The AA data is a snapshot that CI refreshes on `master` daily (`scripts/refresh-benchmarks.mjs`). The copy bundled with the plugin (`src/benchmarks.json`) is only the fallback: in the background the plugin pulls the current one from GitHub into `~/.cache/opencode-squad/` (hard 5s timeout, at most one successful check a day, up to 5 failed attempts a day, never on the startup path) and uses whichever is fresher. A download applies on the next service start — the inventory is fixed per process so the prompt cache survives. Refresh is silent; if the upstream schema is newer than this plugin understands, it keeps the usable snapshot until the plugin is updated. No raw sub-benchmarks or speed metrics are shown.
 
 If a `model_data.json` exists (in the project's `.opencode/` or the global `~/.config/opencode/`), the inventory reads its perf from **there** instead of the raw AA dump. It's a small, hand-editable snapshot holding **only the models that have a grunt-/drill- agent**, keyed by the opencode `provider/model` id, with the AA indices copied in plus an `info` note you fill yourself ("good for coding, weak at long context") — which then shows up inline in the inventory so the orchestrator routes on your guidance, not just the numbers. Without the file, the inventory falls back to `benchmarks.json` exactly as before.
 
@@ -65,38 +66,37 @@ Add `"billing": "subscription"` to an entry to mark a model as covered by a flat
 
 The **global** `~/.config/opencode/model_data.json` is refreshed automatically on opencode startup: the plugin rescans your squad, refreshes the perf from `benchmarks.json`, **merges** (your `info` and any hand-added field are preserved), and writes **only when the models actually changed** — so a new grunt/drill or a fresh benchmark snapshot lands on its own without churning the file or clobbering edits. Note that hand-edited *perf numbers* are overwritten by this refresh (they're derived); only non-perf fields survive. To (re)generate it explicitly — or to target a project's `.opencode/` — run `node scripts/squad-file-performance.mjs [--dir <agentDir>] [--out <file>]`; project-level files are never auto-touched.
 
-"Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via the task tool. Both injections target **only the `build` agent's own sessions** — grunt/drill subagent sessions are never injected into, so there is no recursion.
+"Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via `subagent`. Both injections target **only the `build` agent's own sessions** — grunt/drill subagent sessions are never injected into, so there is no recursion.
 
 ---
 
 ## Optional: override subagent models
 
-The default model for both subagents is `anthropic/claude-sonnet-4-6`. To use a different model for either subagent, add an `agent` block to your `opencode.json`:
+Use `squad-draft` to add or retune the generated per-model agents. For a project-specific override of an existing generated agent, use its full id under `agents`:
 
 ```json
 {
-  "plugin": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"],
-  "agent": {
-    "grunt": { "model": "anthropic/claude-sonnet-4-6" },
-    "drill": { "model": "anthropic/claude-haiku-4-5" }
+  "plugins": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"],
+  "agents": {
+    "grunt-anthropic-claude-sonnet-4-6": { "model": "anthropic/claude-sonnet-4-6#high" }
   }
 }
 ```
 
-Your `agent` block wins; anything you do not specify falls back to the default.
+Unspecified fields keep the generated definition. There are no generic fallback grunt/drill agents.
 
 ---
 
 ## Per-model squad (grunts + drills)
 
-opencode's `task` tool takes only `subagent_type` (no model), so the only way to let the orchestrator *choose* a model — for execution or for review — is a named agent per model per role. The `squad-draft` skill sets this up interactively: invoke it and it discovers the available models (`opencode models`), proposes a tiered roster, asks what to add or remove, then — on your OK — writes a hidden **grunt** (executor) and **drill** (read-only reviewer) per model into `~/.config/opencode/agent/`.
+OpenCode's `subagent` tool dispatches by agent id rather than model, so model choice requires a named agent per model per role. The `squad-draft` skill discovers available models (`opencode models`), proposes a tiered roster, asks what to change, then — on your OK — writes a hidden **grunt** (executor) and **drill** (read-only reviewer) per selected model into `~/.config/opencode/agent/`. Existing legacy agent files can be read and regenerated in native format without losing roster settings.
 
 ```
-openai/gpt-5.5  →  grunt-openai-gpt-5-5   (executor: edit/bash)
+openai/gpt-5.5  →  grunt-openai-gpt-5-5   (executor: edit/shell)
                 →  drill-openai-gpt-5-5   (reviewer: read-only)
 ```
 
-Each generated agent shares the bundled grunt/drill prompt and permissions, differs only in `model`, and is `hidden` (dispatched via `task`, not in the `@`-menu). They appear in the orchestrator's inventory **with their models and capability summary**, which makes the routing concrete — analysis/architecture to a strong model, mechanical work to a cheap one, and reviews on a model strong enough to actually catch problems. Re-running syncs the set (prunes generated grunts/drills no longer listed; never touches hand-authored agents). Reload opencode to pick up new agents. Each file carries a fenced placeholder rather than the role prompt itself; the plugin injects the current `prompts/<role>.md` on every request — so editing a role prompt takes effect immediately, with no regeneration and no reload, and no second copy on disk that can drift. Without the plugin loaded an agent has no role prompt and the placeholder tells it to stop rather than improvise. Frontmatter (model, variant, description, steps, permissions) still changes only by re-applying the roster.
+Each generated agent shares the bundled grunt/drill prompt and permissions, differs only in `model`, and is `hidden` (dispatched via `subagent`, not in the `@`-menu). They appear in the orchestrator's inventory **with their models and capability summary**, which makes routing concrete. Re-running syncs the set (prunes generated agents no longer listed; never touches hand-authored agents). OpenCode reloads changed agent files automatically, so no restart is needed. Each file carries a fenced placeholder rather than the role prompt itself; the plugin injects the current `prompts/<role>.md` on every request. Without the plugin loaded the placeholder tells the agent to stop rather than improvise. Frontmatter changes still require re-applying the roster.
 
 There is no bundled fallback agent — if no `grunt-*`/`drill-*` exists yet, the orchestrator tells you to run `squad-draft` instead of inventing a subagent or quietly doing the work itself.
 
@@ -104,25 +104,26 @@ There is no bundled fallback agent — if no `grunt-*`/`drill-*` exists yet, the
 
 ## Rate-limit guard
 
-opencode's own retry policy retries a rate-limited/overloaded provider call **forever** — it honors the provider's `retry-after` header up to ~24.8 days, or backs off (capped at 30s) when there's no header. There is no config for this in opencode core. For a subagent dispatched via `task`, that leaves the orchestrator blocked with no idea it could just pick a different model.
+OpenCode retries retryable provider failures, including potentially long provider-announced waits. For a child dispatched via `subagent`, that can leave the orchestrator blocked when it could choose another model.
 
 This plugin watches subagent sessions for retry activity and steps in once either of two thresholds is crossed:
 
-Config is passed as **plugin-tuple options**, not a top-level `opencode.json` field — `opencode.json` is strictly schema-validated and an unrecognized top-level key is a hard error that blocks the entire config from loading (confirmed live). The tuple's second element is opencode's own explicitly-unvalidated escape hatch for plugin options:
+Config is passed in the plugin object's **options**, not as a top-level `opencode.json` field:
 
 ```json
 {
-  "plugin": [
-    ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git", {
-      "rate_limit_guard": {
+  "plugins": [
+    {
+      "package": "opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git",
+      "options": { "rate_limit_guard": {
         "enabled": true,
         "retry_on_errors": [429, 403],
         "retryable_error_patterns": ["rate.?limit", "usage.?limit", "quota", "blocked by a gateway or proxy"],
         "max_wait_seconds": 3600,
         "max_cumulative_seconds": 3600,
         "max_silence_seconds": 600
-      }
-    }]
+      } }
+    }
   ]
 }
 ```
@@ -137,9 +138,9 @@ All fields are optional — the values above are also the defaults, so omitting 
 
 Three independent signals feed the guard, so it also catches failures that never look like a retry to opencode itself:
 
-1. **`session.status` retry events** — the abort path. Once a threshold trips, the plugin aborts the stuck subagent. The `task` tool's own error text for that is opencode's hardcoded `"Task cancelled"` (there's no API to set custom text there — confirmed empirically). To actually carry the reason and the "switch models" instruction, once the orchestrator's turn goes idle again the guard sends it a plain follow-up message explaining what happened and telling it to pick a different grunt/drill and retry — including an absolute `Rate limited till <ISO datetime>` deadline when the provider announced one, or `unknown` when it didn't (never a vague "wait a bit").
-2. **Terminal `session.error`/`message.updated` failures** — not every limit produces a retry signal. A real provider error like `"Your token-plan quota has been exhausted"` matches none of opencode's own built-in retryable-message patterns, so opencode never schedules a retry for it at all and the call just fails outright with no warning. The guard also matches these directly against the same patterns and sends the same explanatory note, even though there was nothing for it to abort.
-3. **Silence polling backstop** — the other two signals both require opencode to emit a specific event. Verified live against a real quota-exhausted provider: opencode's ai-sdk layer retried the call *internally* for 10+ minutes without ever emitting a `session.status:retry` or `session.error` — neither of the two paths above ever gets a chance to fire. The guard runs an independent timer per subagent session, polling for any message/part activity; if a guarded session goes completely silent past `max_silence_seconds`, it's aborted on the wall clock alone, no event required.
+1. **Session `retry` hook** — once a threshold trips, the plugin vetoes the retry and steers an explanatory note into the parent turn (resuming it if idle). The note tells sarge to choose another model and includes an absolute `Rate limited till <ISO datetime>` deadline when known.
+2. **Terminal `session.execution.failed` events** — a provider limit that produces no retry still gets the same explanatory note when its error matches the guard patterns.
+3. **Silence polling backstop** — an independent timer watches each child session. If it has no activity past `max_silence_seconds`, the plugin interrupts it and sends the parent an explanation, even without a retry or terminal error event.
 
 Verified live end-to-end against a genuinely quota-exhausted model, on two separate occasions: the guard caught the limit, told the orchestrator, and the orchestrator switched to a different grunt on its own — then, when that one turned out to share the same exhausted account, switched again to a different provider entirely, all without being told which model to pick. The silence backstop specifically was confirmed against a live subagent that produced zero events for over 10 minutes.
 
@@ -147,9 +148,9 @@ Verified live end-to-end against a genuinely quota-exhausted model, on two separ
 
 ## Cache-status hint
 
-The `task` tool supports resuming a prior subagent by passing back its `task_id`, so the orchestrator can either continue an existing grunt/drill session (reusing its message history *and*, if timed right, the provider's prompt cache) or start fresh. Knowing which is worth it requires knowing how long ago that session last actually hit its provider, whether that's still inside the provider's cache TTL, and how large the session has already grown — none of which is printed anywhere by default.
+The `subagent` tool supports resuming a prior child by passing its `sessionID`, so the orchestrator can continue an existing grunt/drill session (reusing its history and, if timed right, the provider cache) or start fresh. Knowing which is worth it requires knowing the time since the last provider hit, the cache TTL, and the accumulated context size. The plugin's notes label the same session identifier `task_id`; pass it as `sessionID` to `subagent` and as `task_id` to `squad_compact`.
 
-When a `task` call completes, this plugin appends a line to its result:
+When a `subagent` call completes, this plugin appends a line to its result:
 
 ```
 [CACHE STATUS] task_id=ses_abc123 — last provider hit ~45s ago (2026-08-27 13:25:16 (Europe/Moscow)), model anthropic/claude-sonnet-5. published cache TTL ~5m — likely still warm. Its context is ~120k / 200k (60%) as of its last completed turn (so right after a compaction this still reads high for one turn). Reusing it re-reads all of that on every step; a fresh session starts from the brief. Pass task_id to continue this same session if you want to reuse it.
@@ -193,7 +194,7 @@ Results as of 2026-09-01 fed `MEASURED_CACHE_TTL_SECONDS`: `zai` and `zai-coding
 
 Like `squad-file-performance.mjs`, this is manual-only and will go stale. That is tolerable here in a way it was not for the read path: it is a periodic measurement, and a provider with no entry now falls through to the tiers above rather than to "unknown".
 
-Verified live: dispatched a real grunt via the `task` tool with `cache_ttl_seconds` set on its model entry and confirmed the exact `[CACHE STATUS]` line landed in the actual `task_result` the orchestrator sees (queried straight from opencode's own storage, not just logs).
+The `[CACHE STATUS]` line is appended to the completed `subagent` tool result, alongside any `[TASK OUTCOME]` diagnosis.
 
 ---
 
@@ -232,12 +233,11 @@ What the variant does change is how often it happens. With it, glm-5.3 ran 83
 turns in one day with no truncation, against five in the two days before. So:
 mitigation, not a fix. The fix is the cap ([#2](https://github.com/GFN-CIS/opencode-squad/issues/2)).
 
-So a roster entry carries an optional level, which becomes `variant:` in both
-generated agents (`variant` is a first-class opencode agent config key):
+So a roster entry carries an optional `variant`, appended to the model reference
+in both generated agents:
 
 ```yaml
-model: zai-coding-plan/glm-5.3
-variant: high
+model: zai-coding-plan/glm-5.3#high
 ```
 
 An unrecognized variant is **silently ignored** by opencode
@@ -277,11 +277,10 @@ A third tool covers the other half of reuse:
 
 Reuse used to be all-or-nothing: pass the `task_id` and re-read the whole
 transcript on every step, or start fresh and lose the history. `squad_compact`
-is the middle option — it runs opencode's own compaction (`POST
-/session/:id/summarize`, which accepts a subagent session like any other) so the
-next dispatch reads a summary instead. The summary is written by the cheapest
-model the squad has an agent for, preferring a flat-rate one, because
-summarising does not need the model that did the work. It is not free: one full
+is the middle option — it runs OpenCode's own `session.compact` so the
+next dispatch reads a summary instead. OpenCode selects the compaction model;
+the optional `model` argument is accepted but ignored and the report says so.
+It is not free: one full
 pass over the history, and the session's provider cache goes cold afterwards, so
 it pays off only when several turns follow. opencode's automatic compaction
 fires at the context limit — around a million tokens on a 1M model — which is
@@ -353,13 +352,13 @@ Hand-authored agents are invisible in every mode: never dumped, never pruned.
 
 ## Task-outcome note
 
-opencode's `task` tool hands the orchestrator the subagent's final text and nothing else — no finish reason, no token split. So two completely different failures arrive as the same empty string: the model was **cut off at max_tokens before it emitted anything**, or the model **genuinely ended its turn with no final message**. `state="completed"` in both cases.
+The `subagent` tool's final text does not explain an empty deliverable. Two completely different failures can arrive as the same empty string: the model was **cut off at max_tokens before it emitted anything**, or it **genuinely ended its turn with no final message**.
 
 That gap is not theoretical. On 2026-09-01 two `zai-coding-plan` grunts (`glm-5.3-flash`, then `glm-5.3`) were dispatched on the same ESPHome component brief. Both came back with an empty `<task_result>`. Their sessions say why: `finish: "length"`, `reasoning: ~32000`, `output: 2` and `9` — each model spent its entire budget inside the reasoning channel (~133 KB of it, holding 70 fenced code blocks of real drafted work) and was truncated one step before writing a file. Their `gpt-5.6-terra` siblings on the same brief finished on `tool-calls` normally.
 
 Given only `""` to look at, the orchestrator announced *«отказ провайдера zai … бриф до оценки даже не дошёл»* and switched providers. Nothing in the session supported either claim — the brief had been parsed line by line and nearly implemented, and the only actual errors in that session were `Tool execution aborted` / `Task cancelled`, i.e. the user's own ESC. A missing diagnosis is bad; an invented one is worse, because the orchestrator acts on it.
 
-So when a `task` call returns an empty or truncated result, this plugin appends:
+So when a `subagent` call returns an empty or truncated result, this plugin appends:
 
 ```
 [TASK OUTCOME] task_id=ses_fa3e7d7a6ffe… (zai-coding-plan/glm-5.3) hit max_tokens (finish=length; 9 tokens output, 31991 tokens reasoning) and was cut off before emitting anything — the result is empty because the turn never reached one, not because the provider refused or the brief was rejected. The budget went into the reasoning channel, so the work may exist there as drafts; read that session's reasoning before rewriting the brief from scratch. Do not switch providers on this signal. Fix the cap: shorten the brief, split the task, or dispatch a model with room to answer.
@@ -375,9 +374,9 @@ Three outcomes get a note, and they say different things:
 
 A normal finish that produced a result gets no note at all.
 
-The facts come from the last *completed* assistant turn of the subagent session — the same `client.session.messages` fetch `[CACHE STATUS]` already makes, so this costs no extra call. Deliberately the last turn that carried a finish reason, not simply the newest: an aborted session can end with a stub assistant record (no finish, all-zero tokens), and reading the outcome off that stub would report "no finish reason" for every cancelled task. `[TASK OUTCOME]` is also appended when the model is unknown or the session has no usable timestamp, both of which suppress the cache-status line — degrading to silence there would restore the exact blind spot it exists to close.
+The facts come from the last *completed* assistant turn of the child session — the same `ctx.session.context` read `[CACHE STATUS]` already makes, so this costs no extra call. Deliberately the last turn that carried a finish reason, not simply the newest: an aborted session can end with a stub assistant record. `[TASK OUTCOME]` is also appended when the model or timestamp is unknown, both of which suppress the cache-status line.
 
-Verified by replaying the two real sessions above through `formatTaskOutcome()` against their stored `task` tool output: both parse as empty and produce the note quoted above.
+The stored-session regression fixtures exercise both empty-result diagnoses through `formatTaskOutcome()`.
 
 ---
 
@@ -460,12 +459,12 @@ Once it delegates, the shape depends on the task:
 
 ### Matching the delegate (capability & risk)
 
-The drill shell allowlist is OpenCode 2 only; OpenCode 1 keeps the legacy no-shell drill policy.
+Both roles use native ordered `permissions:` rules, `model: provider/model#variant`, and `disabled: true` when parked. Grunts explicitly allow edit and shell, then deny all subagent launches; drills keep the deny-by-default inspection policy.
 
 Delegating only helps if the delegate is actually fit for the task. The injected inventory lists each subagent's model, and the orchestrator weighs two things before handing work over:
 
 - **Capability** — the orchestrator routes by what the *specific* models involved are good and bad at as of the current date (its own model and each subagent's model are in the bootstrap/inventory), rather than from fixed rules. High-cognition work (analysis, architecture, ambiguous trade-offs) is not handed to the cheapest drafted `grunt-*`, where a weak model would produce confident nonsense — it picks a strong-model delegate or keeps the task itself. **This cuts both ways:** when the orchestrator itself runs on a mid/cheap model and a task (or a pivotal call inside it) is beyond its depth, it escalates *up* — delegating the whole task to a stronger grunt, or consulting one for a second opinion before committing (advisor-style), rather than guessing.
-- **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheapest `grunt-*` (its broad `bash`/`edit` permissions would execute it without a second opinion).
+- **Risk / blast radius** — for production writes, destructive operations, and migrations, investigation and a dry-run plan may be delegated, but the **apply step is never blind**: the orchestrator surfaces the exact plan/commands, waits for your explicit confirmation, and only then applies. An unsupervised prod-write is never handed to the cheapest `grunt-*` (its broad `shell`/`edit` permissions would execute it without a second opinion).
 
 ### Weighing real cost (caching, subscriptions, context)
 
@@ -509,7 +508,7 @@ The orchestrator opens with its verdict, then proceeds:
 
 **Confirm the plugin loaded**
 
-Check the OpenCode log for a line referencing `orchestrate.js` or `opencode-squad`. If the plugin fails to load, the log prints the error immediately after startup.
+Check the OpenCode log for a line referencing `opencode-squad` (plugin id `orchestrate`). If the plugin fails to load, the log prints the error immediately after startup.
 
 **Subagents are hidden — that is intentional**
 
@@ -517,7 +516,7 @@ Check the OpenCode log for a line referencing `orchestrate.js` or `opencode-squa
 
 **Orchestrator says there's no squad**
 
-There is no bundled grunt/drill fallback agent — if `~/.config/opencode/agent/` (or a project's `.opencode/agent/`) has no `grunt-*`/`drill-*` files, the bootstrap tells sarge to send you to the `squad-draft` skill instead of delegating. Run it once and reload.
+There is no bundled grunt/drill fallback agent — if `~/.config/opencode/agent/` (or a project's `.opencode/agent/`) has no `grunt-*`/`drill-*` files, the bootstrap tells sarge to send you to the `squad-draft` skill instead of delegating. Run it once.
 
 **Check which mode it chose**
 
@@ -540,7 +539,7 @@ npm run lint:fix  # biome check --write
 npm run knip      # unused files/exports/dependencies
 ```
 
-Coverage is scoped to `src/**` on purpose — that's the pure decision-logic layer the codebase deliberately separates from `.opencode/plugins/orchestrate.js`'s SDK-client/event plumbing (see that file's header comment). Unit-testing the plugin file itself would mean mocking the whole opencode SDK client.
+Coverage is scoped to `src/**` on purpose — that's the decision-logic layer separated from `.opencode/lib/orchestrate-v2.js`'s session/tool hook plumbing. Package-entry tests additionally check registration and native agent generation.
 
 ---
 

@@ -1,9 +1,9 @@
 // Pure formatting for the [TASK OUTCOME] note appended to a finished task's
-// result (see the `tool.execute.after` hook on "task" in the plugin).
+// result (see the `execute.after` hook on "subagent" in the plugin).
 //
 // Goal: explain an empty or truncated `<task_result>`.
 //
-// opencode's `task` tool reports `state="completed"` and the subagent's final
+// OpenCode's `subagent` tool reports completion and the subagent's final
 // text, and nothing else — no finish reason, no token split. So two completely
 // different failures arrive at the orchestrator as the same empty string:
 //
@@ -129,9 +129,9 @@ export function formatTaskOutcome(info) {
 }
 
 /**
- * Pulls the `<task_result>` payload out of a `task` tool result string, to tell
- * an empty deliverable from a present one. The tool wraps the subagent's final
- * text in that element; anything the plugin has already appended (the
+ * Tells an empty subagent deliverable from a present one. A result string may
+ * wrap the subagent's final text in a `<task_result>` element, in which case
+ * only that element counts; otherwise the whole string does. Anything the plugin has already appended (the
  * [CACHE STATUS] line) lives outside it, so matching the element rather than
  * trimming the whole string keeps this honest.
  *
