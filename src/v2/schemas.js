@@ -26,7 +26,6 @@ export const SQUAD_COMPACT_INPUT = {
   type: "object",
   properties: {
     task_id: { type: "string", description: ARG_DESCRIPTIONS["compact.task_id"] },
-    model: { type: "string", description: ARG_DESCRIPTIONS["compact.model"] },
   },
   required: ["task_id"],
   additionalProperties: false,

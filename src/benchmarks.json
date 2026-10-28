@@ -1,6 +1,6 @@
 {
  "_meta": {
-  "schema": 1,
+  "schema": 2,
   "intelligence_index": "v5",
   "source": "artificialanalysis.ai",
   "endpoint": "https://artificialanalysis.ai/api/v2/data/llms/models",

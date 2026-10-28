@@ -37,7 +37,7 @@ The package entry (`index.js`) exports the OpenCode 2 `setup` in `.opencode/lib/
 - The delegation tool is `subagent`; the `[TASK OUTCOME]` / `[CACHE STATUS]` notes are appended to its result.
 - The rate-limit guard vetoes the retry through OpenCode 2's `retry` hook instead of aborting the subagent, and steers its explanation into the orchestrator's running turn.
 - No toasts: an OpenCode 2 server plugin has no TUI handle (the benchmark refresh still runs, silently).
-- `squad_compact` cannot choose the summarising model — OpenCode 2 compaction takes none — and says so in its report.
+- `squad_compact` cannot choose the summarising model — OpenCode 2's compaction settings pick it; the tool takes no model argument.
 
 ---
 
@@ -273,13 +273,13 @@ A third tool covers the other half of reuse:
 
 | tool | what it does |
 | --- | --- |
-| `squad_compact` | compacts a subagent session before it is reused for a new task — `task_id`, plus an optional `model` |
+| `squad_compact` | compacts a subagent session before it is reused for a new task — `task_id` only; the compaction model comes from OpenCode 2's own settings |
 
 Reuse used to be all-or-nothing: pass the `task_id` and re-read the whole
 transcript on every step, or start fresh and lose the history. `squad_compact`
 is the middle option — it runs OpenCode's own `session.compact` so the
-next dispatch reads a summary instead. OpenCode selects the compaction model;
-the optional `model` argument is accepted but ignored and the report says so.
+next dispatch reads a summary instead. OpenCode 2's compaction settings select
+the model; `squad_compact` takes no model argument and cannot choose one.
 It is not free: one full
 pass over the history, and the session's provider cache goes cold afterwards, so
 it pays off only when several turns follow. opencode's automatic compaction

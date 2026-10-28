@@ -264,20 +264,16 @@ export default {
             ? undefined
             : await size().then((n) => (n === before ? undefined : n));
 
-          const ignored = input?.model
-            ? ` The requested model ${input.model} was not used: OpenCode 2 compaction takes no model choice.`
-            : "";
           return {
-            content:
-              formatCompactReport({
-                taskId,
-                agent: agentName,
-                before,
-                after,
-                model: "OpenCode's compaction model",
-                why: "OpenCode 2 picks it; squad_compact cannot choose",
-                timedOut,
-              }) + ignored,
+            content: formatCompactReport({
+              taskId,
+              agent: agentName,
+              before,
+              after,
+              model: "OpenCode's compaction model",
+              why: "OpenCode 2's compaction settings pick it; squad_compact cannot choose",
+              timedOut,
+            }),
           };
         },
       });

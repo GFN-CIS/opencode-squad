@@ -33,7 +33,15 @@ const snap = (meta = {}, models = { "gpt-5-5": entry() }) => ({
 });
 
 test("the bundled snapshot passes its own schema", () => {
+  expect(bundled._meta.schema).toBe(SCHEMA_VERSION);
   expect(checkSnapshot(bundled).ok).toBe(true);
+});
+
+test("an older schema version is invalid — v5-era snapshots must not feed a schema-1 reader", () => {
+  // A 0.2.x-era cached/downloaded snapshot (schema 1, the 704-model v4-scored
+  // data) is unreadable at SCHEMA_VERSION 2, not merely stale.
+  const r = checkSnapshot(snap({ schema: SCHEMA_VERSION - 1 }));
+  expect(r).toMatchObject({ ok: false, reason: "invalid" });
 });
 
 test("a well-formed snapshot passes", () => {
