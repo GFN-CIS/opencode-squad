@@ -20,8 +20,50 @@ export const GENERATED_MARKER = `${GENERATED_MARKER_PREFIX} squad-draft`;
 // rename too, so regenerating cleanly migrates older generated agents.
 export const GENERATED_MARKER_DETECT = "generated-by: opencode-";
 
-// Per-role config: name prefix, description, and YAML permission lines. grunt
-// executes (edit/bash); drill reviews read-only (matches the bundled agents).
+const DRILL_SHELL_COMMANDS = [
+  "git log",
+  "git show",
+  "git diff",
+  "git blame",
+  "git status",
+  "git grep",
+  "git ls-files",
+  "git ls-tree",
+  "git cat-file",
+  "git rev-parse",
+  "git merge-base",
+  "git describe",
+  "git shortlog",
+  "gh pr view",
+  "gh pr diff",
+  "gh pr list",
+  "gh pr checks",
+  "gh issue view",
+  "gh issue list",
+  "gh run view",
+  "gh run list",
+  "gh repo view",
+  "gh release view",
+  "gh release list",
+  "glab mr view",
+  "glab mr diff",
+  "glab mr list",
+  "glab issue view",
+  "glab issue list",
+  "glab ci list",
+  "glab ci get",
+  "glab repo view",
+  "head",
+  "tail",
+  "wc",
+  "grep",
+  "sort",
+  "uniq",
+  "cut",
+];
+
+// Grunts keep their V1 policy; V2 drills override the base allow-all, including
+// MCP and Code Mode. Unknown hosts keep the legacy no-shell drill policy.
 const ROLES = {
   grunt: {
     description: "Per-model grunt (worker) for the sarge PDCA cycle.",
@@ -30,6 +72,32 @@ const ROLES = {
   drill: {
     description: "Per-model drill (reviewer) for the sarge PDCA cycle.",
     permission: ["  edit: deny", "  bash: deny", "  webfetch: allow", "  task:", "    '*': deny"],
+    permissions: [
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "read", resource: "*", effect: "allow" },
+      { action: "read", resource: "*.env", effect: "ask" },
+      { action: "read", resource: "*.env.*", effect: "ask" },
+      { action: "read", resource: "*.env.example", effect: "allow" },
+      // external_directory: reads outside the project (grunt handoffs in /tmp,
+      // worktrees); edit stays denied, so this grants no write.
+      ...["glob", "grep", "list", "skill", "webfetch", "websearch", "external_directory"].map(
+        (action) => ({
+          action,
+          resource: "*",
+          effect: "allow",
+        }),
+      ),
+      { action: "shell", resource: "*", effect: "deny" },
+      ...DRILL_SHELL_COMMANDS.map((command) => ({
+        action: "shell",
+        resource: `${command} *`,
+        effect: "allow",
+      })),
+      // Last match wins: git diff/log --output can write even during inspection.
+      { action: "shell", resource: "*--output*", effect: "deny" },
+      { action: "shell", resource: "sort *-o*", effect: "deny" },
+      { action: "shell", resource: "*>*", effect: "deny" },
+    ],
   },
 };
 
@@ -95,11 +163,13 @@ export function slugForModel(modelId, role = "grunt") {
  * @param {"grunt"|"drill"} role
  * @param {string} modelId  e.g. "anthropic/claude-opus-4-7"
  * @param {{variant?: string, description?: string, notes?: string, steps?: number, disable?: boolean}} [opts]
+ * @param {{hostGeneration?: 1|2}} [host] Host-owned, never a roster override.
  * @returns {{slug:string, filename:string, content:string}}
  */
-export function agentMarkdown(role, modelId, opts = {}) {
+export function agentMarkdown(role, modelId, opts = {}, { hostGeneration = 1 } = {}) {
   const cfg = ROLES[role];
   if (!cfg) throw new Error(`unknown role: ${role}`);
+  const native = hostGeneration === 2 && !!cfg.permissions;
   const slug = slugForModel(modelId, role);
   const variant = opts.variant?.trim();
   const description = opts.description?.trim() || cfg.description;
@@ -113,16 +183,17 @@ export function agentMarkdown(role, modelId, opts = {}) {
     `# ${GENERATED_MARKER}`,
     `description: ${description}`,
     "mode: subagent",
-    `model: ${modelId}`,
+    `model: ${modelId}${native && variant ? `#${variant}` : ""}`,
     // Each emitted only when asked for: an absent key leaves opencode on its
     // own default, which is the right behaviour for a model that publishes no
     // reasoning options, or an agent nobody has capped.
-    ...(variant ? [`variant: ${variant}`] : []),
+    ...(!native && variant ? [`variant: ${variant}`] : []),
     ...(typeof opts.steps === "number" ? [`steps: ${opts.steps}`] : []),
-    ...(opts.disable ? ["disable: true"] : []),
+    ...(opts.disable ? [native ? "disabled: true" : "disable: true"] : []),
     "hidden: true",
-    "permission:",
-    ...cfg.permission,
+    ...(native
+      ? ["permissions:", ...cfg.permissions.map((rule) => `  - ${JSON.stringify(rule)}`)]
+      : ["permission:", ...cfg.permission]),
     "---",
     "",
     body,

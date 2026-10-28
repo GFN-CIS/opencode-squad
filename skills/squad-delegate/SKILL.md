@@ -287,14 +287,16 @@ never actually checked. For a review that matters, dispatch a drill on a strong
 model (`drill-<provider>-<model>` from the inventory), the same way you pick
 grunts — a cheap drill rubber-stamps. Either way, read the verdict critically:
 
-- Does each `check` carry a real **`where`** — a `path:line`, a URL — and an
+- Does each `check` carry a real **`where`** — a `path:line`, a URL, or the exact
+  command for `how: ran` — and an
   `evidence` string quoting what was actually there? A check whose evidence would read the same had drill never
   opened the file = drill probably didn't look.
 - Does the evidence merely echo grunt's own self-report? Then it wasn't
   independently verified.
 - Is `unverified` non-empty? That is drill being honest, not drill failing.
-  drill is read-only and cannot run anything, so every check that needs a test
-  run or a command lands there as `kind: needs_execution` BY DESIGN — those are
+  drill can run allowlisted read-only inspection, but not tests, builds,
+  migrations or state-changing commands. Checks needing those land there as
+  `kind: needs_execution` BY DESIGN — those are
   yours to execute, which is what makes the PASS sanity-check below load-bearing
   rather than a formality. A `kind: blocked` entry is the other thing entirely:
   drill could not get at the artifact, so that part of the DoD is unestablished

@@ -3,6 +3,11 @@
 **Date:** 2026-06-18
 **Status:** Approved (design phase)
 
+> Historical design: the no-shell reviewer policy below is superseded for
+> generated `drill-*` agents. They now deny by default, allowing local reads,
+> skills, web access and allowlisted read-only git/gh/glab commands and text
+> filters; MCP and Code Mode remain denied. See `src/workers.js`.
+
 ## 1. Purpose
 
 An OpenCode injector package, in the spirit of `superpowers`, that turns the

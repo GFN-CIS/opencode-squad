@@ -739,6 +739,7 @@ export const OrchestratePlugin = async ({ client, directory }, rawOptions) => {
             roster,
             dir,
             allowRemove: args.allow_remove === true,
+            hostGeneration: 1,
           });
           return {
             title: result.ok

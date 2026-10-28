@@ -9,7 +9,9 @@ license: MIT
 opencode's `task` tool takes only `subagent_type` (no model), so the only way to
 let sarge choose a model — for execution OR review — is a named agent per model:
 a `grunt-<provider>-<model>` (executor) and a `drill-<provider>-<model>`
-(read-only reviewer).
+(read-only reviewer with allowlisted git/gh/glab inspection and web access).
+
+The shell allowlist is OpenCode 2 only; OpenCode 1 keeps the legacy no-shell drill policy.
 
 The squad is edited through two tools, `squad_dump` and `squad_patch`. The
 roster they speak is one map per role, keyed by model id:
@@ -161,9 +163,11 @@ job. (If they hand you an explicit list, honor it.)
   `openai/gpt-5.5` → `grunt-openai-gpt-5-5`). One agent per model per role, so
   changing a level does not rename anything and sarge keeps dispatching by the
   same `subagent_type`.
-- grunts get `edit`/`bash`; drills are read-only (`edit`/`bash` denied,
-  `webfetch` allowed). That contract is NOT roster-settable — a writable
-  reviewer is a safety problem, not a preference.
+- grunts get `edit`/`bash`; drills deny everything by default, allowing local
+  reads/searches, skills, `webfetch`/`websearch` and only allowlisted read-only
+  git/gh/glab commands and text filters. MCP, Code Mode, edits and subagents
+  stay denied. That contract is NOT roster-settable — a writable reviewer is
+  a safety problem, not a preference.
 - `notes` are appended to that one agent's prompt, fenced by markers so they
   round-trip through `squad_dump`. Use them for per-model quirks, not for policy
   that belongs in the shared role prompt.

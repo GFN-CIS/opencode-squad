@@ -1,6 +1,6 @@
 ---
 name: squad-redteam
-description: Use when the user wants a cross-model red-team / second-opinion review — dispatch the SAME artifact or question to several grunts in parallel (different providers/models) and have sarge cross-analyze their independent findings into one consolidated report. Mirrors @alexmkx/opencode-multi-delegate's parallel-dispatch-and-consolidate pattern, but reuses the already-drafted `grunt-*` squad instead of a separate delegate config. Uses grunts, not drills — the panel needs live MCP/gitlab/webfetch access to actually pull the artifact (diffs, external rule docs), and drills are read-only. ALWAYS let the user pick which grunts run, via the multi-select question tool, defaulting to the single strongest grunt per provider. Triggers — "redteam", "red team this", "cross-review", "second opinion from other models", "перепроверь другими моделями", "устрой редтим", "кросс-ревью".
+description: Use when the user wants a cross-model red-team / second-opinion review — dispatch the SAME artifact or question to several grunts in parallel (different providers/models) and have sarge cross-analyze their independent findings into one consolidated report. Mirrors @alexmkx/opencode-multi-delegate's parallel-dispatch-and-consolidate pattern, but reuses the already-drafted `grunt-*` squad instead of a separate delegate config. Uses grunts, not drills — the panel needs live MCP access to pull artifacts, and drills have no MCP tools. ALWAYS let the user pick which grunts run, via the multi-select question tool, defaulting to the single strongest grunt per provider. Triggers — "redteam", "red team this", "cross-review", "second opinion from other models", "перепроверь другими моделями", "устрой редтим", "кросс-ревью".
 license: MIT
 ---
 
@@ -14,10 +14,10 @@ across models is much stronger evidence than one model's say-so. Same idea as
 agents (already scaffolded by `squad-draft`) instead of a standalone
 delegate-model config — no new agents, no new config file.
 
-**Grunts, not drills.** `drill-*` is read-only (`bash: deny`) — fine for
-reviewing an artifact already in front of you, useless for a task that needs
-to go *fetch* the artifact itself (a GitLab MR's diffs via MCP, an external
-rules doc via webfetch, a repo to clone/grep). This skill's panel is
+**Grunts, not drills.** `drill-*` can inspect with allowlisted git/gh/glab
+commands and web tools, but has no MCP access and cannot clone a repo. A panel
+that needs to pull artifacts through MCP (such as GitLab MR diffs) or prepare
+a local checkout still needs grunts. This skill's panel is
 `grunt-*`, used purely as parallel **analysts** for this pass — see the
 `<CRITICAL>` block below for the guardrail that keeps them from "fixing"
 anything they find.
