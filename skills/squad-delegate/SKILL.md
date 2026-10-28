@@ -150,8 +150,10 @@ The note calls the session id `task_id`; pass that value as `sessionID` to
     session buys nothing and loses detail.
 
   `squad_compact` is not free and the numbers decide, not the instinct: it is
-  one full pass of OpenCode's compaction model over the history, and it leaves that session's
-  cache COLD, so the next dispatch re-uploads the compacted context once. It
+  one full pass of OpenCode's compaction model over the history (OpenCode 2's
+  compaction settings pick the model — the tool takes no model argument), and
+  it leaves that session's cache COLD, so the next dispatch re-uploads the
+  compacted context once. It
   pays off when several turns follow — for a single short dispatch a fresh
   session is cheaper. Decide BEFORE dispatching: compacting mid-task wastes the
   pass. Note that opencode's own auto-compaction only fires at the context

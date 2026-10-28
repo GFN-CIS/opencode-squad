@@ -1,3 +1,10 @@
+// Suite: the package entry (index.js → .opencode/lib/orchestrate-v2.js) as an
+// OpenCode 2 host sees it. Covers setup registering the squad_* tools and
+// squad_patch generating native V2 agent files, with the startup network
+// refreshes stubbed at the runtime boundary. Not covered: live hook firing,
+// rate-limit guard and skill loading — those need a real host or their own
+// suites. Run: npx vitest run tests/plugin-entry.test.js
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -43,6 +50,9 @@ test("package exposes only setup and squad_patch generates native agents", async
   } finally {
     dispose();
   }
+  expect([...tools.keys()]).toEqual(
+    expect.arrayContaining(["squad_compact", "squad_dump", "squad_patch"]),
+  );
   for (const role of ["grunt", "drill"]) {
     const content = fs.readFileSync(path.join(directory, `${role}-a-b.md`), "utf8");
     expect(content).toContain("permissions:\n");

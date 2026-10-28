@@ -49,6 +49,7 @@ describe("squad-tools", () => {
 describe("V2 schemas", () => {
   test("declare tool arguments and carry the shared wording", () => {
     expect(SQUAD_COMPACT_INPUT.required).toEqual(["task_id"]);
+    expect(Object.keys(SQUAD_COMPACT_INPUT.properties)).toEqual(["task_id"]);
     expect(Object.keys(SQUAD_PATCH_INPUT.properties).sort()).toEqual([
       "allow_remove",
       "directory",

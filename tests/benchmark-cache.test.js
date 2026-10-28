@@ -81,6 +81,14 @@ test("an invalid or missing cache falls back to the bundled snapshot", () => {
   expect(pickSnapshot(undefined, undefined)).toBeNull();
 });
 
+test("a cached older-schema snapshot loses even with a newer generated date", () => {
+  // The 0.2.x → 0.3.0 case: a schema-1 v4-scored snapshot cached before the
+  // SCHEMA_VERSION 2 bump must never win on `_meta.generated`.
+  const schema1Cache = { ...snap("2026-09-28"), _meta: { schema: 1, generated: "2026-09-28" } };
+  const picked = pickSnapshot(snap("2026-09-22"), schema1Cache);
+  expect(picked._meta).toMatchObject({ schema: SCHEMA_VERSION, generated: "2026-09-22" });
+});
+
 // --- loadSnapshot ----------------------------------------------------------
 
 test("loadSnapshot reads the fresher of the bundled file and the cache", () => {
@@ -164,10 +172,30 @@ test("a newer schema is reported, not cached, and its ETag not kept", async () =
   expect(readMeta()).toMatchObject({ lastSuccess: NOW, upstreamSchema: SCHEMA_VERSION + 1 });
 });
 
+test("a downloaded older-schema snapshot is rejected as a failure", async () => {
+  // master serving schema 2 to this plugin is the normal case; the reverse —
+  // an old schema-1 body reaching a schema-2 reader — must not be cached.
+  const schema1 = { ...snap("2026-09-29"), _meta: { schema: 1, generated: "2026-09-29" } };
+  const r = await run(fakeFetch(200, schema1));
+  expect(r.outcome).toBe("failed");
+  expect(fs.existsSync(path.join(dir, "benchmarks.json"))).toBe(false);
+  expect(readMeta()).toMatchObject({ failures: 1, windowStart: NOW });
+});
+
 test("a known newer schema keeps being reported between daily checks, offline", async () => {
   writeMeta({ lastSuccess: NOW - HOUR, upstreamSchema: SCHEMA_VERSION + 1 });
   const f = fakeFetch(200, snap("2026-09-29"));
   expect(await run(f)).toEqual({ outcome: "schema-ahead", schema: SCHEMA_VERSION + 1 });
+  expect(f.calls).toHaveLength(0);
+});
+
+test("a leftover upstreamSchema equal to the current version is skipped, not stuck", async () => {
+  // A 0.2.x install (schema 1) that saw schema 2 as ahead recorded
+  // upstreamSchema: 2; on this plugin 2 is current, so between daily checks it
+  // must read as an ordinary skip, not keep reporting schema-ahead.
+  writeMeta({ lastSuccess: NOW - HOUR, upstreamSchema: SCHEMA_VERSION });
+  const f = fakeFetch(200, snap("2026-09-29"));
+  expect(await run(f)).toEqual({ outcome: "skipped" });
   expect(f.calls).toHaveLength(0);
 });
 

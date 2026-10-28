@@ -1,3 +1,10 @@
+// Suite: XDG-aware path resolution — src/paths.js (opencodeConfigDir /
+// opencodeDataDir) and the default agent dir built on it (src/squad-apply.js).
+// Covers set/unset/empty XDG env vars and the regression guard that keeps
+// dotdir path segments in src/paths.js and /tmp literals out of tests.
+// Not covered: cacheDir (src/benchmark-cache.js) — tested in
+// tests/benchmark-cache.test.js. Run: npx vitest run tests/paths.test.js
+
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

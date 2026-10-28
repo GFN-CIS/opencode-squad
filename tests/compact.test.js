@@ -9,8 +9,8 @@ describe("formatCompactReport", () => {
       agent: "grunt-anthropic-claude-sonnet-5",
       before: 596_000,
       after: 48_000,
-      model: "zai-coding-plan/glm-5.3",
-      why: "flat-rate (subscription) — ~$0 marginal cost for the pass",
+      model: "OpenCode's compaction model",
+      why: "OpenCode 2's compaction settings pick it; squad_compact cannot choose",
     });
     expect(out).toContain("~596k → ~48k tokens");
     expect(out).toContain("−92%");

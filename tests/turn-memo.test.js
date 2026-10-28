@@ -1,3 +1,10 @@
+// Suite: createTurnMemo (src/message-transform.js) — the bounded per-turn
+// cache that keeps an injected block byte-stable across the requests of one
+// turn so the provider prompt cache survives. Covers get/set, concurrent-turn
+// isolation and eviction at the bound. Not covered: the transform that fills
+// and replays the memo (applyOrchestratorTransformV2 in src/v2/adapt.js,
+// exercised in tests/v2-adapt.test.js). Run: npx vitest run tests/turn-memo.test.js
+
 import { expect, test } from "vitest";
 import { createTurnMemo } from "../src/message-transform.js";
 
