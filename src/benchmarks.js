@@ -54,18 +54,19 @@ export function lookupBenchmark(modelId, models) {
 
 /**
  * One aggregated agentic score (0-100) from AA's agentic/tool-use benchmarks —
- * there is no single agentic index in the API. Mean of the available core
- * agentic evals (tau2 tool-use, terminalbench autonomous terminal), each 0-1,
- * scaled to 0-100. Null if none are scored.
+ * there is no single agentic index in the API. In the Intelligence Index v5
+ * era (2026-10-27+) terminalbench_v4_0 is the only agentic eval scored for
+ * (nearly) all v5-scored models — tau2 is numeric for just 4/77 — so a mean
+ * over both would swing on data almost no model has. The aggregate is
+ * terminalbench_v4_0 alone, 0-1 scaled to 0-100. Null if not scored.
  *
  * @param {any} data  a benchmarks.json model entry
  * @returns {number|null}
  */
 export function agenticScore(data) {
-  const a = data?.agentic || {};
-  const vals = [a.tau2, a.terminalbench_v2_1].filter((v) => typeof v === "number");
-  if (!vals.length) return null;
-  return Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 100);
+  const v = data?.agentic?.terminalbench_v4_0;
+  if (typeof v !== "number") return null;
+  return Math.round(v * 100);
 }
 
 /**

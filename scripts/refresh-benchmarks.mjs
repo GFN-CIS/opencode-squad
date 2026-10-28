@@ -20,6 +20,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, "..", "src", "benchmarks.json");
 const ENDPOINT = "https://artificialanalysis.ai/api/v2/data/llms/models";
 
+// Coverage floor. Intelligence Index v5 (2026-10-27) nulls the index for
+// models AA has not re-evaluated yet; a snapshot generation that scores fewer
+// models than this is a truncated/reshaped AA response, not a migration.
+const MIN_SCORED = 50;
+
 const num = (v) => (typeof v === "number" ? v : null);
 
 function transform(rawData) {
@@ -46,6 +51,7 @@ function transform(rawData) {
         tau_banking: num(ev.tau_banking),
         terminalbench_hard: num(ev.terminalbench_hard),
         terminalbench_v2_1: num(ev.terminalbench_v2_1),
+        terminalbench_v4_0: num(ev.terminalbench_v4_0),
         lcr: num(ev.lcr),
       },
       // the rest of the eval suite
@@ -95,14 +101,23 @@ async function main() {
   const raw = await loadRaw(process.argv.slice(2));
   const data = raw.data || raw;
   const { models, scored } = transform(data);
+  // Producer-side guard only (checkSnapshot is also used by the plugin to
+  // validate downloads, so the floor must not live there).
+  if (scored < MIN_SCORED) {
+    console.error(
+      `AA returned ${scored} scored models (< ${MIN_SCORED}) — refusing to overwrite snapshot`,
+    );
+    process.exit(1);
+  }
   const snapshot = {
     _meta: {
       schema: SCHEMA_VERSION,
+      intelligence_index: "v5",
       source: "artificialanalysis.ai",
       endpoint: ENDPOINT,
       generated: new Date().toISOString().slice(0, 10),
       model_count: scored,
-      note: "Keyed by AA slug. Map an opencode provider/model id via src/benchmarks.js. Indices ~0-100; price is $/1M blended (3:1). No native agentic index — see agentic.* benchmarks. No cost-per-task — price_blended is the proxy.",
+      note: "Keyed by AA slug. Map an opencode provider/model id via src/benchmarks.js. Intelligence Index v5 (since 2026-10-27): AA re-scored only recent models — the rest are null and dropped until re-evaluated. Indices ~0-100; price is $/1M blended (3:1). No native agentic index — see agentic.* benchmarks. No cost-per-task — price_blended is the proxy.",
     },
     models,
   };
