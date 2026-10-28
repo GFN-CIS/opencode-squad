@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { expect, test } from "vitest";
+import { afterEach, expect, test } from "vitest";
 import {
   buildModelData,
   discoverSquadModels,
@@ -24,8 +24,15 @@ const BENCH = {
   },
 };
 
+const dirs = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tmpdir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "squad-md-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squad-md-"));
+  dirs.push(dir);
+  return dir;
 }
 
 test("extractModelId reads the frontmatter model line only", () => {

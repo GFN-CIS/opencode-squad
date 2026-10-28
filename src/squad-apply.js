@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { opencodeConfigDir } from "./paths.js";
 import { buildRoster, diffRoster, parseAgentFile, ROLE_KEYS } from "./roster.js";
 import { agentMarkdown, defaultDescriptions, GENERATED_MARKER_DETECT } from "./workers.js";
 
@@ -16,7 +17,7 @@ const GENERATED_FILE_RE = /^(grunt|drill|worker)-.*\.md$/;
 
 /** The global agent dir opencode merges; the default target for the squad. */
 export function defaultAgentDir() {
-  return path.join(os.homedir(), ".config", "opencode", "agent");
+  return path.join(opencodeConfigDir(process.env, os.homedir()), "agent");
 }
 
 /**

@@ -51,7 +51,8 @@ export const ARG_DESCRIPTIONS = {
     "Accepted for existing callers but ignored: OpenCode 2 selects the compaction model " +
     "from its own compaction settings. The tool reports when a supplied model was not used.",
   "dump.directory":
-    "Agent directory to read. Defaults to the global ~/.config/opencode/agent. " +
+    "Agent directory to read. Defaults to the global ~/.config/opencode/agent " +
+    "(or $XDG_CONFIG_HOME/opencode/agent). " +
     "Pass a project's .opencode/agent to scope the squad to one project.",
   "patch.grunts": "Executors, keyed by model id. `{}` is a valid entry: role defaults.",
   "patch.drills":
@@ -64,7 +65,9 @@ export const ARG_DESCRIPTIONS = {
     "Permit deleting agents present in the current squad but absent from this " +
     "roster. Pass true ONLY when the user asked for that deletion — never to " +
     "get past the refusal.",
-  "patch.directory": "Agent directory to write. Defaults to the global ~/.config/opencode/agent.",
+  "patch.directory":
+    "Agent directory to write. Defaults to the global ~/.config/opencode/agent " +
+    "(or $XDG_CONFIG_HOME/opencode/agent).",
 };
 
 /**

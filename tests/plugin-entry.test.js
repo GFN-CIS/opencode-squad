@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import plugin from "../index.js";
@@ -18,7 +19,7 @@ afterEach(() => {
 
 test("package exposes only setup and squad_patch generates native agents", async () => {
   expect(plugin.server).toBeUndefined();
-  const directory = fs.mkdtempSync("/tmp/opencode/squad-host-");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
   dirs.push(directory);
   const input = {
     directory,

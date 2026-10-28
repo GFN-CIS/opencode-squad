@@ -168,13 +168,17 @@ describe("V2 skills", () => {
     fs.writeFileSync(path.join(dir, "bare", "SKILL.md"), "no frontmatter");
     fs.mkdirSync(path.join(dir, "empty"));
     fs.writeFileSync(path.join(dir, "file.txt"), "x");
-    expect(loadSkills([path.join(dir, "missing"), dir])).toEqual([
-      {
-        id: "bare",
-        name: "bare",
-        path: path.join(dir, "bare", "SKILL.md"),
-        content: "no frontmatter",
-      },
-    ]);
+    try {
+      expect(loadSkills([path.join(dir, "missing"), dir])).toEqual([
+        {
+          id: "bare",
+          name: "bare",
+          path: path.join(dir, "bare", "SKILL.md"),
+          content: "no frontmatter",
+        },
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
