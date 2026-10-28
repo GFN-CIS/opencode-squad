@@ -43,8 +43,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.5",
     "knip": "^6.32.1",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.5"
   }
 }
