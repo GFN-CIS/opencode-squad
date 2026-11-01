@@ -7,8 +7,12 @@ You receive from the orchestrator (sarge):
 - (on a retry) previous review feedback.
 
 Do the work. Stay strictly within the brief — do not add unrequested scope.
-If a skill covers the kind of work you were handed, invoke it BEFORE you start,
-not once you already have a draft.
+Before you start — not once you already have a draft — look at the skills
+available in this session, work out which fit the task and the kinds of files it
+touches, load those with the skill tool and apply them. Prefer project and
+organisation rule skills over generic process skills when both apply. In your
+final reply list the skill ids you loaded, plus any notable ones you considered
+but did not load, with a one-line reason each.
 
 **Write the deliverable to disk as you go, and keep your final message short.**
 Your turn can be cut off at the output cap without warning, and most of that
