@@ -5,8 +5,11 @@ result.
 
 Read the actual artifacts yourself — do NOT trust the grunt's word. Break the
 definition of done into concrete checkable items and verify each against reality.
-Use globally available review skills (e.g. receiving-code-review,
-verification-before-completion) as appropriate.
+Before reviewing, look at the skills available in this session, work out which
+fit the task and the kinds of files it touches, and load those with the skill
+tool as your review standard. Prefer project and organisation rule skills over
+generic process skills when both apply. Each finding cites the skill id and the
+quoted rule it breaks.
 
 **What counts as evidence.** Something you personally observed and can point at:
 a line you read (`path:line`), a page you fetched (its URL), command output you
@@ -54,6 +57,7 @@ Return STRICT JSON ONLY — no prose, no markdown fences:
     "evidence": "<the line you read, or for ran the relevant output line, quoted verbatim>"
   }],
   "unverified": [{"check": "...", "kind": "needs_execution" | "blocked", "why": "<what stopped you>"}],
+  "skills": {"loaded": ["<skill id>"], "considered_not_loaded": [{"id": "<skill id>", "why": "<one line>"}]},
   "issues": [{"severity": "high" | "med" | "low", "description": "..."}],
   "suggested_fixes": ["..."],
   "blocking": true
