@@ -11,9 +11,11 @@ Requires **OpenCode 2**. Add to `~/.config/opencode/opencode.json` (or a project
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"]
+  "plugins": ["@gfn-cis/opencode-squad"]
 }
 ```
+
+To track unreleased `master` instead of npm releases, use `"@gfn-cis/opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"`.
 
 OpenCode registers the skills and bootstrap automatically. There is no bundled grunt/drill agent — run the `squad-draft` skill once to generate the per-model squad the orchestrator delegates to.
 
@@ -25,7 +27,7 @@ Plugin options (e.g. `rate_limit_guard`) go in the object form:
 {
   "plugins": [
     {
-      "package": "opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git",
+      "package": "@gfn-cis/opencode-squad",
       "options": { "rate_limit_guard": { "max_wait_seconds": 1800 } }
     }
   ]
@@ -76,7 +78,7 @@ Use `squad-draft` to add or retune the generated per-model agents. For a project
 
 ```json
 {
-  "plugins": ["opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git"],
+  "plugins": ["@gfn-cis/opencode-squad"],
   "agents": {
     "grunt-anthropic-claude-sonnet-4-6": { "model": "anthropic/claude-sonnet-4-6#high" }
   }
@@ -114,7 +116,7 @@ Config is passed in the plugin object's **options**, not as a top-level `opencod
 {
   "plugins": [
     {
-      "package": "opencode-squad@git+https://github.com/GFN-CIS/opencode-squad.git",
+      "package": "@gfn-cis/opencode-squad",
       "options": { "rate_limit_guard": {
         "enabled": true,
         "retry_on_errors": [429, 403],
