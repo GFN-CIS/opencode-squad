@@ -1,6 +1,6 @@
 {
   "name": "@gfn-cis/opencode-squad",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "OpenCode 2 plugin that turns the build agent into a PDCA orchestrator (sarge) over grunt/drill subagents",
   "type": "module",
   "main": "index.js",
