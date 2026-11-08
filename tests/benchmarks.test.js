@@ -61,7 +61,19 @@ test("agenticScore is terminalbench_v4_0 scaled to 0-100 (v5 era)", () => {
 });
 
 test("formatBench is the minimal routing set (intel/code/agentic/$), no speed/details", () => {
-  const s = formatBench("openai/gpt-6-astra", snapshot.models);
+  // Fixture, not the live snapshot: AA retired the Coding Index and the Free
+  // API tier carries no agentic benchmarks, so the live data has neither.
+  const models = {
+    "gpt-6-astra": {
+      intelligence: 57.4,
+      coding: 61.2,
+      agentic: { terminalbench_v4_0: 0.52 },
+      benchmarks: { scicode: 0.4 },
+      price_blended: 20,
+      tps: 80,
+    },
+  };
+  const s = formatBench("openai/gpt-6-astra", models);
   expect(s).toContain("AA");
   expect(s).toMatch(/intel \d+/);
   expect(s).toMatch(/code \d+/);
@@ -69,5 +81,11 @@ test("formatBench is the minimal routing set (intel/code/agentic/$), no speed/de
   expect(s).toContain("$");
   expect(s.toLowerCase()).not.toContain("tps");
   expect(s.toLowerCase()).not.toContain("scicode");
-  expect(formatBench("acme/nope", snapshot.models)).toBeNull();
+  expect(formatBench("acme/nope", models)).toBeNull();
+});
+
+test("the bundled snapshot still yields intel and price for a current model", () => {
+  const s = formatBench("openai/gpt-6-astra", snapshot.models);
+  expect(s).toMatch(/intel \d+/);
+  expect(s).toContain("$");
 });

@@ -61,3 +61,37 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes --latest
+
+    outputs:
+      skip: ${{ steps.version.outputs.skip }}
+
+  # Publishes to npm through trusted publishing: npm authenticates this workflow via
+  # OIDC, no token exists. The trusted publisher on npmjs.com is bound to release.yml
+  # and environment "npm".
+  npm:
+    needs: release
+    if: needs.release.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: npm supports trusted publishing
+        run: |
+          # OIDC trusted publishing needs npm >= 11.5.1.
+          node -e '
+            const [a, b, c] = process.argv[1].split(".").map(Number);
+            if (a * 1e6 + b * 1e3 + c < 11005001) {
+              console.error("::error::npm " + process.argv[1] + " < 11.5.1");
+              process.exit(1);
+            }' "$(npm --version)"
+      - run: npm publish --provenance --access public
