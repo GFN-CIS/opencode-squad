@@ -18,7 +18,12 @@ import { checkSnapshot, SCHEMA_VERSION } from "../src/benchmarks-schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, "..", "src", "benchmarks.json");
-const ENDPOINT = "https://artificialanalysis.ai/api/v2/data/llms/models";
+// The legacy /api/v2/data/llms/models was retired on 2026-11-04 (HTTP 410).
+// Pro keys get per-benchmark scores and the blended price; a Free key gets a
+// 403 on the Pro list and falls back to /free (headline indices only).
+const ENDPOINT = "https://artificialanalysis.ai/api/v2/language/models";
+const ENDPOINT_FREE = `${ENDPOINT}/free`;
+const MAX_PAGES = 50;
 
 // Coverage floor. Intelligence Index v5 (2026-10-27) nulls the index for
 // models AA has not re-evaluated yet; a snapshot generation that scores fewer
@@ -37,8 +42,18 @@ function transform(rawData) {
     if (intelligence == null) continue; // keep only AA-scored models
     scored++;
     const pr = x.pricing || {};
+    const perf = x.performance || {};
+    const priceIn = num(pr.price_1m_input_tokens);
+    const priceOut = num(pr.price_1m_output_tokens);
+    // Free tier has no blended price; derive AA's 3:1 blend from its parts.
+    const blended =
+      num(pr.price_1m_blended_3_to_1) ??
+      (priceIn != null && priceOut != null
+        ? Math.round(((3 * priceIn + priceOut) / 4) * 1000) / 1000
+        : null);
     models[x.slug] = {
       name: x.name,
+      // The language API's model_creator carries id/name only, no slug.
       creator: x.model_creator?.slug ?? null,
       release_date: x.release_date ?? null,
       // headline indices
@@ -47,16 +62,16 @@ function transform(rawData) {
       math: num(ev.artificial_analysis_math_index),
       // agentic / tool-use benchmarks (no single "agentic index" in the API)
       agentic: {
-        tau2: num(ev.tau2),
+        tau2: num(ev.tau2_telecom ?? ev.tau2),
         tau_banking: num(ev.tau_banking),
         terminalbench_hard: num(ev.terminalbench_hard),
         terminalbench_v2_1: num(ev.terminalbench_v2_1),
         terminalbench_v4_0: num(ev.terminalbench_v4_0),
-        lcr: num(ev.lcr),
+        lcr: num(ev.aa_lcr ?? ev.lcr),
       },
       // the rest of the eval suite
       benchmarks: {
-        gpqa: num(ev.gpqa),
+        gpqa: num(ev.gpqa_diamond ?? ev.gpqa),
         hle: num(ev.hle),
         livecodebench: num(ev.livecodebench),
         scicode: num(ev.scicode),
@@ -67,12 +82,12 @@ function transform(rawData) {
         ifbench: num(ev.ifbench),
       },
       // cost (AA has no "cost per task"; blended $/1M is the cost proxy)
-      price_blended: num(pr.price_1m_blended_3_to_1),
-      price_input: num(pr.price_1m_input_tokens),
-      price_output: num(pr.price_1m_output_tokens),
+      price_blended: blended,
+      price_input: priceIn,
+      price_output: priceOut,
       // speed
-      tps: num(x.median_output_tokens_per_second),
-      ttft: num(x.median_time_to_first_token_seconds),
+      tps: num(perf.median_output_tokens_per_second ?? x.median_output_tokens_per_second),
+      ttft: num(perf.median_time_to_first_token_seconds ?? x.median_time_to_first_token_seconds),
     };
   }
   return { models, scored };
@@ -89,12 +104,36 @@ async function loadRaw(argv) {
     console.error("No AA_API_KEY in env and no --from <file>. Set AA_API_KEY or pass a raw dump.");
     process.exit(2);
   }
-  const res = await fetch(ENDPOINT, { headers: { "x-api-key": key } });
-  if (!res.ok) {
-    console.error(`AA API ${res.status} ${res.statusText}`);
-    process.exit(1);
+  let endpoint = ENDPOINT;
+  let first = await fetchPage(endpoint, 1, key);
+  if (first.status === 403) {
+    console.log("Pro list forbidden for this key; using the Free list.");
+    endpoint = ENDPOINT_FREE;
+    first = await fetchPage(endpoint, 1, key);
   }
-  return res.json();
+  if (!first.ok) fail(first);
+  const body = await first.json();
+  const data = [...body.data];
+  for (let page = 2; body.pagination?.has_more && page <= MAX_PAGES; page++) {
+    const res = await fetchPage(endpoint, page, key);
+    if (!res.ok) fail(res);
+    const next = await res.json();
+    data.push(...next.data);
+    if (!next.pagination?.has_more) break;
+  }
+  console.log(`Fetched ${data.length} models from ${endpoint} (tier ${body.tier ?? "?"}).`);
+  return { data, endpoint };
+}
+
+/** @param {string} endpoint @param {number} page @param {string} key */
+function fetchPage(endpoint, page, key) {
+  return fetch(`${endpoint}?page=${page}`, { headers: { "x-api-key": key } });
+}
+
+/** @param {Response} res @returns {never} */
+function fail(res) {
+  console.error(`AA API ${res.status} ${res.statusText} (${res.url})`);
+  process.exit(1);
 }
 
 async function main() {
@@ -114,10 +153,10 @@ async function main() {
       schema: SCHEMA_VERSION,
       intelligence_index: "v5",
       source: "artificialanalysis.ai",
-      endpoint: ENDPOINT,
+      endpoint: raw.endpoint ?? ENDPOINT,
       generated: new Date().toISOString().slice(0, 10),
       model_count: scored,
-      note: "Keyed by AA slug. Map an opencode provider/model id via src/benchmarks.js. Intelligence Index v5 (since 2026-10-27): AA re-scored only recent models — the rest are null and dropped until re-evaluated. Indices ~0-100; price is $/1M blended (3:1). No native agentic index — see agentic.* benchmarks. No cost-per-task — price_blended is the proxy.",
+      note: "Keyed by AA slug. Map an opencode provider/model id via src/benchmarks.js. Intelligence Index v5 (since 2026-10-27): AA re-scored only recent models — the rest are null and dropped until re-evaluated. Indices ~0-100; price is $/1M blended (3:1). No native agentic index — see agentic.* benchmarks (Pro tier only). AA no longer publishes a Coding Index, so coding is null. No cost-per-task — price_blended is the proxy.",
     },
     models,
   };
