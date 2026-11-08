@@ -71,7 +71,7 @@ first.
    - `.opencode/model_data.json` (project) or `~/.config/opencode/model_data.json`
      (global) — `.models["<provider/model>"].intelligence`;
    - else the plugin's static AA snapshot:
-     `find ~/.cache/opencode/packages -path '*node_modules/opencode-squad/src/benchmarks.json'`
+     `find ~/.cache/opencode/packages -path '*node_modules/*opencode-squad/src/benchmarks.json'`
      (or the repo's own `src/benchmarks.json` if you're running from a checkout).
    Pick the highest-intelligence grunt per provider as the pre-checked default
    — one strongest grunt per provider, not the whole roster. If neither source
