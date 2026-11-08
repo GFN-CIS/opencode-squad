@@ -32,7 +32,8 @@ jobs:
       # Guard against a malformed or reshaped AA response landing on master.
       - if: steps.diff.outputs.changed == 'true'
         run: npm test
-      - if: steps.diff.outputs.changed == 'true'
+      # Only master publishes; a dispatch from a branch is a dry run of the fetch.
+      - if: steps.diff.outputs.changed == 'true' && github.ref == 'refs/heads/master'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
