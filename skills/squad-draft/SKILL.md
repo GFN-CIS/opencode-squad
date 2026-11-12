@@ -79,11 +79,16 @@ job. (If they hand you an explicit list, honor it.)
    after its source re-scored it at half that). `squad_patch` refuses a
    `description`.
 
-   **If the user states a routing rule for a model** ("don't trust GLM with
-   secrets", "keep Luna off long terminal runs"), write it into
-   `models["<provider/model>"].info` in `~/.config/opencode/model_data.json`
-   yourself — their words, one line, keep every other key — and say so in the
-   delta. Do not invent rules from benchmarks: a model without `info` is routed
+   **If the user states a routing rule**, write it into
+   `~/.config/opencode/model_data.json` yourself — their words, one line, keep
+   every other key — and say so in the delta. A rule about the PROVIDER (trust,
+   data handling: "don't send secrets to Z.ai") goes to
+   `providers["<provider>"]` as `{"plan": "<plan>", "info": "<rule>"}`; a rule
+   about one model ("keep Luna off long terminal runs") goes to
+   `models["<provider/model>"].info`. Phrase it as exactly the constraint
+   ("No secrets, credentials, .env or production config; otherwise fine") —
+   sarge treats it as binding, so an over-broad rule ("prefer for
+   non-production") quietly takes the model out of rotation. Do not invent rules from benchmarks: a model without `info` is routed
    on metrics and plan alone, which is correct.
 
 4. **Pick a reasoning `variant` for each agent whose model publishes one.**

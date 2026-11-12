@@ -252,13 +252,13 @@ test("describeAgent carries the owner rule and the plan, nothing invented", () =
   expect(describeAgent("grunt")).toBe(base);
   expect(
     describeAgent("grunt", {
-      info: "  no secrets:\n prod is off-limits ",
+      rules: ["  no secrets:\n prod is off-limits ", "short tasks"],
       billing: { api: false, plan: "GLM Coding Pro" },
     }),
   ).toBe(
-    `${base} Owner rule: no secrets: prod is off-limits. Billing: subscription (GLM Coding Pro).`,
+    `${base} Owner rule: no secrets: prod is off-limits. Owner rule: short tasks. Billing: subscription (GLM Coding Pro).`,
   );
-  expect(describeAgent("drill", { info: "", billing: { api: true } })).toBe(
+  expect(describeAgent("drill", { rules: [""], billing: { api: true } })).toBe(
     `${defaultDescriptions().drill} Billing: metered API.`,
   );
   expect(describeAgent("grunt", { billing: { api: false, plan: null } })).toBe(

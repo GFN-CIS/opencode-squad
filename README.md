@@ -89,13 +89,19 @@ Fetching: at plugin start and then whenever data is older than **48 hours** (che
 
 ```json
 {
-  "providers": { "anthropic": "Max 5x", "openai": "ChatGPT Plus", "zai-coding-plan": "GLM Coding Pro", "google": "api" },
+  "providers": {
+    "anthropic": "Max 5x",
+    "openai": "ChatGPT Plus",
+    "zai-coding-plan": { "plan": "GLM Coding Pro",
+                         "info": "No secrets, credentials, .env or production config; otherwise fine" },
+    "google": "api"
+  },
   "models": { "zai-coding-plan/glm-5.3": { "info": "good for coding, weak at long context" } }
 }
 ```
 
-- `providers` — how each opencode provider is paid for: the plan in your own words, or `"api"` for metered billing. `squad_metrics` prints `subscription: Max 5x` instead of a list price; the plugin keeps no catalog of plan limits — the model knows what common plans include. Without an entry, an OAuth login in opencode's `auth.json` and a `*-coding-plan` / `*-token-plan` provider read as `subscription: plan not set`; anything else as metered API. `squad-draft` asks for missing plans once and writes them here;
-- `models.<id>.info` — **your routing rule** for that model ("no secrets, no production"). It goes into the agent's description as `Owner rule: …`, which the orchestrator treats as binding — it outranks benchmarks — and is shown next to the numbers in `squad_metrics`. Leave it out and the model is routed on metrics and plan alone;
+- `providers` — how each opencode provider is paid for: the plan in your own words, or `"api"` for metered billing. Write `{"plan": …, "info": …}` to add a routing rule for **every** model of that provider — trust in who runs the servers ("no secrets") is a provider property, not a model one. `squad_metrics` prints `subscription: Max 5x` instead of a list price; the plugin keeps no catalog of plan limits — the model knows what common plans include. Without an entry, an OAuth login in opencode's `auth.json` and a `*-coding-plan` / `*-token-plan` provider read as `subscription: plan not set`; anything else as metered API. `squad-draft` asks for missing plans once and writes them here;
+- `models.<id>.info` — **your routing rule** for that one model, after the provider's ("no secrets, no production"). It goes into the agent's description as `Owner rule: …`, which the orchestrator treats as binding — it outranks benchmarks — and is shown next to the numbers in `squad_metrics`. Leave it out and the model is routed on metrics and plan alone;
 - `models.<id>.billing` — per-model override of the provider's plan (`"api"` or a plan name);
 - `models.<id>.cache_ttl_seconds` — see [the cache note](#cache-status-hint) below.
 
