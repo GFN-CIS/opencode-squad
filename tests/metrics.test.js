@@ -16,6 +16,8 @@ import {
   KEY_METRICS,
   keyCandidates,
   lookup,
+  ownerRules,
+  providerEntry,
   squadRoles,
 } from "../src/metrics.js";
 
@@ -134,6 +136,28 @@ describe("billing", () => {
   });
 });
 
+describe("owner rules", () => {
+  test("a provider entry is a plan string or {plan, info}", () => {
+    expect(providerEntry("Max 5x")).toEqual({ plan: "Max 5x", info: null });
+    expect(providerEntry({ plan: " GLM  Pro ", info: "no secrets" })).toEqual({
+      plan: "GLM Pro",
+      info: "no secrets",
+    });
+    expect(providerEntry({ info: "x" })).toEqual({ plan: null, info: "x" });
+    expect(providerEntry(null)).toEqual({ plan: null, info: null });
+  });
+
+  test("provider rule first, then the model's own; billing reads the object's plan", () => {
+    const providers = { z: { plan: "GLM Pro", info: "no secrets" } };
+    expect(ownerRules("z/glm", { providers, note: { info: "short tasks" } })).toEqual([
+      "no secrets",
+      "short tasks",
+    ]);
+    expect(ownerRules("a/b", { providers, note: { info: " " } })).toEqual([]);
+    expect(billingFor("z/glm", { plans: providers })).toEqual({ api: false, plan: "GLM Pro" });
+  });
+});
+
 describe("formatSummary", () => {
   const now = 5 * 3600_000;
   const out = formatSummary({
@@ -162,7 +186,7 @@ describe("formatSummary", () => {
     expect(line("zai-coding-plan/glm-5.3")).toContain("subscription: GLM Coding Pro");
     expect(line("zai-coding-plan/glm-5.3")).not.toContain("$1.4");
     expect(line("anthropic/claude-sonnet-5-5")).toContain("$2/$10");
-    expect(line("anthropic/claude-sonnet-5-5")).toContain("note: careful reviewer");
+    expect(line("anthropic/claude-sonnet-5-5")).toContain("owner rule: careful reviewer");
   });
 
   test("a missing benchmark is left out, never printed as zero", () => {

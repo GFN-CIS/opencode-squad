@@ -209,20 +209,25 @@ export function agentMarkdown(role, modelId, opts = {}) {
  * orchestrator: asked to "refresh descriptions", sarge invented capability
  * blurbs ("strongest coder", "1M ctx") that were wrong within a week.
  *
- * What goes in is exactly what the user owns: the per-model `info` from
- * model_data.json (a binding routing rule such as "no secrets") and how the
- * provider is paid for. Without either, the role's generic line.
+ * What goes in is exactly what the user owns: the `info` rules from
+ * model_data.json — provider-wide and per-model, binding routing rules such as
+ * "no secrets" — and how the provider is paid for. Without either, the role's
+ * generic line.
+ *
+ * `rules` are the provider's and the model's `info`, in that order.
  *
  * @param {"grunt"|"drill"} role
- * @param {{info?: string|null, billing?: {api: true} | {api: false, plan: string|null} | null}} [facts]
+ * @param {{rules?: string[], billing?: {api: true} | {api: false, plan: string|null} | null}} [facts]
  * @returns {string}
  */
-export function describeAgent(role, { info, billing } = {}) {
+export function describeAgent(role, { rules = [], billing } = {}) {
   const cfg = ROLES[role];
   if (!cfg) throw new Error(`unknown role: ${role}`);
   const parts = [cfg.description];
-  const note = typeof info === "string" ? info.trim().replace(/\s+/g, " ") : "";
-  if (note) parts.push(`Owner rule: ${/[.!?]$/.test(note) ? note : `${note}.`}`);
+  for (const rule of rules) {
+    const r = String(rule).trim().replace(/\s+/g, " ");
+    if (r) parts.push(`Owner rule: ${/[.!?]$/.test(r) ? r : `${r}.`}`);
+  }
   if (billing) {
     parts.push(
       billing.api

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTurnMemo } from "../../src/message-transform.js";
-import { billingFor } from "../../src/metrics.js";
+import { billingFor, ownerRules } from "../../src/metrics.js";
 import { metricsDir, readMetrics, refreshMetrics } from "../../src/metrics-cache.js";
 import { buildModelData, modelsChanged, readModelData } from "../../src/model-data.js";
 import { opencodeConfigDir, opencodeDataDir } from "../../src/paths.js";
@@ -128,7 +128,8 @@ export function loadModelData(directory = process.cwd()) {
   return found ? merged : null;
 }
 
-// Plans per provider from model_data.json `providers` (project over global).
+// model_data.json `providers` (project over global): per provider the plan as
+// a string, or {plan, info} — see providerEntry in src/metrics.js.
 // Read on every call: it is tiny, and an edit should apply without a restart.
 /** @param {string|null} [directory] see loadModelData */
 export function loadProviderPlans(directory = process.cwd()) {
@@ -192,7 +193,7 @@ export function squadDescriber(agentDir, directory) {
   const authTypes = loadAuthTypes();
   return (role, modelId) =>
     describeAgent(role, {
-      info: notes[modelId]?.info,
+      rules: ownerRules(modelId, { note: notes[modelId], providers: plans }),
       billing: billingFor(modelId, { note: notes[modelId], plans, authTypes }),
     });
 }

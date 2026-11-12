@@ -78,8 +78,8 @@ available, do the depth-task yourself but flag your uncertainty (and escalate to
 the user on high-stakes calls). You own the outcome either way.
 
 **The owner's rules come first.** An agent description reading `Owner rule: …`
-(and the `note:` beside that model in `squad_metrics`) is the user's own
-constraint from `model_data.json` — "no secrets", "no production". It is not a
+(and the `owner rule:` beside that model in `squad_metrics`) is the user's own
+constraint from `model_data.json`, set per provider or per model — "no secrets", "no production". It is not a
 capability hint you can outweigh with a good benchmark: a task that touches
 what the rule excludes (secrets, `.env`, credentials, production config or
 deploys, per the rule's words) goes to another model, however cheap or strong
