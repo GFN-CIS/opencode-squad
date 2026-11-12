@@ -7,7 +7,6 @@ const agentEntry = {
   type: "object",
   properties: {
     variant: { type: "string", description: ARG_DESCRIPTIONS["agent.variant"] },
-    description: { type: "string", description: ARG_DESCRIPTIONS["agent.description"] },
     notes: { type: "string", description: ARG_DESCRIPTIONS["agent.notes"] },
     steps: { type: "integer", exclusiveMinimum: 0, description: ARG_DESCRIPTIONS["agent.steps"] },
     disable: { type: "boolean", description: ARG_DESCRIPTIONS["agent.disable"] },

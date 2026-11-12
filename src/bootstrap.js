@@ -82,6 +82,12 @@ routing, also weigh subscription vs metered API billing on the candidate grunts
 — a flat-rate one is ~free at the margin. Full reasoning on all three lives in
 \`squad-delegate\`.
 
+**Owner rules bind.** An agent description with \`Owner rule: …\` is the user's
+constraint (from model_data.json): never send that agent a task the rule
+excludes, whatever its metrics. Within the rules, route on \`squad_metrics\`
+capability, then on the billing in the description (subscription ≈ free at the
+margin).
+
 **Model numbers are not in this block.** Before your first routing decision in
 this chat, call \`squad_metrics({models: [...]})\` ONCE with the \`model:\` of every
 grunt/drill below (deduplicated), and route on what it returns — not on numbers

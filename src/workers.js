@@ -147,9 +147,10 @@ export function slugForModel(modelId, role = "grunt") {
  * model.variants)) return undefined`), so a typo buys silence, not an error.
  *
  * `description` is what the orchestrator reads in its subagent inventory when
- * choosing who to dispatch, so a per-model one ("cheap, mechanical edits" vs
- * "strong analysis") is the difference between a routing signal and ten copies
- * of the same sentence. Defaults to the role's generic line.
+ * choosing who to dispatch. It is PLUGIN-OWNED: built by `describeAgent` from
+ * the owner's `info` and provider plan in model_data.json, never hand-written
+ * into the roster — hand-written ones went stale and got invented (see
+ * describeAgent). Defaults to the role's generic line.
  *
  * `notes` are extra instructions appended to the role prompt, fenced by markers
  * so a dump can read them back — the round trip is what makes the roster
@@ -180,7 +181,10 @@ export function agentMarkdown(role, modelId, opts = {}) {
   const content = [
     "---",
     `# ${GENERATED_MARKER}`,
-    `description: ${description}`,
+    // Quoted: owner notes routinely carry ": " or " #", which unquoted YAML
+    // would turn into a parse error or a silently truncated line. A JSON
+    // string is valid YAML.
+    `description: ${JSON.stringify(description)}`,
     "mode: subagent",
     `model: ${modelId}${variant ? `#${variant}` : ""}`,
     // Each emitted only when asked for: an absent key leaves opencode on its
@@ -197,6 +201,41 @@ export function agentMarkdown(role, modelId, opts = {}) {
     "",
   ].join("\n");
   return { slug, filename: `${slug}.md`, content };
+}
+
+/**
+ * The agent's description, derived from what the user wrote down — never from
+ * benchmarks, which squad_metrics serves live, and never composed by the
+ * orchestrator: asked to "refresh descriptions", sarge invented capability
+ * blurbs ("strongest coder", "1M ctx") that were wrong within a week.
+ *
+ * What goes in is exactly what the user owns: the `info` rules from
+ * model_data.json — provider-wide and per-model, binding routing rules such as
+ * "no secrets" — and how the provider is paid for. Without either, the role's
+ * generic line.
+ *
+ * `rules` are the provider's and the model's `info`, in that order.
+ *
+ * @param {"grunt"|"drill"} role
+ * @param {{rules?: string[], billing?: {api: true} | {api: false, plan: string|null} | null}} [facts]
+ * @returns {string}
+ */
+export function describeAgent(role, { rules = [], billing } = {}) {
+  const cfg = ROLES[role];
+  if (!cfg) throw new Error(`unknown role: ${role}`);
+  const parts = [cfg.description];
+  for (const rule of rules) {
+    const r = String(rule).trim().replace(/\s+/g, " ");
+    if (r) parts.push(`Owner rule: ${/[.!?]$/.test(r) ? r : `${r}.`}`);
+  }
+  if (billing) {
+    parts.push(
+      billing.api
+        ? "Billing: metered API."
+        : `Billing: subscription${billing.plan ? ` (${billing.plan})` : ""}.`,
+    );
+  }
+  return parts.join(" ");
 }
 
 /** The generic per-role description, used when the roster names none. */

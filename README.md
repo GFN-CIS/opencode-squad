@@ -89,13 +89,19 @@ Fetching: at plugin start and then whenever data is older than **48 hours** (che
 
 ```json
 {
-  "providers": { "anthropic": "Max 5x", "openai": "ChatGPT Plus", "zai-coding-plan": "GLM Coding Pro", "google": "api" },
+  "providers": {
+    "anthropic": "Max 5x",
+    "openai": "ChatGPT Plus",
+    "zai-coding-plan": { "plan": "GLM Coding Pro",
+                         "info": "No secrets, credentials, .env or production config; otherwise fine" },
+    "google": "api"
+  },
   "models": { "zai-coding-plan/glm-5.3": { "info": "good for coding, weak at long context" } }
 }
 ```
 
-- `providers` — how each opencode provider is paid for: the plan in your own words, or `"api"` for metered billing. `squad_metrics` prints `subscription: Max 5x` instead of a list price; the plugin keeps no catalog of plan limits — the model knows what common plans include. Without an entry, an OAuth login in opencode's `auth.json` and a `*-coding-plan` / `*-token-plan` provider read as `subscription: plan not set`; anything else as metered API. `squad-draft` asks for missing plans once and writes them here;
-- `models.<id>.info` — a routing note shown next to the numbers in `squad_metrics`;
+- `providers` — how each opencode provider is paid for: the plan in your own words, or `"api"` for metered billing. Write `{"plan": …, "info": …}` to add a routing rule for **every** model of that provider — trust in who runs the servers ("no secrets") is a provider property, not a model one. `squad_metrics` prints `subscription: Max 5x` instead of a list price; the plugin keeps no catalog of plan limits — the model knows what common plans include. Without an entry, an OAuth login in opencode's `auth.json` and a `*-coding-plan` / `*-token-plan` provider read as `subscription: plan not set`; anything else as metered API. `squad-draft` asks for missing plans once and writes them here;
+- `models.<id>.info` — **your routing rule** for that one model, after the provider's ("no secrets, no production"). It goes into the agent's description as `Owner rule: …`, which the orchestrator treats as binding — it outranks benchmarks — and is shown next to the numbers in `squad_metrics`. Leave it out and the model is routed on metrics and plan alone;
 - `models.<id>.billing` — per-model override of the provider's plan (`"api"` or a plan name);
 - `models.<id>.cache_ttl_seconds` — see [the cache note](#cache-status-hint) below.
 
@@ -302,7 +308,7 @@ So the roster is data you edit, exposed as two plugin tools:
 | tool | what it does |
 | --- | --- |
 | `squad_dump` | returns the current roster as JSON, derived from the agent files |
-| `squad_patch` | writes a roster back — `grunts` / `drills`, plus `allow_remove` and `directory`; rejects a `description` carrying a price, a benchmark score or a date |
+| `squad_patch` | writes a roster back — `grunts` / `drills`, plus `allow_remove` and `directory`; refuses a `description` (generated, see below) and a roster wrapped in an extra key |
 | `squad_metrics` | benchmarks, prices, context and billing for the `models` given; `full: true` for every metric of up to 6 — see [Model metrics](#model-metrics-squad_metrics) |
 
 A third tool covers the other half of reuse:
@@ -324,12 +330,9 @@ long past the point where reuse became expensive.
 
 ```json
 { "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high",
-                                           "description": "cheap 1M ctx coder",
                                            "notes": "prefer the write tool" },
-              "openai/gpt-5.6-luna": { "description": "fast mechanical edits",
-                                       "steps": 25 } },
-  "drills":  { "anthropic/claude-opus-5": { "variant": "max",
-                                            "description": "final reviewer" } } }
+              "openai/gpt-5.6-luna": { "steps": 25 } },
+  "drills":  { "anthropic/claude-opus-5": { "variant": "max" } } }
 ```
 
 One map per role, keyed by model id, mirroring the files on disk. An agent exists
@@ -351,10 +354,11 @@ Per-agent fields, and why these and not the rest of opencode's agent schema:
 | field | why it is here |
 | --- | --- |
 | `variant` | the reasoning governor — per agent, so a drill can think harder |
-| `description` | the one line sarge reads in its inventory when choosing whom to dispatch; without it, ten grunts say the same generic sentence and carry no routing signal at all |
 | `notes` | extra instructions for one agent, fenced in the prompt so they round-trip |
 | `steps` | cap on agentic iterations before opencode forces a text response |
 | `disable` | park an agent without deleting it — the soft alternative to a removal |
+
+**Descriptions are generated, not drafted.** An agent's `description` is the line the orchestrator reads when it picks whom to dispatch, so it carries exactly what you own and nothing that goes stale: the role, your `info` for that model as `Owner rule: …`, and the provider's plan (`Billing: subscription (Max 5x).`). The plugin writes it on every `squad_patch` and **rewrites it at every start** from the global `model_data.json` — only files whose text changes, atomically — and opencode reloads changed agent files live. So editing `info` or a plan needs a restart, not a re-draft. Benchmarks, prices and rankings never go in: hand-written ones went stale within a week, and an orchestrator asked to "refresh descriptions" invented them.
 
 Deliberately **not** exposed: `permission` (a drill's read-only contract is a
 safety property, not a preference), `mode`/`hidden`/`color` (ours), and

@@ -114,9 +114,11 @@ export function buildModelData(dir, existing, generated) {
       generated: generated ?? null,
       model_count: ids.length,
       note:
-        "Hand-editable. `providers`: your plan per opencode provider id, in your " +
-        'own words ("Max 5x", "GLM Coding Pro") or "api" for metered billing. ' +
-        "`models`: per squad model `info` (routing note) and `cache_ttl_seconds`. " +
+        "Hand-editable. `providers`: per opencode provider id, your plan in your " +
+        'own words ("Max 5x", "GLM Coding Pro", "api" for metered) — or ' +
+        '{"plan": ..., "info": ...}, where `info` is a routing rule for every model ' +
+        "of that provider. `models`: per squad model `info` (a routing rule for " +
+        "that model) and `cache_ttl_seconds`. Rules go into the agent descriptions. " +
         "Everything here survives every refresh. Benchmarks and prices are NOT kept " +
         "here: the squad_metrics tool fetches them live.",
     },

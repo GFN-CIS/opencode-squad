@@ -5,10 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTurnMemo } from "../../src/message-transform.js";
+import { billingFor, ownerRules } from "../../src/metrics.js";
 import { metricsDir, readMetrics, refreshMetrics } from "../../src/metrics-cache.js";
 import { buildModelData, modelsChanged, readModelData } from "../../src/model-data.js";
 import { opencodeConfigDir, opencodeDataDir } from "../../src/paths.js";
 import { createPromptLoader } from "../../src/prompt-inject.js";
+import { defaultAgentDir, syncDescriptions } from "../../src/squad-apply.js";
+import { describeAgent } from "../../src/workers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
@@ -85,40 +88,53 @@ export async function getMetrics(waitMs = 10_000) {
 
 // Hand-editable per-squad-model snapshot, keyed by opencode provider/model id.
 // Looked for beside the agent dirs opencode merges: the project's .opencode
-// first, then the global config dir. null if neither exists. Read once per process.
-// Keyed by project directory: one OpenCode 2 service process hosts plugin
-// instances for several projects, and its cwd is none of them.
-const _modelDataCache = new Map(); // directory -> merged models | null
-/** @param {string} [directory] project root; defaults to the process cwd */
+// and the global config dir; project entries win on overlap. null if neither
+// exists. `directory: null` reads the global file only.
+//
+// Cached on the files' mtimes, not for the process lifetime: the desktop
+// service lives for hours, and a forever-cache meant an edited `info` reached
+// nobody until a restart — sarge re-applied the squad and still saw the old
+// notes. Keyed by project directory: one OpenCode 2 service process hosts
+// plugin instances for several projects, and its cwd is none of them.
+const _modelDataCache = new Map(); // directory -> {sig, merged}
+const modelDataFiles = (directory) => [
+  path.join(opencodeConfigDir(process.env, os.homedir()), "model_data.json"),
+  ...(directory ? [path.join(directory, ".opencode", "model_data.json")] : []),
+];
+const mtimeOf = (file) => {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return 0;
+  }
+};
+/** @param {string|null} [directory] project root; defaults to the process cwd */
 export function loadModelData(directory = process.cwd()) {
-  if (_modelDataCache.has(directory)) return _modelDataCache.get(directory);
-  const candidates = [
-    path.join(directory, ".opencode", "model_data.json"),
-    path.join(opencodeConfigDir(process.env, os.homedir()), "model_data.json"),
-  ];
+  const files = modelDataFiles(directory);
+  const sig = files.map(mtimeOf).join("|");
+  const hit = _modelDataCache.get(directory);
+  if (hit?.sig === sig) return hit.merged;
   const merged = {};
   let found = false;
-  // Global first, then project on top, so project entries win on overlap.
-  for (const file of [...candidates].reverse()) {
+  // Global first, then project on top.
+  for (const file of files) {
     const md = readModelData(file);
     if (md) {
       found = true;
       Object.assign(merged, md.models);
     }
   }
-  _modelDataCache.set(directory, found ? merged : null);
-  return _modelDataCache.get(directory);
+  _modelDataCache.set(directory, { sig, merged: found ? merged : null });
+  return found ? merged : null;
 }
 
-// Plans per provider from model_data.json `providers` (project over global).
+// model_data.json `providers` (project over global): per provider the plan as
+// a string, or {plan, info} — see providerEntry in src/metrics.js.
 // Read on every call: it is tiny, and an edit should apply without a restart.
-/** @param {string} [directory] see loadModelData */
+/** @param {string|null} [directory] see loadModelData */
 export function loadProviderPlans(directory = process.cwd()) {
   const plans = {};
-  for (const file of [
-    path.join(opencodeConfigDir(process.env, os.homedir()), "model_data.json"),
-    path.join(directory, ".opencode", "model_data.json"),
-  ]) {
+  for (const file of modelDataFiles(directory)) {
     Object.assign(plans, readModelData(file)?.providers ?? {});
   }
   return plans;
@@ -158,5 +174,38 @@ export function ensureGlobalModelDataFresh() {
     fs.writeFileSync(file, `${JSON.stringify(snapshot, null, 2)}\n`);
   } catch {
     // Best-effort; nothing reads perf from this file any more.
+  }
+}
+
+/**
+ * describe(role, modelId) for the squad in `agentDir`, from model_data.json.
+ * The GLOBAL agent dir — shared by every project — reads the global file only:
+ * with project overrides the shared files would flip with whichever project
+ * started last. A project's own agent dir also sees that project's file.
+ *
+ * @param {string} agentDir
+ * @param {string} [directory]  project root
+ */
+export function squadDescriber(agentDir, directory) {
+  const scope = path.resolve(agentDir) === path.resolve(defaultAgentDir()) ? null : directory;
+  const notes = loadModelData(scope) ?? {};
+  const plans = loadProviderPlans(scope);
+  const authTypes = loadAuthTypes();
+  return (role, modelId) =>
+    describeAgent(role, {
+      rules: ownerRules(modelId, { note: notes[modelId], providers: plans }),
+      billing: billingFor(modelId, { note: notes[modelId], plans, authTypes }),
+    });
+}
+
+// Startup: rewrite the global squad's descriptions from model_data.json, so an
+// edited `info` or plan reaches the orchestrator with a restart instead of a
+// re-draft (opencode reloads agent files live). Best-effort, like the regen.
+export function syncGlobalSquadDescriptions() {
+  try {
+    const dir = defaultAgentDir();
+    return syncDescriptions({ dir, describe: squadDescriber(dir) });
+  } catch {
+    return [];
   }
 }
