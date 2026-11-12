@@ -1,25 +1,19 @@
-// Build and read model_data.json — the per-squad-model performance snapshot.
+// Build and read model_data.json — hand-editable notes per squad model.
 //
-// Unlike src/benchmarks.json (the full Artificial Analysis dump, keyed by AA
-// slug), model_data.json is small, hand-editable, and keyed by the opencode
-// `provider/model` id. It holds ONLY the models that currently have a
-// grunt-/drill- agent, with the decision-useful AA indices copied in plus an
-// `info` field the user fills by hand ("good for coding, weak at long context").
+// Keyed by the opencode `provider/model` id and holding ONLY the models that
+// have a grunt-/drill- agent. Every field is the user's: `info` (a routing
+// note the squad_metrics tool shows next to the numbers), `billing`
+// ("subscription" marks a flat-rate model), and `cache_ttl_seconds` (the
+// provider's published prompt-cache TTL, read by src/cache-status.js; left
+// unset where no TTL is published and reported as "unknown" rather than
+// guessed). Benchmarks and prices are not stored here — they are fetched live
+// (src/metrics-cache.js) so they cannot go stale in a file.
 //
-// It is written ONLY by `scripts/squad-file-performance.mjs` (manual run), so
-// the user can edit it freely. Re-running refreshes the perf indices from
-// benchmarks.json but preserves `info` (and any other hand-added field) —
-// including `cache_ttl_seconds`, an optional hand-added number (the
-// provider's published prompt-cache TTL in seconds) that
-// src/cache-status.js reads to tell the orchestrator whether reusing a
-// task_id is still likely to hit a warm cache. Left unset for providers
-// with no published TTL (e.g. alibaba-token-plan, zai-coding-plan as of
-// 2026-08) — reported as "unknown" rather than guessed.
+// The plugin refreshes the global file at startup: new squad models get an
+// empty entry, removed ones are dropped, hand-added fields are preserved.
 
 import fs from "node:fs";
 import path from "node:path";
-
-import { agenticScore, lookupBenchmark } from "./benchmarks.js";
 
 /**
  * Pull the model id out of an agent markdown file's YAML frontmatter.
@@ -67,59 +61,37 @@ export function discoverSquadModels(dir) {
   return [...ids].sort();
 }
 
-/**
- * Decision-useful perf indices for one opencode model id, looked up in the AA
- * snapshot. Returns an all-null entry (no `info` key) when AA doesn't score the
- * model — the row is still emitted so the user can fill it by hand.
- *
- * @param {string} modelId  opencode `provider/model` id
- * @param {Record<string, any>} benchmarksModels  benchmarks.json `models`
- * @returns {{name:string|null, aa_slug:string|null, intelligence:number|null,
- *   coding:number|null, agentic:number|null, price_blended:number|null}}
- */
-export function perfFromBenchmark(modelId, benchmarksModels) {
-  const r = lookupBenchmark(modelId, benchmarksModels);
-  if (!r) {
-    return {
-      name: null,
-      aa_slug: null,
-      intelligence: null,
-      coding: null,
-      agentic: null,
-      price_blended: null,
-    };
-  }
-  const d = r.data;
-  return {
-    name: d.name ?? null,
-    aa_slug: r.slug,
-    intelligence: typeof d.intelligence === "number" ? Math.round(d.intelligence) : null,
-    coding: typeof d.coding === "number" ? Math.round(d.coding) : null,
-    agentic: agenticScore(d),
-    price_blended: typeof d.price_blended === "number" ? d.price_blended : null,
-  };
-}
+// Fields earlier versions copied in from Artificial Analysis. They are stale
+// by construction (AA is no longer a source) and are stripped on the next
+// startup refresh so nothing can render them again.
+export const LEGACY_PERF_KEYS = [
+  "name",
+  "aa_slug",
+  "intelligence",
+  "coding",
+  "agentic",
+  "price_blended",
+];
 
 /**
- * Merge fresh perf over the previous model_data entries. The overlay order
- * `{ info: "", ...previous, ...freshPerf }` means:
- *   - a brand-new model gets an empty `info`;
- *   - an existing model keeps its `info` and any other hand-added field;
- *   - perf indices are refreshed from benchmarks every run (hand-edited perf
- *     numbers are intentionally overwritten — only non-perf fields survive).
- * Models no longer in the squad are dropped (not in `modelIds` → not emitted).
+ * Merge the squad's model ids over the previous model_data entries:
+ *   - a brand-new model gets an empty `info` to fill by hand;
+ *   - an existing model keeps every hand-added field (`info`, `billing`,
+ *     `cache_ttl_seconds`, ...);
+ *   - legacy AA perf fields are dropped;
+ *   - models no longer in the squad are dropped.
  *
  * @param {string[]} modelIds  ids discovered from the agent dir
- * @param {Record<string, any>} benchmarksModels  benchmarks.json `models`
  * @param {{models?:Record<string, any>}} [existing]  parsed prior model_data.json
  * @returns {Record<string, any>}  the `models` object keyed by opencode id
  */
-export function mergeModelData(modelIds, benchmarksModels, existing = {}) {
+export function mergeModelData(modelIds, existing = {}) {
   const prev = existing?.models || {};
   const out = {};
   for (const id of [...modelIds].sort()) {
-    const fresh = perfFromBenchmark(id, benchmarksModels);
-    out[id] = { info: "", ...(prev[id] || {}), ...fresh };
+    const entry = { info: "", ...(prev[id] || {}) };
+    for (const k of LEGACY_PERF_KEYS) delete entry[k];
+    out[id] = entry;
   }
   return out;
 }
@@ -128,68 +100,31 @@ export function mergeModelData(modelIds, benchmarksModels, existing = {}) {
  * Assemble the full model_data.json snapshot object.
  *
  * @param {string} dir  agent directory to scan
- * @param {Record<string, any>} benchmarksModels  benchmarks.json `models`
  * @param {{models?:Record<string, any>}} [existing]  prior model_data.json
  * @param {string} [generated]  ISO date string (passed in; no Date here)
  * @returns {{_meta:object, models:Record<string, any>}}
  */
-export function buildModelData(dir, benchmarksModels, existing, generated) {
+export function buildModelData(dir, existing, generated) {
   const ids = discoverSquadModels(dir);
-  const models = mergeModelData(ids, benchmarksModels, existing);
+  const models = mergeModelData(ids, existing);
   return {
     _meta: {
-      source: "derived from src/benchmarks.json (Artificial Analysis)",
       generated: generated ?? null,
       model_count: ids.length,
       note:
-        "Per-squad-model perf snapshot, keyed by opencode provider/model id. " +
-        "Holds only models that have a grunt-/drill- agent. `info` is " +
-        "hand-editable and preserved across re-runs; perf indices are " +
-        "overwritten from benchmarks on every run.",
+        "Hand-editable notes per squad model, keyed by opencode provider/model id. " +
+        '`info` (routing note), `billing` ("subscription" for flat-rate) and ' +
+        "`cache_ttl_seconds` are yours and survive every refresh. Benchmarks and " +
+        "prices are NOT kept here: the squad_metrics tool fetches them live.",
     },
     models,
   };
 }
 
 /**
- * Format one model_data entry for the inventory line: the AA indices plus the
- * hand-written `info` note (so the orchestrator sees routing guidance inline).
- *
- * `billing` is an optional hand-added field (like `info`, never touched by the
- * perf refresh) marking a model as `"subscription"` — flat-rate, so its
- * marginal per-token cost to the user is ~0 regardless of `price_blended`.
- * When set, it's surfaced instead of the API list price so the orchestrator
- * doesn't read a subscription-covered model as expensive.
- *
- * @param {any} entry  a model_data `models` entry (precomputed indices + info)
- * @returns {string|null}  e.g. "AA intel 55 · code 75 · agentic 85 · $11.25/M · note: good for coding"
- */
-export function formatPerf(entry) {
-  if (!entry) return null;
-  const isSubscription = entry.billing === "subscription";
-  const parts = [];
-  if (typeof entry.intelligence === "number") parts.push(`intel ${entry.intelligence}`);
-  if (typeof entry.coding === "number") parts.push(`code ${entry.coding}`);
-  if (typeof entry.agentic === "number") parts.push(`agentic ${entry.agentic}`);
-  // price_blended is AA-sourced, so it belongs inside the "AA ..." group; the
-  // billing note is not an AA metric, so it's appended outside that group —
-  // otherwise a subscription-only entry (no AA match at all) would render the
-  // nonsensical "AA billing: subscription ...".
-  if (!isSubscription && typeof entry.price_blended === "number") {
-    parts.push(`$${entry.price_blended}/M`);
-  }
-  const aa = parts.length ? `AA ${parts.join(" · ")}` : null;
-  const billing = isSubscription ? "billing: subscription (flat-rate, ~$0 marginal)" : null;
-  let s = [aa, billing].filter(Boolean).join(" · ") || null;
-  const info = entry.info && String(entry.info).trim();
-  if (info) s = s ? `${s} · note: ${info}` : `note: ${info}`;
-  return s;
-}
-
-/**
  * Whether a freshly built snapshot's `models` differ from what's already on
  * disk — used by the startup auto-regen to write ONLY on a real change (new
- * grunt/drill, refreshed perf, edited info), never just to bump the date. The
+ * grunt/drill, dropped legacy fields, edited info), never just to bump the date. The
  * merge keeps entry key order stable across runs, so a plain JSON compare of
  * the `models` objects is reliable.
  *
@@ -204,8 +139,7 @@ export function modelsChanged(existing, snapshot) {
 }
 
 /**
- * Read and parse a model_data.json file. Returns null if absent/unreadable —
- * callers fall back to the raw benchmarks snapshot.
+ * Read and parse a model_data.json file. Returns null if absent/unreadable.
  *
  * @param {string} file  path to model_data.json
  * @returns {{_meta?:object, models:Record<string, any>}|null}

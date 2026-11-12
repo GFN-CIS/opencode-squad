@@ -139,6 +139,34 @@ export function buildRoster(files, defaultDescriptions = {}) {
   return { roster, conflicts };
 }
 
+// What a description must not carry: numbers that go stale. Benchmarks,
+// prices and release dates change under a drafted squad, and a frozen copy in
+// the description then contradicts the live numbers squad_metrics serves —
+// which is how a GLM grunt came to advertise a score its source had since
+// re-scored by half. A context size ("1M ctx") is a stable fact and allowed.
+const STALE_IN_DESCRIPTION = [
+  [/\$\s*\d/, "a price"],
+  [/\d\s*\/\s*M\b/, "a per-token price"],
+  [/\b\d{4}-\d{2}(?:-\d{2})?\b/, "a date"],
+  [/\(\s*\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)+\s*\)/, "a score tuple"],
+  [
+    /\b(?:intel\w*|cod(?:e|ing)|agentic|si|swe[\w-]*|terminal[\w-]*|\w*bench\w*|score|index|elo|rank)\s*[:=#]?\s*\d/i,
+    "a benchmark score",
+  ],
+  [/\d+(?:\.\d+)?\s*%/, "a percentage"],
+];
+
+/**
+ * @param {string} text
+ * @returns {string|null} what stale number the text carries, if any
+ */
+function staleNumberIn(text) {
+  for (const [re, what] of STALE_IN_DESCRIPTION) {
+    if (re.test(text)) return what;
+  }
+  return null;
+}
+
 /**
  * Validate an edited roster. Hand-rolled rather than schema-driven: the shape
  * is shallow, and a validator dependency in a scaffolder earns less than it
@@ -182,6 +210,15 @@ export function validateRoster(doc) {
       for (const k of ["variant", "description", "notes"]) {
         if (entry[k] !== undefined && (typeof entry[k] !== "string" || !String(entry[k]).trim())) {
           errors.push(`${at}.${k} must be a non-empty string when present`);
+        }
+      }
+      if (typeof entry.description === "string") {
+        const stale = staleNumberIn(entry.description);
+        if (stale) {
+          errors.push(
+            `${at}.description contains ${stale}. Descriptions say WHEN to pick a model; ` +
+              "benchmarks, prices and dates go stale there — squad_metrics serves them live.",
+          );
         }
       }
       if (entry.steps !== undefined && (!Number.isInteger(entry.steps) || entry.steps <= 0)) {

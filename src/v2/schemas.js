@@ -49,3 +49,16 @@ export const SQUAD_PATCH_INPUT = {
   },
   additionalProperties: false,
 };
+
+export const SQUAD_METRICS_INPUT = {
+  type: "object",
+  properties: {
+    models: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: 6,
+      description: ARG_DESCRIPTIONS["metrics.models"],
+    },
+  },
+  additionalProperties: false,
+};

@@ -4,15 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  CHECK_INTERVAL_MS,
-  cacheDir,
-  loadSnapshot,
-  refreshOnce,
-} from "../../src/benchmark-cache.js";
-import { formatBench } from "../../src/benchmarks.js";
 import { createTurnMemo } from "../../src/message-transform.js";
-import { buildModelData, formatPerf, modelsChanged, readModelData } from "../../src/model-data.js";
+import { metricsDir, readMetrics, refreshMetrics } from "../../src/metrics-cache.js";
+import { buildModelData, modelsChanged, readModelData } from "../../src/model-data.js";
 import { opencodeConfigDir } from "../../src/paths.js";
 import { createPromptLoader } from "../../src/prompt-inject.js";
 
@@ -41,67 +35,57 @@ export const loadRolePrompt = createPromptLoader({
   },
 });
 
-// AA benchmark snapshot (models object), read once per process: the fresher of
-// the bundled copy and the one the background refresher downloaded. Fixed for
-// the process lifetime on purpose — see src/benchmark-cache.js. null if neither
-// is usable.
-const BENCH_CACHE_DIR = cacheDir(process.env, os.homedir());
-let _benchCache; // undefined = not loaded
-let _bundledModelCount = 0;
-function loadBenchmarks() {
-  if (_benchCache !== undefined) return _benchCache;
-  _benchCache = null;
-  const { snapshot, bundledCount } = loadSnapshot(
-    path.join(PACKAGE_ROOT, "src", "benchmarks.json"),
-    BENCH_CACHE_DIR,
-  );
-  _bundledModelCount = bundledCount;
-  if (snapshot) {
-    _benchCache = snapshot.models;
-  }
-  return _benchCache;
+// Live model metrics (src/metrics-cache.js), cached in the OS temp dir.
+// One refresher per process — the OpenCode 2 service is long-lived and hosts
+// several projects. The first refresh starts at load; each fetch carries its
+// own short timeout, so a one-shot `opencode run` is held up by at most that.
+// Afterwards a timer re-checks every few hours and refetches only what is
+// older than the TTL. Timers are unref'd so they never keep the process alive.
+export const METRICS_DIR = metricsDir();
+const METRICS_CHECK_INTERVAL_MS = 4 * 3600_000;
+/** @type {Promise<unknown> | null} */
+let _metricsInflight = null;
+let _metricsTimer;
+
+function refreshMetricsNow() {
+  _metricsInflight ??= refreshMetrics({
+    fetch: globalThis.fetch,
+    dir: METRICS_DIR,
+    now: Date.now(),
+  })
+    .catch(() => undefined)
+    .finally(() => {
+      _metricsInflight = null;
+    });
+  return _metricsInflight;
 }
 
-// Background benchmark refresh: first check shortly after startup, then hourly
-// (refreshOnce itself enforces the once-a-day / 5-failures throttle). The first
-// check is delayed so a one-shot `opencode run` exits before any socket is
-// opened. Fire-and-forget under a
-// hard fetch timeout, so opencode never waits on GitHub; timers are unref'd so
-// they never keep the process alive. Started once per process.
-const BENCH_FIRST_CHECK_MS = 30_000;
-let _benchTimer;
-export function startBenchmarkRefresh() {
-  if (_benchTimer) return;
-  loadBenchmarks(); // pin the in-use snapshot before the refresher can replace the cache
-  let busy = false;
-  const tick = async () => {
-    if (busy) return;
-    busy = true;
-    try {
-      await refreshOnce({
-        fetch: globalThis.fetch,
-        dir: BENCH_CACHE_DIR,
-        now: Date.now(),
-        minModels: Math.ceil(_bundledModelCount / 2),
-      });
-    } catch {
-      // Best-effort; the next tick tries again.
-    } finally {
-      busy = false;
-    }
-  };
-  _benchTimer = setTimeout(() => {
-    void tick();
-    _benchTimer = setInterval(tick, CHECK_INTERVAL_MS);
-    _benchTimer.unref?.();
-  }, BENCH_FIRST_CHECK_MS);
-  _benchTimer.unref?.();
+export function startMetricsRefresh() {
+  if (_metricsTimer) return;
+  void refreshMetricsNow();
+  _metricsTimer = setInterval(() => void refreshMetricsNow(), METRICS_CHECK_INTERVAL_MS);
+  _metricsTimer.unref?.();
+}
+
+/**
+ * The cached metrics. If there are none yet and a refresh is in flight,
+ * wait for it — but no longer than `waitMs`.
+ *
+ * @param {number} [waitMs]
+ */
+export async function getMetrics(waitMs = 10_000) {
+  const have = readMetrics(METRICS_DIR);
+  if (have || !_metricsInflight) return have;
+  await Promise.race([
+    _metricsInflight,
+    new Promise((resolve) => setTimeout(resolve, waitMs).unref?.()),
+  ]);
+  return readMetrics(METRICS_DIR);
 }
 
 // Hand-editable per-squad-model snapshot, keyed by opencode provider/model id.
 // Looked for beside the agent dirs opencode merges: the project's .opencode
-// first, then the global config dir. null if neither exists (we then fall back
-// to the raw AA benchmarks). Read once per process.
+// first, then the global config dir. null if neither exists. Read once per process.
 // Keyed by project directory: one OpenCode 2 service process hosts plugin
 // instances for several projects, and its cwd is none of them.
 const _modelDataCache = new Map(); // directory -> merged models | null
@@ -126,41 +110,25 @@ export function loadModelData(directory = process.cwd()) {
   return _modelDataCache.get(directory);
 }
 
-// Per-model capability tail for the inventory: model_data entry if we have one
-// (precomputed indices + hand-written note), else the raw AA benchmark lookup.
-/** @param {string} [directory] see loadModelData */
-export function buildPerfLookup(directory) {
-  const modelData = loadModelData(directory);
-  const benchmarks = loadBenchmarks();
-  return (modelId) => {
-    const entry = modelData?.[modelId];
-    if (entry) return formatPerf(entry);
-    return benchmarks ? formatBench(modelId, benchmarks) : null;
-  };
-}
-
-// Startup auto-regen of the GLOBAL model_data.json: rescan the squad, refresh
-// perf from benchmarks, MERGE (preserving hand-written `info`), and write ONLY
-// when the models actually changed — so a new grunt/drill or fresh benchmarks
-// land automatically without clobbering edits or churning the file every boot.
+// Startup auto-regen of the GLOBAL model_data.json: rescan the squad, MERGE
+// (preserving every hand-written field, dropping legacy AA perf fields), and
+// write ONLY when the models actually changed — so a new grunt/drill lands
+// automatically without clobbering edits or churning the file every boot.
 // Best-effort: any failure is swallowed so it can never break startup. No-op
 // when there is no squad yet (0 models). Only the global agent dir is scanned;
-// a project's .opencode/model_data.json stays fully manual (via the script's
-// --dir). Runs before the inventory cache is built, so the fresh file is read.
+// a project's .opencode/model_data.json is edited by hand only.
 export function ensureGlobalModelDataFresh() {
   try {
-    const benchmarks = loadBenchmarks();
-    if (!benchmarks) return;
     const configDir = opencodeConfigDir(process.env, os.homedir());
     const agentDir = path.join(configDir, "agent");
     const file = path.join(configDir, "model_data.json");
     const existing = readModelData(file) || {};
     const generated = new Date().toISOString().slice(0, 10);
-    const snapshot = buildModelData(agentDir, benchmarks, existing, generated);
+    const snapshot = buildModelData(agentDir, existing, generated);
     if (Object.keys(snapshot.models).length === 0) return; // no squad -> nothing
     if (!modelsChanged(existing, snapshot)) return; // unchanged -> no write
     fs.writeFileSync(file, `${JSON.stringify(snapshot, null, 2)}\n`);
   } catch {
-    // Best-effort; the inventory falls back to benchmarks.json regardless.
+    // Best-effort; nothing reads perf from this file any more.
   }
 }

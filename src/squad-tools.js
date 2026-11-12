@@ -19,6 +19,14 @@ export const TOOL_DESCRIPTIONS = {
     "`drills` and keyed by model id, with its per-agent settings. ALWAYS call this " +
     "before squad_patch — the roster is a document you edit, not one you retype. " +
     "Returns JSON.",
+  squad_metrics:
+    "Benchmark scores, list prices, context windows and billing for every model " +
+    "connected in opencode, with your grunt/drill models marked. Call it ONCE per " +
+    "chat, before your first routing decision — the result stays in your history. " +
+    "Call it again only after your context was compacted or the squad changed. " +
+    "Data is fetched live (cached up to 48h), so trust it over any number you " +
+    "remember. Pass `models` to get EVERY metric for a few specific models when " +
+    "the summary does not settle a choice between them.",
   squad_patch:
     "Write the squad roster: one agent per entry under `grunts` / `drills`, keyed by " +
     "model id. This is the COMPLETE intended squad, not a delta — an agent absent from " +
@@ -52,6 +60,9 @@ export const ARG_DESCRIPTIONS = {
     "Agent directory to read. Defaults to the global ~/.config/opencode/agent " +
     "(or $XDG_CONFIG_HOME/opencode/agent). " +
     "Pass a project's .opencode/agent to scope the squad to one project.",
+  "metrics.models":
+    "Up to 6 opencode model ids (provider/model) to return every available metric " +
+    "for. Omit for the one-line-per-model summary of all connected models.",
   "patch.grunts": "Executors, keyed by model id. `{}` is a valid entry: role defaults.",
   "patch.drills":
     "Reviewers, keyed by model id. A drill's verdict is what the orchestrator acts " +

@@ -1,6 +1,6 @@
 # Release on every push to master (i.e. a merged PR) whose package.json version
 # has no GitHub release yet. Bump "version" in the PR to cut a release; pushes
-# that keep the version (benchmark refreshes, docs) are no-ops. An existing
+# that keep the version (docs, CI) are no-ops. An existing
 # vX.Y.Z tag is reused as-is, otherwise the tag is created on the pushed commit.
 name: release
 

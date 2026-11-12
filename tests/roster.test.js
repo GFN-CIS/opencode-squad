@@ -163,3 +163,26 @@ test("validateRoster rejects non-objects, and an entry that is not an object", (
     'grunts["a/b"] must be an object (use {} for no overrides)',
   );
 });
+
+test("validateRoster rejects benchmarks, prices and dates in descriptions", () => {
+  const bad = [
+    "Flat-rate, strong balanced capability (60/75/84) — first choice",
+    "Balanced default (intel 55, code 72, agentic 81)",
+    "Cheapest Anthropic ($0.1/M in, $0.5/M out)",
+    "Newest Opus release (2026-09-22) for architecture",
+    "TerminalBench 0.42, good coder",
+    "wins 64% of SWE tasks",
+  ];
+  for (const description of bad) {
+    const errors = validateRoster({ grunts: { "a/b": { description } } });
+    expect(errors, description).toHaveLength(1);
+    expect(errors[0]).toContain("squad_metrics");
+  }
+  expect(
+    validateRoster({
+      grunts: {
+        "a/b": { description: "Flat-rate, 1M ctx, mechanical edits; weak on ambiguous specs" },
+      },
+    }),
+  ).toEqual([]);
+});

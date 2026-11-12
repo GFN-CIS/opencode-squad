@@ -1,0 +1,140 @@
+{
+  "schema": "superindex.models/1",
+  "generated_at": "2026-11-12T10:30:17.252Z",
+  "source": "https://superindex.app",
+  "license": "CC-BY-4.0",
+  "models": [
+    {
+      "id": "anthropic/claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "si_score": 88.8,
+      "rank": 1,
+      "confidence_pct": 100,
+      "status": "ranked",
+      "price_in": 4,
+      "price_out": 20,
+      "context_window": 1000000
+    },
+    {
+      "id": "anthropic/claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "si_score": 88.8,
+      "rank": 2,
+      "confidence_pct": 100,
+      "status": "ranked",
+      "price_in": 10,
+      "price_out": 50,
+      "context_window": 1000000
+    },
+    {
+      "id": "openai/gpt-6.1-sol",
+      "name": "GPT-6.1 Sol",
+      "si_score": 87.2,
+      "rank": 4,
+      "confidence_pct": 100,
+      "status": "ranked",
+      "price_in": 2,
+      "price_out": 10,
+      "context_window": 1050000
+    },
+    {
+      "id": "openai/gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "si_score": 86.7,
+      "rank": 5,
+      "confidence_pct": 100,
+      "status": "ranked",
+      "price_in": 10,
+      "price_out": 50,
+      "context_window": 1050000
+    },
+    {
+      "id": "anthropic/claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "si_score": 85.2,
+      "rank": 7,
+      "confidence_pct": 100,
+      "status": "ranked",
+      "price_in": 2,
+      "price_out": 10,
+      "context_window": 1000000
+    },
+    {
+      "id": "zhipuai/glm-5.3",
+      "name": "GLM-5.3",
+      "si_score": 80.6,
+      "rank": 19,
+      "confidence_pct": 93,
+      "status": "ranked",
+      "price_in": 1.4,
+      "price_out": 4.4,
+      "context_window": 1000000
+    },
+    {
+      "id": "zhipuai/glm-5.3-flash",
+      "name": "GLM-5.3-Flash",
+      "si_score": 77.5,
+      "rank": 30,
+      "confidence_pct": 100,
+      "status": "ranked",
+      "price_in": 0.15,
+      "price_out": 0.5,
+      "context_window": 1000000
+    },
+    {
+      "id": "anthropic/claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
+      "si_score": 76.6,
+      "rank": 34,
+      "confidence_pct": 100,
+      "status": "ranked",
+      "price_in": 0.1,
+      "price_out": 0.5,
+      "context_window": 1000000
+    },
+    {
+      "id": "openai/gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "si_score": 74.3,
+      "rank": 41,
+      "confidence_pct": 100,
+      "status": "ranked",
+      "price_in": 0.1,
+      "price_out": 0.5,
+      "context_window": 1050000
+    },
+    {
+      "id": "openai/gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "si_score": 69.8,
+      "rank": null,
+      "confidence_pct": 36,
+      "status": "provisional",
+      "price_in": 1,
+      "price_out": 5,
+      "context_window": 1050000
+    },
+    {
+      "id": "openai/gpt-6-astra-fast",
+      "name": "GPT-6 Astra (Fast)",
+      "si_score": null,
+      "rank": null,
+      "confidence_pct": 0,
+      "status": "provisional",
+      "price_in": null,
+      "price_out": null,
+      "context_window": 1050000
+    },
+    {
+      "id": "zhipuai/glm-5.3-flashx",
+      "name": "GLM-5.3-FlashX",
+      "si_score": null,
+      "rank": null,
+      "confidence_pct": 0,
+      "status": "provisional",
+      "price_in": 0.37,
+      "price_out": 1.25,
+      "context_window": null
+    }
+  ]
+}

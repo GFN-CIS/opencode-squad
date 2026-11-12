@@ -27,6 +27,14 @@ import { formatCompactReport } from "../../src/compact.js";
 import { buildLimitMap, buildVariantMap, estimateContextTokens } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import {
+  connectedModels,
+  formatDetail,
+  formatSummary,
+  lookup,
+  squadRoles,
+} from "../../src/metrics.js";
+import { fetchDetail } from "../../src/metrics-cache.js";
+import {
   evaluateRetry,
   formatGuardNote,
   initGuardState,
@@ -60,16 +68,22 @@ import {
   retryToStatus,
   subagentOutcome,
 } from "../../src/v2/adapt.js";
-import { SQUAD_COMPACT_INPUT, SQUAD_DUMP_INPUT, SQUAD_PATCH_INPUT } from "../../src/v2/schemas.js";
+import {
+  SQUAD_COMPACT_INPUT,
+  SQUAD_DUMP_INPUT,
+  SQUAD_METRICS_INPUT,
+  SQUAD_PATCH_INPUT,
+} from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
 import {
-  buildPerfLookup,
   ensureGlobalModelDataFresh,
+  getMetrics,
   loadModelData,
   loadRolePrompt,
+  METRICS_DIR,
   ORCHESTRATOR_AGENT,
   SKILLS_DIR,
-  startBenchmarkRefresh,
+  startMetricsRefresh,
   turnMemo,
 } from "./runtime.js";
 
@@ -91,7 +105,7 @@ export default {
   id: "orchestrate",
   async setup(ctx) {
     ensureGlobalModelDataFresh();
-    startBenchmarkRefresh();
+    startMetricsRefresh();
 
     // { package: "opencode-squad", options: { rate_limit_guard } }.
     const guardConfig = normalizeGuardConfig(ctx.options?.rate_limit_guard);
@@ -132,7 +146,7 @@ export default {
       const agents = await getAgents();
       squadDrafted = hasSquad(agents ?? []);
       inventory = agents
-        ? formatInventory(agents, buildPerfLookup(directory), await getLimitMap())
+        ? formatInventory(agents, await getLimitMap())
         : "(no subagents available)";
       return inventory;
     };
@@ -297,6 +311,56 @@ export default {
               "To change the squad, pass this same document back to squad_patch with your " +
               "edits applied — keeping every agent you were not asked to touch.",
             metadata: { title: `squad: ${count} agent(s)`, dir, agents: count },
+          };
+        },
+      });
+
+      editor.add({
+        name: "squad_metrics",
+        description: TOOL_DESCRIPTIONS.squad_metrics,
+        input: SQUAD_METRICS_INPUT,
+        execute: async (input) => {
+          const data = await getMetrics();
+          const now = Date.now();
+          const wanted = Array.isArray(input?.models)
+            ? input.models
+                .map((m) => String(m).trim())
+                .filter(Boolean)
+                .slice(0, 6)
+            : [];
+          if (wanted.length) {
+            const parts = await Promise.all(
+              wanted.map(async (id) => {
+                const llmbId =
+                  lookup(id, data?.ids?.index)?.entry ??
+                  Object.values(data?.scores?.byMetric ?? {})
+                    .map((idx) => lookup(id, idx)?.entry.id)
+                    .find(Boolean);
+                const detail = llmbId
+                  ? await fetchDetail({ fetch: globalThis.fetch, dir: METRICS_DIR, now, llmbId })
+                  : null;
+                return formatDetail(id, detail, lookup(id, data?.superindex?.index)?.entry ?? null);
+              }),
+            );
+            return {
+              content:
+                "Every metric llmbenchmark.ai holds for these models, grouped by source and the " +
+                "setting it was measured at; values are 0-1 unless a unit is shown. " +
+                "SuperIndex: superindex.app (CC-BY-4.0).\n\n" +
+                parts.join("\n\n"),
+              metadata: { title: `metrics: ${wanted.length} model(s)` },
+            };
+          }
+          const models = connectedModels(await getProviders());
+          return {
+            content: formatSummary({
+              models,
+              roles: squadRoles(await getAgents()),
+              notes: loadModelData(directory),
+              data,
+              now,
+            }),
+            metadata: { title: `metrics: ${models.length} model(s)` },
           };
         },
       });
