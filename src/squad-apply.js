@@ -11,7 +11,7 @@ import path from "node:path";
 
 import { opencodeConfigDir } from "./paths.js";
 import { buildRoster, diffRoster, parseAgentFile, ROLE_KEYS } from "./roster.js";
-import { agentMarkdown, defaultDescriptions, GENERATED_MARKER_DETECT } from "./workers.js";
+import { agentMarkdown, GENERATED_MARKER_DETECT } from "./workers.js";
 
 const GENERATED_FILE_RE = /^(grunt|drill|worker)-.*\.md$/;
 
@@ -60,7 +60,7 @@ export function readSquad(dir) {
     files.push({ role, modelId, entry });
     filesByAgent.set(`${role} ${modelId}`, name);
   }
-  const { roster, conflicts } = buildRoster(files, defaultDescriptions());
+  const { roster, conflicts } = buildRoster(files);
   return { roster, conflicts, filesByAgent };
 }
 
@@ -73,10 +73,14 @@ export function readSquad(dir) {
  * that would have been added get written, so a rejected apply leaves the squad
  * exactly as it was.
  *
- * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean}} input
+ * `describe(role, modelId)` supplies each agent's description (see
+ * describeAgent); without it the role's generic line is written.
+ *
+ * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean,
+ *   describe?: (role: "grunt"|"drill", modelId: string) => string|undefined}} input
  * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[]}, written: Array<{role:string,id:string,variant?:string,filename:string}>, pruned: string[], conflicts: string[], dir: string}}
  */
-export function applySquad({ roster, dir, allowRemove = false }) {
+export function applySquad({ roster, dir, allowRemove = false, describe }) {
   const { roster: current, conflicts, filesByAgent } = readSquad(dir);
   const diff = diffRoster(current, roster);
 
@@ -93,8 +97,11 @@ export function applySquad({ roster, dir, allowRemove = false }) {
   const written = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
     for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
-      const { filename, content } = agentMarkdown(role, modelId, entry ?? {});
-      fs.writeFileSync(path.join(dir, filename), content);
+      const { filename, content } = agentMarkdown(role, modelId, {
+        ...entry,
+        description: describe?.(role, modelId),
+      });
+      writeAtomic(path.join(dir, filename), content);
       written.push({ role, id: modelId, variant: entry?.variant, filename });
     }
   }
@@ -108,6 +115,53 @@ export function applySquad({ roster, dir, allowRemove = false }) {
   }
 
   return { ok: true, diff, written, pruned, conflicts, dir };
+}
+
+/**
+ * Bring the existing squad's descriptions in line with model_data.json — run at
+ * plugin start. opencode reloads agent files on change (an `agent.updated`
+ * event, seconds later), so an edited `info` or plan reaches the orchestrator
+ * without anyone re-drafting the squad.
+ *
+ * Re-renders each generated file from its own roster entry, so variant, steps
+ * and notes survive; writes only files whose content actually changes, since
+ * every write makes opencode reload — and one service process runs this for
+ * every project it hosts. Files under a legacy name are left for squad_patch,
+ * which migrates them.
+ *
+ * @param {{dir: string, describe: (role: "grunt"|"drill", modelId: string) => string|undefined}} input
+ * @returns {string[]}  filenames rewritten
+ */
+export function syncDescriptions({ dir, describe }) {
+  const { roster, filesByAgent } = readSquad(dir);
+  const rewritten = [];
+  for (const [key, role] of Object.entries(ROLE_KEYS)) {
+    for (const [modelId, entry] of Object.entries(roster[key] ?? {})) {
+      const { filename, content } = agentMarkdown(role, modelId, {
+        ...entry,
+        description: describe(role, modelId),
+      });
+      if (filesByAgent.get(`${role} ${modelId}`) !== filename) continue;
+      const file = path.join(dir, filename);
+      let current;
+      try {
+        current = fs.readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      if (current === content) continue;
+      writeAtomic(file, content);
+      rewritten.push(filename);
+    }
+  }
+  return rewritten;
+}
+
+// A watcher (opencode's) sees either the old file or the new one, never half.
+function writeAtomic(file, content) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, content);
+  fs.renameSync(tmp, file);
 }
 
 /**

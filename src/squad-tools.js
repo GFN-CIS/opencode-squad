@@ -31,7 +31,9 @@ export const TOOL_DESCRIPTIONS = {
     "Write the squad roster: one agent per entry under `grunts` / `drills`, keyed by " +
     "model id. This is the COMPLETE intended squad, not a delta — an agent absent from " +
     "it is DELETED, so start from squad_dump and edit that. Deleting an agent the user " +
-    "did not ask you to delete is refused, not performed.",
+    "did not ask you to delete is refused, not performed. Agent descriptions are not " +
+    "yours to write: the plugin builds them from model_data.json (the owner's `info` " +
+    "per model and the provider's plan) on every apply and at startup.",
 };
 
 /** Argument descriptions, keyed by argument (agent-entry fields under `agent.*`). */
@@ -43,11 +45,6 @@ export const ARG_DESCRIPTIONS = {
     "an error. Omit for models that publish no reasoning options. Setting it does not " +
     "suppress reasoning: it bounds a reasoner otherwise limited only by the output " +
     "cap. Per AGENT, so a drill may think harder than the grunt on the same model.",
-  "agent.description":
-    "What this agent is for, in one line. The orchestrator reads exactly this in its " +
-    "subagent inventory when choosing who to dispatch, so make it say WHEN to pick " +
-    "this model — 'cheap, mechanical edits', 'strong analysis, slow'. Omit to keep the " +
-    "generic role default, which carries no routing signal at all.",
   "agent.notes":
     "Extra instructions appended to this agent's prompt only — per-model quirks and " +
     "workarounds. Round-trips through squad_dump.",

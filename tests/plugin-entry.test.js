@@ -32,6 +32,9 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
   return {
     ...(await importOriginal()),
     ensureGlobalModelDataFresh: () => {},
+    // Both would touch the REAL global agent dir / model_data.json.
+    syncGlobalSquadDescriptions: () => [],
+    squadDescriber: () => (role, id) => `${role} on ${id}. Owner rule: no secrets.`,
     startMetricsRefresh: () => {},
     getMetrics: async () => data,
     loadModelData: () => null,
@@ -67,16 +70,23 @@ test("package exposes only setup and squad_patch generates native agents", async
       transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
     },
   });
+  let wrapped;
   try {
-    await tools.get("squad_patch").execute(input, { agent: "build" });
+    const patch = tools.get("squad_patch");
+    // A roster wrapped one level too deep must not read as "delete everything".
+    wrapped = (await patch.execute({ roster: input, directory }, { agent: "build" })).content;
+    await patch.execute(input, { agent: "build" });
   } finally {
     dispose();
   }
   expect([...tools.keys()]).toEqual(
     expect.arrayContaining(["squad_compact", "squad_dump", "squad_metrics", "squad_patch"]),
   );
+  expect(wrapped).toContain("Refused: pass `grunts` and/or `drills` at the TOP level");
+  expect(wrapped).toContain("`roster`");
   for (const role of ["grunt", "drill"]) {
     const content = fs.readFileSync(path.join(directory, `${role}-a-b.md`), "utf8");
+    expect(content).toContain(`description: "${role} on a/b. Owner rule: no secrets."\n`);
     expect(content).toContain("permissions:\n");
     expect(content).toContain("model: a/b#high\n");
     expect(content).not.toContain("permission:");

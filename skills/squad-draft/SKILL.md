@@ -18,16 +18,15 @@ The squad is edited through two tools, `squad_dump` and `squad_patch`. The
 roster they speak is one map per role, keyed by model id:
 
 ```json
-{ "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high",
-                                           "description": "cheap 1M ctx coder" },
-              "openai/gpt-5.6-luna": { "description": "fast mechanical edits" } },
-  "drills": { "anthropic/claude-opus-5": { "variant": "max",
-                                           "description": "final reviewer" } } }
+{ "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high" },
+              "openai/gpt-5.6-luna": {} },
+  "drills": { "anthropic/claude-opus-5": { "variant": "max" } } }
 ```
 
 An agent exists if it appears in a role map, and `{}` is a valid entry meaning
-"this model, role defaults". Per-agent fields: `variant`, `description`,
-`notes`, `steps`, `disable` — all optional, all described in the tool schema.
+"this model, role defaults". Per-agent fields: `variant`, `notes`, `steps`,
+`disable` — all optional, all described in the tool schema. There is no
+`description` field: the plugin writes each agent's description itself (step 3).
 
 **Be proactive.** The moment this skill is invoked, run the whole flow yourself.
 Do NOT sit waiting for the user to hand you a model list; proposing it is your
@@ -69,26 +68,23 @@ job. (If they hand you an explicit list, honor it.)
    Cheap, fast and small models go in `grunts` alone: they work, they do not
    judge. Say which models you are proposing grunt-only, and why.
 
-3. **Write a real `description` for every agent.** This is the one field sarge
-   actually reads at the moment of choice: it goes verbatim into the subagent
-   inventory line the orchestrator scans when picking an agent id. Left out,
-   it falls back to a generic role sentence — and a squad where all ten grunts
-   say "Per-model grunt (worker) for the sarge PDCA cycle" gives sarge nothing to
-   choose on but the model name. Write when to pick this one: "cheap, 1M context,
-   mechanical edits", "strong analysis, slow and expensive", "code-specialized,
-   weak at ambiguous specs". One line, concrete, comparative.
+3. **Do not write descriptions — they are generated.** The description is what
+   sarge reads at the moment of choice, so it carries only what the USER owns:
+   the model's `info` from `model_data.json` (a binding routing rule, e.g. "no
+   secrets, no production") and the provider's plan. The plugin builds it on
+   every `squad_patch` and rewrites it at every start, so an edited `info` or
+   plan reaches sarge after a restart without a re-draft. Benchmarks, prices,
+   context and rankings stay out — sarge reads them live from `squad_metrics`;
+   a frozen copy goes stale (a GLM grunt kept advertising "(60/75/84)" long
+   after its source re-scored it at half that). `squad_patch` refuses a
+   `description`.
 
-   **No numbers that go stale: no benchmark scores, no prices, no release
-   dates.** Those change under a drafted squad, and a frozen copy then
-   contradicts the live numbers — a GLM grunt kept advertising "(60/75/84)"
-   long after its source re-scored it at half that. Sarge gets the numbers
-   from the `squad_metrics` tool. Read them there to decide the tiers, then
-   write the role and the stable facts: what the model is for, when to pick
-   it, subscription or not, context size ("1M ctx" is allowed). Rankings
-   against other models ("strongest", "below X") go stale the same way the
-   numbers do — leave them to `squad_metrics`. `squad_patch` rejects a new
-   description carrying a price, a score or a date; `squad_dump` flags old
-   ones so you can propose rewriting them in the same delta.
+   **If the user states a routing rule for a model** ("don't trust GLM with
+   secrets", "keep Luna off long terminal runs"), write it into
+   `models["<provider/model>"].info` in `~/.config/opencode/model_data.json`
+   yourself — their words, one line, keep every other key — and say so in the
+   delta. Do not invent rules from benchmarks: a model without `info` is routed
+   on metrics and plan alone, which is correct.
 
 4. **Pick a reasoning `variant` for each agent whose model publishes one.**
    Without a variant, opencode sends NO reasoning parameter — and for an
@@ -148,7 +144,8 @@ job. (If they hand you an explicit list, honor it.)
 5. **Ask, as a delta.** In one message (use the question tool if available), show
    what will CHANGE against the dumped roster, not just the end state:
    ```
-   + grunt zai-coding-plan/glm-5.3   variant high, "cheap 1M ctx coder"
+   + grunt zai-coding-plan/glm-5.3   variant high
+   ~ info  zai-coding-plan/glm-5.3   "no secrets, no production" (model_data.json)
    ~ drill anthropic/claude-opus-5   variant max (was none)
    - nothing
    = 6 agents unchanged
@@ -205,5 +202,7 @@ job. (If they hand you an explicit list, honor it.)
   it to stop and say so, which is the right failure for a grunt holding
   `edit`/`shell`. Two limits: an agent generated before the fence existed needs
   ONE re-apply to opt in, and everything in the frontmatter — `model`,
-  `variant`, `description`, `steps`, `disable`, permissions, adding or removing
-  a model — still only changes by re-applying the roster.
+  `variant`, `steps`, `disable`, permissions, adding or removing a model — still
+  only changes by re-applying the roster. The `description` is the exception:
+  the plugin re-derives it from `model_data.json` at every start, and opencode
+  reloads changed agent files live.

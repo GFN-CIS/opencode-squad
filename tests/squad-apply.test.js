@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { applySquad, formatApplyReport, readSquad } from "../src/squad-apply.js";
+import { applySquad, formatApplyReport, readSquad, syncDescriptions } from "../src/squad-apply.js";
 
 let dir;
 
@@ -26,7 +26,6 @@ test("applySquad writes one file per agent and reads back losslessly", () => {
     grunts: {
       "zai-coding-plan/glm-5.3": {
         variant: "high",
-        description: "cheap long-context coder",
         notes: "prefer the write tool",
         steps: 40,
       },
@@ -185,4 +184,47 @@ test("formatApplyReport echoes variants per agent, with the typo warning", () =>
 
 test("formatApplyReport omits the variant block when nothing set one", () => {
   expect(formatApplyReport(apply({ grunts: { "a/b": {} } }))).not.toContain("Variants written");
+});
+
+// Descriptions are plugin-owned: squad_patch and the startup sync both take
+// them from describe(), and neither leaks them into the dumped roster.
+test("applySquad writes describe()'s description; the dump never carries it", () => {
+  applySquad({
+    roster: { grunts: { "z/glm": { variant: "high" } } },
+    dir,
+    describe: (role, id) => `${role} ${id}: Owner rule: no secrets # really`,
+  });
+  expect(read("grunt-z-glm.md")).toContain(
+    'description: "grunt z/glm: Owner rule: no secrets # really"\n',
+  );
+  expect(readSquad(dir).roster).toEqual({ grunts: { "z/glm": { variant: "high" } }, drills: {} });
+});
+
+test("syncDescriptions rewrites only what changed and keeps every roster field", () => {
+  apply({
+    grunts: { "a/b": { variant: "high", steps: 7, notes: "keep me" }, "c/d": {} },
+    drills: { "a/b": { variant: "max" } },
+  });
+  fs.writeFileSync(path.join(dir, "grunt-hand-made.md"), "---\ndescription: mine\n---\n");
+  const before = read("grunt-c-d.md");
+  const describe = (role, id) => (id === "a/b" ? `${role}: no secrets` : undefined);
+
+  expect(syncDescriptions({ dir, describe }).sort()).toEqual(["drill-a-b.md", "grunt-a-b.md"]);
+  expect(read("grunt-a-b.md")).toContain('description: "grunt: no secrets"\n');
+  expect(read("grunt-a-b.md")).toContain("model: a/b#high\nsteps: 7\n");
+  expect(read("grunt-a-b.md")).toContain("keep me");
+  expect(read("grunt-c-d.md")).toBe(before);
+  expect(read("grunt-hand-made.md")).toBe("---\ndescription: mine\n---\n");
+  // Idempotent: a second start writes nothing, so opencode reloads nothing.
+  expect(syncDescriptions({ dir, describe })).toEqual([]);
+  expect(ls().filter((f) => f.endsWith(".tmp"))).toEqual([]);
+});
+
+test("syncDescriptions leaves legacy-named files for squad_patch to migrate", () => {
+  fs.writeFileSync(
+    path.join(dir, "worker-a-b.md"),
+    "---\n# generated-by: opencode-squad squad-draft\ndescription: old\nmodel: a/b\n---\n",
+  );
+  expect(syncDescriptions({ dir, describe: () => "new" })).toEqual([]);
+  expect(syncDescriptions({ dir: path.join(dir, "nope"), describe: () => "x" })).toEqual([]);
 });

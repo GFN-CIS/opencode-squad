@@ -5,7 +5,6 @@ import {
   NOTES_CLOSE,
   NOTES_OPEN,
   parseAgentFile,
-  staleDescriptions,
   validateRoster,
 } from "../src/roster.js";
 
@@ -27,11 +26,12 @@ const FILE = [
   NOTES_CLOSE,
 ].join("\n");
 
+// description is plugin-owned (derived from model_data.json), so it is never
+// read back into the roster.
 test("parseAgentFile reads the frontmatter and the fenced notes, ignoring the body", () => {
   expect(parseAgentFile(FILE)).toEqual({
     modelId: "zai-coding-plan/glm-5.3",
     entry: {
-      description: "cheap long-context coder",
       variant: "high",
       steps: 40,
       notes: "always write files with the write tool",
@@ -67,18 +67,6 @@ test("a model can carry a different variant per role", () => {
   expect(roster.drills["a/b"].variant).toBe("max");
 });
 
-test("buildRoster hides a description that is just the role default", () => {
-  const { roster } = buildRoster(
-    [
-      { role: "grunt", modelId: "a/generic", entry: { description: "GENERIC GRUNT" } },
-      { role: "grunt", modelId: "a/named", entry: { description: "cheap edits" } },
-    ],
-    { grunt: "GENERIC GRUNT" },
-  );
-  expect(roster.grunts["a/generic"]).toEqual({});
-  expect(roster.grunts["a/named"]).toEqual({ description: "cheap edits" });
-});
-
 test("diffRoster works per AGENT, so removed is exactly the files that would go", () => {
   const current = {
     grunts: { "a/keep": {}, "a/retune": { variant: "low" }, "a/drop": {} },
@@ -99,10 +87,10 @@ test("diffRoster works per AGENT, so removed is exactly the files that would go"
 test("diffRoster reports every changed field, not just the first", () => {
   const d = diffRoster(
     { grunts: { "a/b": { variant: "low" } } },
-    { grunts: { "a/b": { variant: "high", description: "now useful", steps: 20 } } },
+    { grunts: { "a/b": { variant: "high", notes: "now useful", steps: 20 } } },
   );
   expect(d.changed[0]).toContain('variant "low" -> "high"');
-  expect(d.changed[0]).toContain('description null -> "now useful"');
+  expect(d.changed[0]).toContain('notes null -> "now useful"');
   expect(d.changed[0]).toContain("steps null -> 20");
 });
 
@@ -120,7 +108,7 @@ test("diffRoster surfaces a carelessly rebuilt roster as a mass deletion", () =>
 test("validateRoster accepts a well-formed document, including empty entries", () => {
   expect(
     validateRoster({
-      grunts: { "a/b": {}, "c/d": { variant: "high", description: "x", notes: "y", steps: 5 } },
+      grunts: { "a/b": {}, "c/d": { variant: "high", notes: "y", steps: 5 } },
       drills: { "a/b": { disable: true } },
     }),
   ).toEqual([]);
@@ -165,41 +153,14 @@ test("validateRoster rejects non-objects, and an entry that is not an object", (
   );
 });
 
-test("validateRoster rejects benchmarks, prices and dates in descriptions", () => {
-  const bad = [
-    "Flat-rate, strong balanced capability (60/75/84) — first choice",
-    "Balanced default (intel 55, code 72, agentic 81)",
-    "Cheapest Anthropic ($0.1/M in, $0.5/M out)",
-    "Newest Opus release (2026-09-22) for architecture",
-    "TerminalBench 0.42, good coder",
-    "wins 64% of SWE tasks",
-  ];
-  for (const description of bad) {
-    const errors = validateRoster({ grunts: { "a/b": { description } } });
-    expect(errors, description).toHaveLength(1);
-    expect(errors[0]).toContain("squad_metrics");
-  }
-  expect(
-    validateRoster({
-      grunts: {
-        "a/b": { description: "Flat-rate, 1M ctx, mechanical edits; weak on ambiguous specs" },
-      },
-    }),
-  ).toEqual([]);
+test("validateRoster refuses a description and points at model_data info", () => {
+  const errors = validateRoster({ grunts: { "a/b": { description: "strongest coder" } } });
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toContain('models["a/b"].info');
 });
 
-test("an unchanged stale description on disk does not block an unrelated edit", () => {
-  const current = { grunts: { "a/b": { description: "Cheap ($0.1/M in)", variant: "low" } } };
-  const edited = { grunts: { "a/b": { description: "Cheap ($0.1/M in)", variant: "high" } } };
-  expect(validateRoster(edited, current)).toEqual([]);
-  const rewritten = { grunts: { "a/b": { description: "Cheap ($0.2/M in)" } } };
-  expect(validateRoster(rewritten, current)).toHaveLength(1);
-});
-
-test("staleDescriptions flags numbers for the next cleanup", () => {
-  const notes = staleDescriptions({
-    grunts: { "a/b": { description: "Balanced (intel 55)" }, "c/d": { description: "fine" } },
-  });
-  expect(notes).toHaveLength(1);
-  expect(notes[0]).toContain('grunts["a/b"].description contains a benchmark score');
+test("validateRoster names a wrapper key it does not know", () => {
+  expect(validateRoster({ roster: { grunts: {} } })).toEqual([
+    'unknown top-level key "roster" (expected grunts, drills)',
+  ]);
 });
