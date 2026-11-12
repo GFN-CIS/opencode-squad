@@ -68,7 +68,8 @@ first.
    Each file's frontmatter has a `model:` line (`provider/model`). Group the
    grunts by the provider segment of the filename (`grunt-<provider>-...`).
 2. Within each provider group, rank by capability. Use the `squad_metrics`
-   result already in your history, or call it once if it is not: the
+   result already in your history, or call it once with the grunts' models if
+   it is not: the
    SuperIndex score (SI) is the overall ranking, the agentic benchmarks
    (TerminalBench4, APEX-Agents, FrontierSWE) break ties for code review.
    Pick the strongest grunt per provider as the pre-checked default — one

@@ -82,12 +82,12 @@ routing, also weigh subscription vs metered API billing on the candidate grunts
 — a flat-rate one is ~free at the margin. Full reasoning on all three lives in
 \`squad-delegate\`.
 
-**Model numbers are not in this block.** Benchmarks, list prices and billing for
-every connected model come from the \`squad_metrics\` tool: call it ONCE in this
-chat, before your first routing decision, and route on what it returns — not on
-numbers you remember. The result stays in your history; call it again only
-after your context was compacted or the squad changed. For a close call between
-specific models, \`squad_metrics({models: [...]})\` returns every metric for them.
+**Model numbers are not in this block.** Before your first routing decision in
+this chat, call \`squad_metrics({models: [...]})\` ONCE with the \`model:\` of every
+grunt/drill below (deduplicated), and route on what it returns — not on numbers
+you remember. The result stays in your history; call it again only after your
+context was compacted or the squad changed. For a close call between specific
+models, add \`full: true\` to get every metric for them.
 
 If you stall — past the effort your verdict assumed, repeating with no new
 information, or no new artifact — stop and change the frame (re-decide; usually

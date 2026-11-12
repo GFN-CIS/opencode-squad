@@ -223,7 +223,7 @@ export function formatSummary({ models, roles = {}, notes = null, data, now }) {
   const si = data?.superindex?.index;
   const byMetric = data?.scores?.byMetric ?? {};
   const header = [
-    `Model metrics for the ${models.length} models connected in opencode.`,
+    `Model metrics for ${models.length} model(s).`,
     `SuperIndex (superindex.app, CC-BY-4.0): fetched ${fmtAge(data?.superindex?.fetchedAt, now)}. ` +
       `llmbenchmark.ai: fetched ${fmtAge(data?.scores?.fetchedAt, now)}.`,
     "SI = SuperIndex composite score (#rank). Benchmarks are 0-1, measured at the " +
@@ -231,8 +231,8 @@ export function formatSummary({ models, roles = {}, notes = null, data, now }) {
       "Where a model was run at several settings, all are listed. A benchmark missing " +
       "from a line was not measured for that model — it is not a zero. " +
       "Prices are list $ per 1M tokens in/out; a subscription model costs ~$0 at the margin.",
-    `Benchmarks: ${KEY_METRICS.map((m) => m.label).join(", ")}. Every metric for given ` +
-      "models: squad_metrics({models: [...]}).",
+    `Benchmarks: ${KEY_METRICS.map((m) => m.label).join(", ")}. Every metric for up to ` +
+      "6 models: squad_metrics({models: [...], full: true}).",
     "",
   ];
   if (!si && !Object.keys(byMetric).length) {
@@ -338,27 +338,6 @@ export function formatDetail(id, detail, si) {
     head.push(`${src}: ${items.join("; ")}`);
   }
   return head.join("\n");
-}
-
-/**
- * Every model opencode can reach, with its context window when known.
- *
- * @param {Array<{id: string, models?: Record<string, {limit?: {context?: number}}>}>|null} providers
- *   normalizeProviders output
- * @returns {Array<{id: string, context?: number}>}
- */
-export function connectedModels(providers) {
-  const out = [];
-  for (const p of Array.isArray(providers) ? providers : []) {
-    for (const [mid, m] of Object.entries(p?.models ?? {})) {
-      const ctx = m?.limit?.context;
-      out.push({
-        id: `${p.id}/${mid}`,
-        ...(typeof ctx === "number" && ctx > 0 ? { context: ctx } : {}),
-      });
-    }
-  }
-  return out;
 }
 
 /**

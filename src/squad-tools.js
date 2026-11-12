@@ -20,13 +20,13 @@ export const TOOL_DESCRIPTIONS = {
     "before squad_patch — the roster is a document you edit, not one you retype. " +
     "Returns JSON.",
   squad_metrics:
-    "Benchmark scores, list prices, context windows and billing for every model " +
-    "connected in opencode, with your grunt/drill models marked. Call it ONCE per " +
-    "chat, before your first routing decision — the result stays in your history. " +
-    "Call it again only after your context was compacted or the squad changed. " +
-    "Data is fetched live (cached up to 48h), so trust it over any number you " +
-    "remember. Pass `models` to get EVERY metric for a few specific models when " +
-    "the summary does not settle a choice between them.",
+    "Benchmark scores, list prices, context windows and billing for the models you " +
+    "name — pass the `model:` of every grunt/drill in your inventory. Call it ONCE " +
+    "per chat, before your first routing decision; the result stays in your " +
+    "history. Call it again only after your context was compacted or the squad " +
+    "changed. Data is fetched live (cached up to 48h), so trust it over any number " +
+    "you remember. `full: true` returns EVERY metric for up to 6 models, for a " +
+    "close call the one-line summary does not settle.",
   squad_patch:
     "Write the squad roster: one agent per entry under `grunts` / `drills`, keyed by " +
     "model id. This is the COMPLETE intended squad, not a delta — an agent absent from " +
@@ -61,8 +61,11 @@ export const ARG_DESCRIPTIONS = {
     "(or $XDG_CONFIG_HOME/opencode/agent). " +
     "Pass a project's .opencode/agent to scope the squad to one project.",
   "metrics.models":
-    "Up to 6 opencode model ids (provider/model) to return every available metric " +
-    "for. Omit for the one-line-per-model summary of all connected models.",
+    "opencode model ids (provider/model) — normally the models of your grunt/drill " +
+    "agents, deduplicated.",
+  "metrics.full":
+    "Return every metric the sources hold (up to 6 models, ~2K tokens each) " +
+    "instead of one summary line per model.",
   "patch.grunts": "Executors, keyed by model id. `{}` is a valid entry: role defaults.",
   "patch.drills":
     "Reviewers, keyed by model id. A drill's verdict is what the orchestrator acts " +

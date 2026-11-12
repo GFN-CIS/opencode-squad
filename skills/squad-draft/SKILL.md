@@ -42,12 +42,15 @@ job. (If they hand you an explicit list, honor it.)
    how a squad of seven became a squad of one; `squad_patch` will refuse it, but
    the refusal is a backstop, not the plan.
 
-1. **Discover** the models actually available in this install and how they
-   compare: call `squad_metrics` — one line per connected model with its
-   SuperIndex score, agentic/coding benchmarks, list price or subscription,
-   and context. Skip the noise — free/preview/image/tts/embedding/`-lite`
-   models — unless the user wants them. For a close call between two
-   candidates, `squad_metrics({models: [...]})` returns every metric.
+1. **Discover** the models actually available in this install:
+   ```bash
+   opencode models
+   ```
+   (Filter if useful, e.g. `opencode models anthropic`.) Skip the noise —
+   free/preview/image/tts/embedding/`-lite` models — unless the user wants them.
+   Then compare the candidates with `squad_metrics({models: [...]})`: SuperIndex
+   score, agentic/coding benchmarks, list price or subscription, context. Add
+   `full: true` for a close call between a few.
 
 2. **Propose a roster.** From what's available, pick a curated, *tiered* set that
    gives sarge real choice without bloat — roughly one or two per tier, spread

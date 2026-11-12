@@ -7,7 +7,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
-  connectedModels,
   formatDetail,
   formatSummary,
   indexModelIds,
@@ -225,12 +224,6 @@ describe("formatDetail", () => {
 });
 
 describe("host helpers", () => {
-  test("connectedModels flattens providers with context", () => {
-    expect(
-      connectedModels([{ id: "p", models: { a: { limit: { context: 1000 } }, b: {} } }]),
-    ).toEqual([{ id: "p/a", context: 1000 }, { id: "p/b" }]);
-  });
-
   test("squadRoles maps models to grunt/drill and ignores other agents", () => {
     expect(
       squadRoles([
