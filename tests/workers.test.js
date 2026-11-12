@@ -4,6 +4,7 @@ import { NOTES_CLOSE, NOTES_OPEN, parseAgentFile } from "../src/roster.js";
 import {
   agentMarkdown,
   defaultDescriptions,
+  describeAgent,
   GENERATED_MARKER,
   slugForModel,
 } from "../src/workers.js";
@@ -166,7 +167,6 @@ test.each(["grunt", "drill"])(
     expect(parseAgentFile(content)).toEqual({
       modelId: "openai/gpt-5.5",
       entry: {
-        description: defaultDescriptions()[role],
         variant: "high",
         disable: true,
         steps: 12,
@@ -216,7 +216,8 @@ test("agentMarkdown writes the per-agent overrides, and only those that were giv
     steps: 40,
     disable: true,
   });
-  expect(content).toContain("description: cheap long-context coder");
+  // Quoted, so an owner note carrying ": " or " #" stays valid YAML.
+  expect(content).toContain('description: "cheap long-context coder"\n');
   expect(content).toContain("model: zai-coding-plan/glm-5.3#high\n");
   expect(content).toContain("steps: 40");
   expect(content).toContain("disabled: true");
@@ -230,7 +231,7 @@ test("agentMarkdown writes the per-agent overrides, and only those that were giv
   expect(bare).not.toContain("disable:");
   expect(bare).not.toContain(NOTES_OPEN);
   // Falls back to the role's generic description rather than writing nothing.
-  expect(bare).toContain(`description: ${defaultDescriptions().grunt}`);
+  expect(bare).toContain(`description: ${JSON.stringify(defaultDescriptions().grunt)}`);
 });
 
 test("notes are fenced so the body stays separable from the role prompt", () => {
@@ -244,4 +245,24 @@ test("a blank override is ignored rather than written as an empty key", () => {
   const { content } = agentMarkdown("grunt", "a/b", { variant: "  ", notes: "  " });
   expect(content).not.toContain("variant:");
   expect(content).not.toContain(NOTES_OPEN);
+});
+
+test("describeAgent carries the owner rule and the plan, nothing invented", () => {
+  const base = defaultDescriptions().grunt;
+  expect(describeAgent("grunt")).toBe(base);
+  expect(
+    describeAgent("grunt", {
+      info: "  no secrets:\n prod is off-limits ",
+      billing: { api: false, plan: "GLM Coding Pro" },
+    }),
+  ).toBe(
+    `${base} Owner rule: no secrets: prod is off-limits. Billing: subscription (GLM Coding Pro).`,
+  );
+  expect(describeAgent("drill", { info: "", billing: { api: true } })).toBe(
+    `${defaultDescriptions().drill} Billing: metered API.`,
+  );
+  expect(describeAgent("grunt", { billing: { api: false, plan: null } })).toBe(
+    `${base} Billing: subscription.`,
+  );
+  expect(() => describeAgent("captain")).toThrow();
 });

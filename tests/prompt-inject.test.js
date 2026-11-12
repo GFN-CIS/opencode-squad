@@ -145,14 +145,12 @@ describe("generated agent files carry the fence", () => {
   it("round-trips through parseAgentFile with notes and model intact", () => {
     const { content } = agentMarkdown("grunt", "anthropic/claude-opus-5", {
       variant: "high",
-      description: "strong analysis",
       notes: "this model over-scaffolds",
     });
     const { modelId, entry } = parseAgentFile(content);
     expect(modelId).toBe("anthropic/claude-opus-5");
     expect(entry).toEqual({
       variant: "high",
-      description: "strong analysis",
       notes: "this model over-scaffolds",
     });
     // Regenerating from what was read back must reproduce the same file — the
