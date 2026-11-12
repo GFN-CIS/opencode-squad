@@ -35,6 +35,8 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
     startMetricsRefresh: () => {},
     getMetrics: async () => data,
     loadModelData: () => null,
+    loadProviderPlans: () => ({ "zai-coding-plan": "GLM Coding Pro" }),
+    loadAuthTypes: () => ({}),
     METRICS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-metrics-")),
   };
 });
@@ -140,7 +142,7 @@ test("squad_metrics renders the asked models, squad roles and full detail", asyn
     ).content;
     expect(summary).toContain("Model metrics for 3 model(s).");
     expect(summary).toMatch(
-      /- zai-coding-plan\/glm-5\.3 \[grunt\]: SI 80\.6 #19 · ctx 1M · billing: subscription/,
+      /- zai-coding-plan\/glm-5\.3 \[grunt\]: SI 80\.6 #19 · ctx 1M · subscription: GLM Coding Pro/,
     );
     expect(summary).toContain("- anthropic/claude-sonnet-5-5: SI 85.2 #7");
     expect(summary).toContain("- no benchmark data: opencode/big-pickle");

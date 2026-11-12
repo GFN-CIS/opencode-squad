@@ -107,15 +107,18 @@ export function mergeModelData(modelIds, existing = {}) {
 export function buildModelData(dir, existing, generated) {
   const ids = discoverSquadModels(dir);
   const models = mergeModelData(ids, existing);
+  const { _meta: _old, models: _oldModels, ...handKeys } = existing ?? {};
   return {
+    ...handKeys,
     _meta: {
       generated: generated ?? null,
       model_count: ids.length,
       note:
-        "Hand-editable notes per squad model, keyed by opencode provider/model id. " +
-        '`info` (routing note), `billing` ("subscription" for flat-rate) and ' +
-        "`cache_ttl_seconds` are yours and survive every refresh. Benchmarks and " +
-        "prices are NOT kept here: the squad_metrics tool fetches them live.",
+        "Hand-editable. `providers`: your plan per opencode provider id, in your " +
+        'own words ("Max 5x", "GLM Coding Pro") or "api" for metered billing. ' +
+        "`models`: per squad model `info` (routing note) and `cache_ttl_seconds`. " +
+        "Everything here survives every refresh. Benchmarks and prices are NOT kept " +
+        "here: the squad_metrics tool fetches them live.",
     },
     models,
   };
@@ -147,7 +150,7 @@ export function modelsChanged(existing, snapshot) {
 export function readModelData(file) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return parsed?.models ? parsed : null;
+    return parsed?.models || parsed?.providers ? { models: {}, ...parsed } : null;
   } catch {
     return null;
   }

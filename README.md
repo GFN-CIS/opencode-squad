@@ -67,7 +67,7 @@ The inventory carries **no benchmarks and no prices** on purpose. The bootstrap 
 `squad_metrics` returns one line per model asked for, with the squad's grunt/drill models marked:
 
 ```
-- zai-coding-plan/glm-5.3 [grunt+drill]: SI 80.6 #19 · ctx 1M · billing: subscription · TerminalBench4 0.418 · APEX-Agents 0.566 · FrontierSWE 0.302 · ValsIndex 0.599
+- zai-coding-plan/glm-5.3 [grunt+drill]: SI 80.6 #19 · ctx 1M · subscription: GLM Coding Pro · TerminalBench4 0.418 · APEX-Agents 0.566 · FrontierSWE 0.302 · ValsIndex 0.599
 - anthropic/claude-sonnet-5-5 [grunt+drill]: SI 85.2 #7 · ctx 1M · $2/$10 · TerminalBench4 0.618 · APEX-Agents 0.755 · FrontierSWE 0.619 · LiveBench-coding 0.772 · ValsIndex 0.708
 - openai/gpt-6.1-terra-fast: same data as openai/gpt-6.1-terra
 ```
@@ -85,11 +85,19 @@ Fetching: at plugin start and then whenever data is older than **48 hours** (che
 
 ### `model_data.json`: your notes per model
 
-`model_data.json` (the project's `.opencode/` or the global `~/.config/opencode/`) holds **only hand-written fields**, keyed by the opencode `provider/model` id, for the models that have a grunt-/drill- agent:
+`model_data.json` (the project's `.opencode/` or the global `~/.config/opencode/`) holds **only hand-written fields**:
 
-- `info` — a routing note ("good for coding, weak at long context") shown next to the numbers in `squad_metrics`;
-- `billing` — `"subscription"` marks a flat-rate model (Claude Pro/Max, GitHub Copilot, ChatGPT Plus, …), so `squad_metrics` shows `billing: subscription` instead of a list price. Providers named `*-coding-plan` / `*-token-plan` count as subscriptions without it; set `"billing": "api"` to override;
-- `cache_ttl_seconds` — see [the cache note](#cache-status-hint) below.
+```json
+{
+  "providers": { "anthropic": "Max 5x", "openai": "ChatGPT Plus", "zai-coding-plan": "GLM Coding Pro", "google": "api" },
+  "models": { "zai-coding-plan/glm-5.3": { "info": "good for coding, weak at long context" } }
+}
+```
+
+- `providers` — how each opencode provider is paid for: the plan in your own words, or `"api"` for metered billing. `squad_metrics` prints `subscription: Max 5x` instead of a list price; the plugin keeps no catalog of plan limits — the model knows what common plans include. Without an entry, an OAuth login in opencode's `auth.json` and a `*-coding-plan` / `*-token-plan` provider read as `subscription: plan not set`; anything else as metered API. `squad-draft` asks for missing plans once and writes them here;
+- `models.<id>.info` — a routing note shown next to the numbers in `squad_metrics`;
+- `models.<id>.billing` — per-model override of the provider's plan (`"api"` or a plan name);
+- `models.<id>.cache_ttl_seconds` — see [the cache note](#cache-status-hint) below.
 
 The global file is refreshed at opencode startup: new squad models get an empty entry, removed ones are dropped, every hand-added field is kept, and the benchmark fields earlier versions copied in from Artificial Analysis are stripped. It is written only when something actually changed. A project's file is never auto-touched.
 
@@ -499,7 +507,7 @@ Delegating only helps if the delegate is actually fit for the task. The injected
 Delegation isn't automatically the cheap option — three factors can flip it:
 
 - **Prompt/KV caching** — a fresh `grunt-*` session starts with no cache hit on your accumulated context, while continuing yourself on a provider with prompt caching reuses your already-cached prefix at a steep discount. For a small task on top of a large, already-cached context, finishing it yourself can beat the cost of writing a brief, spinning up a grunt cold, and reading its result back.
-- **Subscription vs API billing** — a grunt shown as `billing: subscription` by `squad_metrics` (see above) costs the user ~$0 marginally regardless of tokens; an API-billed grunt's cost scales with usage. When quality is comparable, the orchestrator prefers the subscription-covered delegate and saves API-billed models for when they're genuinely the better fit — not by default.
+- **Subscription vs API billing** — a grunt shown as `subscription: <plan>` by `squad_metrics` (see above) costs the user ~$0 marginally regardless of tokens; an API-billed grunt's cost scales with usage. When quality is comparable, the orchestrator prefers the subscription-covered delegate and saves API-billed models for when they're genuinely the better fit — not by default.
 - **Context pressure is not a panic button** — the live `<ORCHESTRATE_CONTEXT>` line is for genuinely heavy work, not an excuse to delegate every minor task once usage looks high. opencode compacts automatically, and for small/quick work the overhead of a task brief plus a grunt round-trip usually costs more than just doing it and letting compaction absorb the overflow.
 
 For full routing rules, escape hatches, and edge-case handling see [skills/squad-delegate/SKILL.md](skills/squad-delegate/SKILL.md).

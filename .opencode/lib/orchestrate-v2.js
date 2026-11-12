@@ -72,7 +72,9 @@ import { loadSkills } from "../../src/v2/skills.js";
 import {
   ensureGlobalModelDataFresh,
   getMetrics,
+  loadAuthTypes,
   loadModelData,
+  loadProviderPlans,
   loadRolePrompt,
   METRICS_DIR,
   ORCHESTRATOR_AGENT,
@@ -367,6 +369,8 @@ export default {
               models,
               roles: squadRoles(await getAgents()),
               notes: loadModelData(directory),
+              plans: loadProviderPlans(directory),
+              authTypes: loadAuthTypes(),
               data,
               now,
             }),

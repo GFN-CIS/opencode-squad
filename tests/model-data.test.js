@@ -130,3 +130,22 @@ test("readModelData round-trips a written file and tolerates a missing one", () 
   expect(readModelData(file).models["a/b"].info).toBe("x");
   expect(readModelData(path.join(dir, "nope.json"))).toBeNull();
 });
+
+test("buildModelData keeps the hand-written providers section", () => {
+  const dir = tmpdir();
+  fs.writeFileSync(path.join(dir, "grunt-anthropic-x.md"), "---\nmodel: anthropic/x\n---\n");
+  const snap = buildModelData(
+    dir,
+    { providers: { anthropic: "Max 5x" }, models: {} },
+    "2026-11-12",
+  );
+  expect(snap.providers).toEqual({ anthropic: "Max 5x" });
+  expect(modelsChanged({ models: {} }, snap)).toBe(true);
+});
+
+test("readModelData accepts a file with only providers", () => {
+  const dir = tmpdir();
+  const file = path.join(dir, "model_data.json");
+  fs.writeFileSync(file, JSON.stringify({ providers: { openai: "api" } }));
+  expect(readModelData(file)).toEqual({ models: {}, providers: { openai: "api" } });
+});

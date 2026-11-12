@@ -7,12 +7,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+  billingFor,
   formatDetail,
   formatSummary,
   indexModelIds,
   indexScoreRows,
   indexSuperIndex,
-  isSubscription,
   KEY_METRICS,
   keyCandidates,
   lookup,
@@ -101,12 +101,36 @@ describe("indexScoreRows", () => {
 });
 
 describe("billing", () => {
-  test("coding/token plans are subscriptions; model_data billing overrides", () => {
-    expect(isSubscription("zai-coding-plan/glm-5.3")).toBe(true);
-    expect(isSubscription("alibaba-token-plan/qwen")).toBe(true);
-    expect(isSubscription("anthropic/claude-opus-5-5")).toBe(false);
-    expect(isSubscription("anthropic/claude-opus-5-5", { billing: "subscription" })).toBe(true);
-    expect(isSubscription("zai-coding-plan/glm-5.3", { billing: "api" })).toBe(false);
+  test("provider plan names the subscription; api means metered", () => {
+    const plans = { anthropic: "Max 5x", openai: "api" };
+    expect(billingFor("anthropic/claude-opus-5-5", { plans })).toEqual({
+      api: false,
+      plan: "Max 5x",
+    });
+    expect(billingFor("openai/gpt-6-luna", { plans, authTypes: { openai: "oauth" } })).toEqual({
+      api: true,
+    });
+  });
+
+  test("without a plan: oauth login or a *-plan provider is a subscription", () => {
+    expect(billingFor("openai/gpt-6-luna", { authTypes: { openai: "oauth" } })).toEqual({
+      api: false,
+      plan: null,
+    });
+    expect(billingFor("zai-coding-plan/glm-5.3")).toEqual({ api: false, plan: null });
+    expect(billingFor("alibaba-token-plan/qwen")).toEqual({ api: false, plan: null });
+    expect(billingFor("google/gemini", { authTypes: { google: "api" } })).toEqual({ api: true });
+  });
+
+  test("a model's own billing overrides its provider", () => {
+    const plans = { "zai-coding-plan": "GLM Coding Pro" };
+    expect(billingFor("zai-coding-plan/glm-5.3", { plans, note: { billing: "api" } })).toEqual({
+      api: true,
+    });
+    expect(billingFor("anthropic/x", { note: { billing: "subscription" } })).toEqual({
+      api: false,
+      plan: null,
+    });
   });
 });
 
@@ -121,6 +145,7 @@ describe("formatSummary", () => {
     ],
     roles: { "zai-coding-plan/glm-5.3": ["grunt", "drill"] },
     notes: { "anthropic/claude-sonnet-5-5": { info: "careful reviewer" } },
+    plans: { "zai-coding-plan": "GLM Coding Pro" },
     data: DATA,
     now,
   });
@@ -134,7 +159,7 @@ describe("formatSummary", () => {
 
   test("subscription replaces the list price; roles and notes are shown", () => {
     expect(line("zai-coding-plan/glm-5.3")).toContain("[grunt+drill]");
-    expect(line("zai-coding-plan/glm-5.3")).toContain("billing: subscription");
+    expect(line("zai-coding-plan/glm-5.3")).toContain("subscription: GLM Coding Pro");
     expect(line("zai-coding-plan/glm-5.3")).not.toContain("$1.4");
     expect(line("anthropic/claude-sonnet-5-5")).toContain("$2/$10");
     expect(line("anthropic/claude-sonnet-5-5")).toContain("note: careful reviewer");

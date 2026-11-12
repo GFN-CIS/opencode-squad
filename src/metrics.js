@@ -168,18 +168,31 @@ export function indexModelIds(list) {
 }
 
 /**
- * Flat-rate billing: the user's explicit `billing` in model_data.json wins;
- * otherwise a `*-coding-plan` / `*-token-plan` provider is a subscription by
- * construction.
+ * How a model is paid for, as the orchestrator should read it. The plan name
+ * is the user's own words ("Max 5x", "GLM Coding Pro") — models know what the
+ * common plans include, so no catalog of limits is kept here to go stale.
+ *
+ * Precedence: the model's own `billing` in model_data.json, then the
+ * provider's entry under `providers`, then what opencode's auth tells us
+ * (an OAuth login is a subscription), then the provider's name
+ * (`*-coding-plan` / `*-token-plan`). Anything else is metered API.
  *
  * @param {string} id  opencode provider/model
- * @param {any} [note]  model_data.json entry
+ * @param {{note?: any, plans?: Record<string, string>|null,
+ *   authTypes?: Record<string, string>|null}} [ctx]
+ * @returns {{api: true} | {api: false, plan: string|null}}
  */
-export function isSubscription(id, note) {
-  if (note?.billing === "subscription") return true;
-  if (typeof note?.billing === "string" && note.billing) return false;
+export function billingFor(id, { note, plans, authTypes } = {}) {
   const provider = String(id).split("/")[0];
-  return /-(?:coding|token)-plan$/.test(provider);
+  const named = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const asPlan = (v) => (v.toLowerCase() === "api" ? { api: true } : { api: false, plan: v });
+  const own = named(note?.billing);
+  if (own) return own === "subscription" ? { api: false, plan: null } : asPlan(own);
+  const plan = named(plans?.[provider]);
+  if (plan) return asPlan(plan);
+  if (authTypes?.[provider] === "oauth") return { api: false, plan: null };
+  if (/-(?:coding|token)-plan$/.test(provider)) return { api: false, plan: null };
+  return { api: true };
 }
 
 const fmtCtx = (n) =>
@@ -215,11 +228,21 @@ function fmtValues(values) {
  * @param {Array<{id: string, context?: number}>} p.models  connected opencode models
  * @param {Record<string, string[]>} [p.roles]  model id -> ["grunt", "drill"]
  * @param {Record<string, any>|null} [p.notes]  model_data.json models
+ * @param {Record<string, string>|null} [p.plans]  model_data.json providers
+ * @param {Record<string, string>|null} [p.authTypes]  provider -> opencode auth type
  * @param {MetricsData|null} p.data
  * @param {number} p.now
  * @returns {string}
  */
-export function formatSummary({ models, roles = {}, notes = null, data, now }) {
+export function formatSummary({
+  models,
+  roles = {},
+  notes = null,
+  plans = null,
+  authTypes = null,
+  data,
+  now,
+}) {
   const si = data?.superindex?.index;
   const byMetric = data?.scores?.byMetric ?? {};
   const header = [
@@ -230,7 +253,8 @@ export function formatSummary({ models, roles = {}, notes = null, data, now }) {
       "setting the leaderboard ran (mostly max effort) — NOT at your agents' variant. " +
       "Where a model was run at several settings, all are listed. A benchmark missing " +
       "from a line was not measured for that model — it is not a zero. " +
-      "Prices are list $ per 1M tokens in/out; a subscription model costs ~$0 at the margin.",
+      "Prices are list $ per 1M tokens in/out (metered API). `subscription: <plan>` " +
+      "is a flat-rate plan: ~$0 per token, bounded by the plan's usage limits instead.",
     `Benchmarks: ${KEY_METRICS.map((m) => m.label).join(", ")}. Every metric for up to ` +
       "6 models: squad_metrics({models: [...], full: true}).",
     "",
@@ -277,7 +301,8 @@ export function formatSummary({ models, roles = {}, notes = null, data, now }) {
     }
     const ctx = m.context ?? s?.entry.context;
     if (ctx) parts.push(`ctx ${fmtCtx(ctx)}`);
-    if (isSubscription(m.id, note)) parts.push("billing: subscription");
+    const billing = billingFor(m.id, { note, plans, authTypes });
+    if (!billing.api) parts.push(`subscription: ${billing.plan ?? "plan not set"}`);
     else if (/-free$/.test(modelKey(m.id))) parts.push("free");
     else if (s?.entry.priceIn != null) {
       parts.push(`$${s.entry.priceIn}/$${s.entry.priceOut ?? "?"}`);

@@ -180,11 +180,10 @@ Say so and go look at the subagent session. Do not narrate a provider failure,
 a refusal, or a rejected brief that nothing in front of you supports — you own
 the outcome, and that includes owning the accuracy of your post-mortem.
 
-**Subscription vs API billing.** `squad_metrics` shows `billing: subscription`
-for a flat-rate model — any `*-coding-plan` / `*-token-plan` provider, or one the
-user marked `"billing": "subscription"` in `model_data.json` (Claude Pro/Max,
-GitHub Copilot, ChatGPT Plus, ...) — and a list price `$in/$out` otherwise,
-which means ordinary metered API billing. A subscription-covered grunt costs the user ~$0 marginally
+**Subscription vs API billing.** `squad_metrics` shows `subscription: <plan>`
+for a flat-rate model ("Max 5x", "GLM Coding Pro" — the user's own words; you
+know what those plans include and how they cap usage) and a list price
+`$in/$out` for ordinary metered API billing. A subscription-covered grunt costs the user ~$0 marginally
 regardless of how many tokens it burns; an API-billed grunt's cost scales with
 usage same as your own tokens do. When two candidates are roughly comparable on
 capability, prefer the subscription-covered one — it's free at the margin. Don't

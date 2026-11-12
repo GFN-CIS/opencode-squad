@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createTurnMemo } from "../../src/message-transform.js";
 import { metricsDir, readMetrics, refreshMetrics } from "../../src/metrics-cache.js";
 import { buildModelData, modelsChanged, readModelData } from "../../src/model-data.js";
-import { opencodeConfigDir } from "../../src/paths.js";
+import { opencodeConfigDir, opencodeDataDir } from "../../src/paths.js";
 import { createPromptLoader } from "../../src/prompt-inject.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -108,6 +108,34 @@ export function loadModelData(directory = process.cwd()) {
   }
   _modelDataCache.set(directory, found ? merged : null);
   return _modelDataCache.get(directory);
+}
+
+// Plans per provider from model_data.json `providers` (project over global).
+// Read on every call: it is tiny, and an edit should apply without a restart.
+/** @param {string} [directory] see loadModelData */
+export function loadProviderPlans(directory = process.cwd()) {
+  const plans = {};
+  for (const file of [
+    path.join(opencodeConfigDir(process.env, os.homedir()), "model_data.json"),
+    path.join(directory, ".opencode", "model_data.json"),
+  ]) {
+    Object.assign(plans, readModelData(file)?.providers ?? {});
+  }
+  return plans;
+}
+
+// provider -> "oauth" | "api" | ... from opencode's auth store. Only the type
+// is read out; credentials never leave this function.
+export function loadAuthTypes() {
+  try {
+    const file = path.join(opencodeDataDir(process.env, os.homedir()), "auth.json");
+    const auth = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Object.fromEntries(
+      Object.entries(auth ?? {}).map(([provider, v]) => [provider, String(v?.type ?? "")]),
+    );
+  } catch {
+    return {};
+  }
 }
 
 // Startup auto-regen of the GLOBAL model_data.json: rescan the squad, MERGE
