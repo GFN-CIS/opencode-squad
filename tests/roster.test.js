@@ -5,6 +5,7 @@ import {
   NOTES_CLOSE,
   NOTES_OPEN,
   parseAgentFile,
+  staleDescriptions,
   validateRoster,
 } from "../src/roster.js";
 
@@ -185,4 +186,20 @@ test("validateRoster rejects benchmarks, prices and dates in descriptions", () =
       },
     }),
   ).toEqual([]);
+});
+
+test("an unchanged stale description on disk does not block an unrelated edit", () => {
+  const current = { grunts: { "a/b": { description: "Cheap ($0.1/M in)", variant: "low" } } };
+  const edited = { grunts: { "a/b": { description: "Cheap ($0.1/M in)", variant: "high" } } };
+  expect(validateRoster(edited, current)).toEqual([]);
+  const rewritten = { grunts: { "a/b": { description: "Cheap ($0.2/M in)" } } };
+  expect(validateRoster(rewritten, current)).toHaveLength(1);
+});
+
+test("staleDescriptions flags numbers for the next cleanup", () => {
+  const notes = staleDescriptions({
+    grunts: { "a/b": { description: "Balanced (intel 55)" }, "c/d": { description: "fine" } },
+  });
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toContain('grunts["a/b"].description contains a benchmark score');
 });

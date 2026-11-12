@@ -25,6 +25,11 @@ export const KEY_METRICS = [
   { metric: "valsai_index", label: "ValsIndex" },
 ];
 
+// llmbenchmark relays Artificial Analysis under these ids. AA is not a source
+// for this plugin: its index was re-scored on an incomparable scale and its
+// free tier returns nulls for most sub-benchmarks.
+const EXCLUDED_SOURCES = new Set(["aa-api", "artificialanalysis"]);
+
 // Serving-speed and pricing-tier suffixes that name the same weights.
 const SAME_MODEL_SUFFIXES = [
   /-ultrafast$/,
@@ -265,12 +270,15 @@ export function formatSummary({ models, roles = {}, notes = null, data, now }) {
     const parts = [];
     if (s) {
       const e = s.entry;
-      if (e.score !== null) parts.push(`SI ${e.score}${e.rank !== null ? ` #${e.rank}` : ""}`);
-      else parts.push(`SI unranked (${e.status ?? "no score"})`);
+      if (e.score === null) parts.push(`SI unranked (${e.status ?? "no score"})`);
+      else if (e.rank !== null) parts.push(`SI ${e.score} #${e.rank}`);
+      // Unranked scores rest on too few benchmarks to compare with ranked ones.
+      else parts.push(`SI ${e.score} (provisional, conf ${e.confidence ?? "?"}%)`);
     }
     const ctx = m.context ?? s?.entry.context;
     if (ctx) parts.push(`ctx ${fmtCtx(ctx)}`);
     if (isSubscription(m.id, note)) parts.push("billing: subscription");
+    else if (/-free$/.test(modelKey(m.id))) parts.push("free");
     else if (s?.entry.priceIn != null) {
       parts.push(`$${s.entry.priceIn}/$${s.entry.priceOut ?? "?"}`);
     }
@@ -310,7 +318,7 @@ export function formatDetail(id, detail, si) {
     head.push(detail ? "llmbenchmark: no scores." : "llmbenchmark: not found or unavailable.");
     return head.join("\n");
   }
-  head.push(`llmbenchmark id: ${detail.id} (${scores.length} scores)`);
+  head.push(`llmbenchmark id: ${detail.id} (Artificial Analysis rows omitted)`);
   /** @type {Map<string, string[]>} */
   const bySource = new Map();
   for (const s of scores) {
@@ -320,6 +328,7 @@ export function formatDetail(id, detail, si) {
     if (typeof s?.metric !== "string" || value === null || /_(?:votes|interval)$/.test(s.metric)) {
       continue;
     }
+    if (EXCLUDED_SOURCES.has(s.source)) continue;
     const src = `${typeof s.source === "string" ? s.source : "?"}${s.setting ? ` (${s.setting})` : ""}`;
     const unit = s.unit && s.unit !== "ratio" ? ` ${s.unit}` : "";
     if (!bySource.has(src)) bySource.set(src, []);

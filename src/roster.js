@@ -173,10 +173,17 @@ function staleNumberIn(text) {
  * costs. Reports every problem at once — someone fixing an edited document
  * should not discover the mistakes one run at a time.
  *
+ * A description that already sits on disk unchanged is not re-checked for
+ * stale numbers: rosters drafted before the rule carry prices, and refusing an
+ * unrelated edit (a variant change) over them would block every such squad.
+ * squad_dump flags those for cleanup instead.
+ *
  * @param {unknown} doc
+ * @param {{grunts?: Record<string, {description?: string}>,
+ *   drills?: Record<string, {description?: string}>}} [current]  roster on disk
  * @returns {string[]}  empty when valid
  */
-export function validateRoster(doc) {
+export function validateRoster(doc, current) {
   const errors = [];
   if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
     return ["roster must be a JSON object"];
@@ -212,7 +219,8 @@ export function validateRoster(doc) {
           errors.push(`${at}.${k} must be a non-empty string when present`);
         }
       }
-      if (typeof entry.description === "string") {
+      const unchanged = current?.[key]?.[modelId]?.description === entry.description;
+      if (typeof entry.description === "string" && !unchanged) {
         const stale = staleNumberIn(entry.description);
         if (stale) {
           errors.push(
@@ -288,4 +296,28 @@ export function diffRoster(current, next) {
     changed: changed.sort(),
     unchanged: unchanged.sort(),
   };
+}
+
+/**
+ * Dump notes for descriptions that carry stale numbers, so the orchestrator
+ * proposes rewriting them as part of its next delta.
+ *
+ * @param {{grunts?: Record<string, {description?: string}>,
+ *   drills?: Record<string, {description?: string}>}} roster
+ * @returns {string[]}
+ */
+export function staleDescriptions(roster) {
+  const out = [];
+  for (const key of Object.keys(ROLE_KEYS)) {
+    for (const [id, entry] of Object.entries(roster?.[key] ?? {})) {
+      const stale = typeof entry?.description === "string" && staleNumberIn(entry.description);
+      if (stale) {
+        out.push(
+          `${key}["${id}"].description contains ${stale} — rewrite it without numbers ` +
+            "(squad_metrics serves them live) the next time you patch the squad.",
+        );
+      }
+    }
+  }
+  return out;
 }

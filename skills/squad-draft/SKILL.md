@@ -79,11 +79,13 @@ job. (If they hand you an explicit list, honor it.)
    dates.** Those change under a drafted squad, and a frozen copy then
    contradicts the live numbers — a GLM grunt kept advertising "(60/75/84)"
    long after its source re-scored it at half that. Sarge gets the numbers
-   from the `squad_metrics` tool. Read them there to decide the tiers and the
-   wording, then write the qualitative conclusion ("agentic coding close to
-   the balanced tier, weaker on open-ended analysis"). `squad_patch` rejects a
-   description carrying a price, a score or a date. A context size ("1M
-   ctx") is a stable fact and allowed.
+   from the `squad_metrics` tool. Read them there to decide the tiers, then
+   write the role and the stable facts: what the model is for, when to pick
+   it, subscription or not, context size ("1M ctx" is allowed). Rankings
+   against other models ("strongest", "below X") go stale the same way the
+   numbers do — leave them to `squad_metrics`. `squad_patch` rejects a new
+   description carrying a price, a score or a date; `squad_dump` flags old
+   ones so you can propose rewriting them in the same delta.
 
 4. **Pick a reasoning `variant` for each agent whose model publishes one.**
    Without a variant, opencode sends NO reasoning parameter — and for an
