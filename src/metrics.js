@@ -167,6 +167,39 @@ export function indexModelIds(list) {
   return out;
 }
 
+const named = (v) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ") : null);
+
+/**
+ * One `providers` entry of model_data.json: either the plan as a bare string
+ * ("Max 5x", "api") or `{plan, info}`, where `info` is a routing rule that
+ * holds for every model of that provider ("no secrets" is about who runs the
+ * servers, not about one model).
+ *
+ * @param {unknown} v
+ * @returns {{plan: string|null, info: string|null}}
+ */
+export function providerEntry(v) {
+  if (typeof v === "string") return { plan: named(v), info: null };
+  if (v && typeof v === "object") {
+    const o = /** @type {Record<string, unknown>} */ (v);
+    return { plan: named(o.plan), info: named(o.info) };
+  }
+  return { plan: null, info: null };
+}
+
+/**
+ * The owner's routing rules for one model: its provider's `info`, then its
+ * own. Binding for the orchestrator, unlike anything measured.
+ *
+ * @param {string} id  opencode provider/model
+ * @param {{note?: any, providers?: Record<string, unknown>|null}} [ctx]
+ * @returns {string[]}
+ */
+export function ownerRules(id, { note, providers } = {}) {
+  const provider = String(id).split("/")[0];
+  return [providerEntry(providers?.[provider]).info, named(note?.info)].filter((r) => r !== null);
+}
+
 /**
  * How a model is paid for, as the orchestrator should read it. The plan name
  * is the user's own words ("Max 5x", "GLM Coding Pro") — models know what the
@@ -178,17 +211,16 @@ export function indexModelIds(list) {
  * (`*-coding-plan` / `*-token-plan`). Anything else is metered API.
  *
  * @param {string} id  opencode provider/model
- * @param {{note?: any, plans?: Record<string, string>|null,
+ * @param {{note?: any, plans?: Record<string, unknown>|null,
  *   authTypes?: Record<string, string>|null}} [ctx]
  * @returns {{api: true} | {api: false, plan: string|null}}
  */
 export function billingFor(id, { note, plans, authTypes } = {}) {
   const provider = String(id).split("/")[0];
-  const named = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
   const asPlan = (v) => (v.toLowerCase() === "api" ? { api: true } : { api: false, plan: v });
   const own = named(note?.billing);
   if (own) return own === "subscription" ? { api: false, plan: null } : asPlan(own);
-  const plan = named(plans?.[provider]);
+  const plan = providerEntry(plans?.[provider]).plan;
   if (plan) return asPlan(plan);
   if (authTypes?.[provider] === "oauth") return { api: false, plan: null };
   if (/-(?:coding|token)-plan$/.test(provider)) return { api: false, plan: null };
@@ -228,7 +260,7 @@ function fmtValues(values) {
  * @param {Array<{id: string, context?: number}>} p.models  connected opencode models
  * @param {Record<string, string[]>} [p.roles]  model id -> ["grunt", "drill"]
  * @param {Record<string, any>|null} [p.notes]  model_data.json models
- * @param {Record<string, string>|null} [p.plans]  model_data.json providers
+ * @param {Record<string, unknown>|null} [p.plans]  model_data.json providers
  * @param {Record<string, string>|null} [p.authTypes]  provider -> opencode auth type
  * @param {MetricsData|null} p.data
  * @param {number} p.now
@@ -276,7 +308,8 @@ export function formatSummary({
     const note = notes?.[m.id];
     const s = lookup(m.id, si);
     const hits = KEY_METRICS.map(({ metric }) => lookup(m.id, byMetric[metric]));
-    const info = typeof note?.info === "string" && note.info.trim() ? note.info.trim() : null;
+    const rules = ownerRules(m.id, { note, providers: plans });
+    const info = rules.length ? rules.join(" / ") : null;
     const role = roles[m.id]?.length ? ` [${roles[m.id].join("+")}]` : "";
     if (!s && hits.every((h) => h === null) && !info) {
       noData.push(m.id);
@@ -314,7 +347,7 @@ export function formatSummary({
       .filter(Boolean)
       .find((k) => k !== modelKey(m.id));
     if (matched) parts.push(`(data for ${matched})`);
-    if (info) parts.push(`note: ${info}`);
+    if (info) parts.push(`owner rule: ${info}`);
     lines.push(`- ${m.id}${role}: ${parts.join(" · ")}`);
   }
   if (noData.length) lines.push(`- no benchmark data: ${noData.join(", ")}`);

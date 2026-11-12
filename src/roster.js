@@ -47,7 +47,7 @@ export const ROLE_KEYS = /** @type {const} */ ({ grunts: "grunt", drills: "drill
  * `options` — nobody has needed those, and `options` in particular can override
  * the variant silently, which is the opposite of what this roster is for.
  */
-const AGENT_KEYS = new Set(["variant", "description", "notes", "steps", "disable"]);
+const AGENT_KEYS = new Set(["variant", "notes", "steps", "disable"]);
 
 /**
  * Fences the roster-supplied `notes` inside the generated prompt body so a dump
@@ -86,7 +86,6 @@ export function parseAgentFile(text) {
         modelId = id;
         if (variant) entry.variant = variant;
       } else if (key === "variant") entry.variant = value;
-      else if (key === "description") entry.description = value;
       else if (key === "steps") entry.steps = Number(value);
       else if ((key === "disable" || key === "disabled") && value === "true") entry.disable = true;
     }
@@ -103,18 +102,14 @@ export function parseAgentFile(text) {
 /**
  * Fold per-file entries into the roster tree.
  *
- * `description` is dropped when it matches the role's default, so a dump shows
- * only what someone actually chose. That matters more than it sounds: the
- * description is what the orchestrator reads in its subagent inventory when it
- * picks who to dispatch, and today every grunt carries the same generic
- * sentence — ten copies of a line that says nothing about which model to pick.
- * Keeping defaults out of the dump is what makes a real one visible.
+ * `description` is never read into the roster (parseAgentFile skips it): the
+ * plugin derives it from model_data.json. A dump that carried it would invite
+ * the orchestrator to pass it back — and to "improve" it.
  *
  * @param {Array<{role: string, modelId?: string, entry: Record<string, any>}>} files
- * @param {Record<string, string>} [defaultDescriptions]  role -> default description
  * @returns {{roster: Record<string, Record<string, any>>, conflicts: string[]}}
  */
-export function buildRoster(files, defaultDescriptions = {}) {
+export function buildRoster(files) {
   /** @type {Record<string, Record<string, any>>} */
   const roster = { grunts: {}, drills: {} };
   const conflicts = [];
@@ -126,9 +121,6 @@ export function buildRoster(files, defaultDescriptions = {}) {
       continue;
     }
     const entry = { ...f.entry };
-    if (entry.description && entry.description === defaultDescriptions[f.role]) {
-      delete entry.description;
-    }
     roster[key][f.modelId] = entry;
   }
   for (const key of Object.keys(roster)) {
@@ -139,51 +131,20 @@ export function buildRoster(files, defaultDescriptions = {}) {
   return { roster, conflicts };
 }
 
-// What a description must not carry: numbers that go stale. Benchmarks,
-// prices and release dates change under a drafted squad, and a frozen copy in
-// the description then contradicts the live numbers squad_metrics serves —
-// which is how a GLM grunt came to advertise a score its source had since
-// re-scored by half. A context size ("1M ctx") is a stable fact and allowed.
-const STALE_IN_DESCRIPTION = [
-  [/\$\s*\d/, "a price"],
-  [/\d\s*\/\s*M\b/, "a per-token price"],
-  [/\b\d{4}-\d{2}(?:-\d{2})?\b/, "a date"],
-  [/\(\s*\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)+\s*\)/, "a score tuple"],
-  [
-    /\b(?:intel\w*|cod(?:e|ing)|agentic|si|swe[\w-]*|terminal[\w-]*|\w*bench\w*|score|index|elo|rank)\s*[:=#]?\s*\d/i,
-    "a benchmark score",
-  ],
-  [/\d+(?:\.\d+)?\s*%/, "a percentage"],
-];
-
-/**
- * @param {string} text
- * @returns {string|null} what stale number the text carries, if any
- */
-function staleNumberIn(text) {
-  for (const [re, what] of STALE_IN_DESCRIPTION) {
-    if (re.test(text)) return what;
-  }
-  return null;
-}
-
 /**
  * Validate an edited roster. Hand-rolled rather than schema-driven: the shape
  * is shallow, and a validator dependency in a scaffolder earns less than it
  * costs. Reports every problem at once — someone fixing an edited document
  * should not discover the mistakes one run at a time.
  *
- * A description that already sits on disk unchanged is not re-checked for
- * stale numbers: rosters drafted before the rule carry prices, and refusing an
- * unrelated edit (a variant change) over them would block every such squad.
- * squad_dump flags those for cleanup instead.
+ * `description` is refused with a pointer to where it belongs: the plugin
+ * builds it from model_data.json (describeAgent in workers.js), so a
+ * hand-written one would be overwritten at the next start anyway.
  *
  * @param {unknown} doc
- * @param {{grunts?: Record<string, {description?: string}>,
- *   drills?: Record<string, {description?: string}>}} [current]  roster on disk
  * @returns {string[]}  empty when valid
  */
-export function validateRoster(doc, current) {
+export function validateRoster(doc) {
   const errors = [];
   if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
     return ["roster must be a JSON object"];
@@ -212,21 +173,17 @@ export function validateRoster(doc, current) {
       }
       const entry = /** @type {Record<string, unknown>} */ (raw);
       for (const k of Object.keys(entry)) {
-        if (!AGENT_KEYS.has(k)) errors.push(`${at} has unknown key "${k}"`);
+        if (k === "description") {
+          errors.push(
+            `${at}.description: descriptions are generated by the plugin from ` +
+              `model_data.json — put a routing rule in its models["${modelId}"].info ` +
+              "instead, and leave description out.",
+          );
+        } else if (!AGENT_KEYS.has(k)) errors.push(`${at} has unknown key "${k}"`);
       }
-      for (const k of ["variant", "description", "notes"]) {
+      for (const k of ["variant", "notes"]) {
         if (entry[k] !== undefined && (typeof entry[k] !== "string" || !String(entry[k]).trim())) {
           errors.push(`${at}.${k} must be a non-empty string when present`);
-        }
-      }
-      const unchanged = current?.[key]?.[modelId]?.description === entry.description;
-      if (typeof entry.description === "string" && !unchanged) {
-        const stale = staleNumberIn(entry.description);
-        if (stale) {
-          errors.push(
-            `${at}.description contains ${stale}. Descriptions say WHEN to pick a model; ` +
-              "benchmarks, prices and dates go stale there — squad_metrics serves them live.",
-          );
         }
       }
       if (entry.steps !== undefined && (!Number.isInteger(entry.steps) || entry.steps <= 0)) {
@@ -296,28 +253,4 @@ export function diffRoster(current, next) {
     changed: changed.sort(),
     unchanged: unchanged.sort(),
   };
-}
-
-/**
- * Dump notes for descriptions that carry stale numbers, so the orchestrator
- * proposes rewriting them as part of its next delta.
- *
- * @param {{grunts?: Record<string, {description?: string}>,
- *   drills?: Record<string, {description?: string}>}} roster
- * @returns {string[]}
- */
-export function staleDescriptions(roster) {
-  const out = [];
-  for (const key of Object.keys(ROLE_KEYS)) {
-    for (const [id, entry] of Object.entries(roster?.[key] ?? {})) {
-      const stale = typeof entry?.description === "string" && staleNumberIn(entry.description);
-      if (stale) {
-        out.push(
-          `${key}["${id}"].description contains ${stale} — rewrite it without numbers ` +
-            "(squad_metrics serves them live) the next time you patch the squad.",
-        );
-      }
-    }
-  }
-  return out;
 }

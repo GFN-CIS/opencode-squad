@@ -77,6 +77,18 @@ model is a senior review, not an admission of failure. If no stronger model is
 available, do the depth-task yourself but flag your uncertainty (and escalate to
 the user on high-stakes calls). You own the outcome either way.
 
+**The owner's rules come first.** An agent description reading `Owner rule: …`
+(and the `owner rule:` beside that model in `squad_metrics`) is the user's own
+constraint from `model_data.json`, set per provider or per model — "no secrets", "no production". It is not a
+capability hint you can outweigh with a good benchmark: a task that touches
+what the rule excludes (secrets, `.env`, credentials, production config or
+deploys, per the rule's words) goes to another model, however cheap or strong
+the ruled one is, and an otherwise ideal pick is set aside without debate. A
+task the rule does not touch is routed normally. Within what the rules allow,
+route on `squad_metrics` (capability), then on the plan in the same line
+(subscription vs metered, below). A model with no rule is weighed on metrics
+and plan alone.
+
 **Cost is total, not per-token.** The cheapest model is rarely the cheapest job.
 A weak grunt on a task beyond it burns more of its own (cheap) tokens through
 extra turns and lower quality — and worse, burns *your* expensive tokens

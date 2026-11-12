@@ -36,7 +36,7 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
-import { staleDescriptions, validateRoster } from "../../src/roster.js";
+import { validateRoster } from "../../src/roster.js";
 import {
   applySquad,
   defaultAgentDir,
@@ -79,12 +79,17 @@ import {
   METRICS_DIR,
   ORCHESTRATOR_AGENT,
   SKILLS_DIR,
+  squadDescriber,
   startMetricsRefresh,
+  syncGlobalSquadDescriptions,
   turnMemo,
 } from "./runtime.js";
 
 // squad_metrics({full: true}) returns ~2K tokens per model; cap the bill.
 const MAX_FULL_MODELS = 6;
+
+// How long the agent list (and the inventory rendered from it) is reused.
+const AGENTS_TTL_MS = 15_000;
 
 // How long squad_compact waits for the compaction before reporting anyway.
 // Timing out is not a failure: the compaction keeps running server-side.
@@ -104,6 +109,9 @@ export default {
   id: "orchestrate",
   async setup(ctx) {
     ensureGlobalModelDataFresh();
+    // After the regen, which may rewrite model_data.json. opencode reloads
+    // the rewritten agent files on its own (agent.updated).
+    syncGlobalSquadDescriptions();
     startMetricsRefresh();
 
     // { package: "opencode-squad", options: { rate_limit_guard } }.
@@ -112,13 +120,21 @@ export default {
 
     // --- lazy, process-lifetime lookups ---
 
+    // opencode reloads agent files live, so the list is re-read after a short
+    // TTL rather than held for the process lifetime: the startup description
+    // sync and squad_patch both land seconds AFTER a first turn may have
+    // asked, and the desktop service runs for hours.
     /** @type {Promise<ReturnType<typeof normalizeAgents> | null> | undefined} */
     let agentsPromise;
+    let agentsAt = 0;
     const getAgents = () => {
-      agentsPromise ??= ctx.agent
-        .list()
-        .then((r) => normalizeAgents(unwrap(r)))
-        .catch(() => null);
+      if (!agentsPromise || Date.now() - agentsAt > AGENTS_TTL_MS) {
+        agentsAt = Date.now();
+        agentsPromise = ctx.agent
+          .list()
+          .then((r) => normalizeAgents(unwrap(r)))
+          .catch(() => null);
+      }
       return agentsPromise;
     };
 
@@ -139,10 +155,12 @@ export default {
     };
 
     let inventory;
+    let inventoryFrom; // the agents list `inventory` was rendered from
     let squadDrafted = false;
     const getInventory = async () => {
-      if (inventory !== undefined) return inventory;
       const agents = await getAgents();
+      if (inventory !== undefined && inventoryFrom === agents) return inventory;
+      inventoryFrom = agents;
       squadDrafted = hasSquad(agents ?? []);
       inventory = agents
         ? formatInventory(agents, await getLimitMap())
@@ -298,7 +316,7 @@ export default {
         execute: async (input) => {
           const dir = input?.directory || defaultAgentDir();
           const { roster, conflicts: readConflicts } = readSquad(dir);
-          const conflicts = [...readConflicts, ...staleDescriptions(roster)];
+          const conflicts = readConflicts;
           const count =
             Object.keys(roster.grunts ?? {}).length + Object.keys(roster.drills ?? {}).length;
           const note = conflicts.length
@@ -393,8 +411,21 @@ export default {
             };
           }
           const dir = input?.directory || defaultAgentDir();
-          const roster = { grunts: input?.grunts ?? {}, drills: input?.drills ?? {} };
-          const errors = validateRoster(roster, readSquad(dir).roster);
+          const { allow_remove: _allow, directory: _dir, ...doc } = input ?? {};
+          // Code Mode does not enforce the schema's additionalProperties, and
+          // a roster wrapped as {roster: {...}} used to read as "no agents" —
+          // a 14-agent deletion the guard caught twice in one afternoon.
+          if (doc.grunts === undefined && doc.drills === undefined) {
+            const keys = Object.keys(doc);
+            return {
+              content:
+                "Refused: pass `grunts` and/or `drills` at the TOP level of the input" +
+                (keys.length ? ` (got ${keys.map((k) => `\`${k}\``).join(", ")})` : "") +
+                ". Nothing was written.",
+            };
+          }
+          const roster = { grunts: doc.grunts ?? {}, drills: doc.drills ?? {} };
+          const errors = validateRoster(doc);
           errors.push(...validateVariants(roster, await getVariantMap()));
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
@@ -403,10 +434,10 @@ export default {
             roster,
             dir,
             allowRemove: input?.allow_remove === true,
+            describe: squadDescriber(dir, directory),
           });
           if (result.ok) {
             // The inventory lists the squad; let the next turn see the change.
-            inventory = undefined;
             agentsPromise = undefined;
           }
           return {
