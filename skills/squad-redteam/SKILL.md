@@ -41,7 +41,7 @@ step 3's `subagent` calls are sent:
   fall back to "whatever seems to be the current task" — a wrong guess here
   means every panel member reviews the wrong thing.
 - The only tools you may use before dispatch are the discovery commands in
-  step 1 (listing agent files, reading model_data/benchmarks) and the
+  step 1 (listing agent files, the `squad_metrics` tool) and the
   multi-select question tool.
 
 And every dispatched grunt gets told, verbatim, in its task brief (step 3):
@@ -67,20 +67,19 @@ first.
    ```
    Each file's frontmatter has a `model:` line (`provider/model`). Group the
    grunts by the provider segment of the filename (`grunt-<provider>-...`).
-2. Within each provider group, rank by AA intelligence. Check, in order:
-   - `.opencode/model_data.json` (project) or `~/.config/opencode/model_data.json`
-     (global) — `.models["<provider/model>"].intelligence`;
-   - else the plugin's static AA snapshot:
-     `find ~/.cache/opencode/packages -path '*node_modules/*opencode-squad/src/benchmarks.json'`
-     (or the repo's own `src/benchmarks.json` if you're running from a checkout).
-   Pick the highest-intelligence grunt per provider as the pre-checked default
-   — one strongest grunt per provider, not the whole roster. If neither source
-   is available, default to any one grunt per provider and say the ranking is
-   unavailable.
+2. Within each provider group, rank by capability. Use the `squad_metrics`
+   result already in your history, or call it once with the grunts' models if
+   it is not: the
+   SuperIndex score (SI) is the overall ranking, the agentic benchmarks
+   (TerminalBench4, APEX-Agents, FrontierSWE) break ties for code review.
+   Pick the strongest grunt per provider as the pre-checked default — one
+   per provider, not the whole roster. If metrics are unavailable, default to
+   any one grunt per provider and say the ranking is unavailable.
 3. **Ask, don't assume.** Present all available grunts as a multi-select
    question (use the built-in interactive question tool — checkboxes,
    `multiple: true`), each grunt labeled with its model and, if you have it,
-   a one-line capability hint (intel/code/agentic/$), with the per-provider
+   a one-line capability hint (SI score, an agentic benchmark, price or
+   subscription), with the per-provider
    defaults above pre-checked. Let the user add or remove any grunt freely
    (e.g. run every grunt from one provider, or add a cheap one for a
    fast/rough pass). Do not skip this ask even when the default looks

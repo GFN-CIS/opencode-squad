@@ -1,7 +1,6 @@
 // OpenCode's own config and data locations, resolved the way opencode itself
 // resolves them: XDG base dir when the env var is set (an empty string counts
-// as unset — same `||` semantics as cacheDir in src/benchmark-cache.js), else
-// the dotdir under the home directory. OpenCode appends "opencode" to whichever
+// as unset), else the dotdir under the home directory. OpenCode appends "opencode" to whichever
 // base it lands on (verified: XDG_CONFIG_HOME=/x `opencode debug paths` → /x/opencode).
 
 import path from "node:path";

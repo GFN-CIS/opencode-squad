@@ -5,6 +5,7 @@ import {
   NOTES_CLOSE,
   NOTES_OPEN,
   parseAgentFile,
+  staleDescriptions,
   validateRoster,
 } from "../src/roster.js";
 
@@ -162,4 +163,43 @@ test("validateRoster rejects non-objects, and an entry that is not an object", (
   expect(validateRoster({ grunts: { "a/b": "high" } })).toContain(
     'grunts["a/b"] must be an object (use {} for no overrides)',
   );
+});
+
+test("validateRoster rejects benchmarks, prices and dates in descriptions", () => {
+  const bad = [
+    "Flat-rate, strong balanced capability (60/75/84) — first choice",
+    "Balanced default (intel 55, code 72, agentic 81)",
+    "Cheapest Anthropic ($0.1/M in, $0.5/M out)",
+    "Newest Opus release (2026-09-22) for architecture",
+    "TerminalBench 0.42, good coder",
+    "wins 64% of SWE tasks",
+  ];
+  for (const description of bad) {
+    const errors = validateRoster({ grunts: { "a/b": { description } } });
+    expect(errors, description).toHaveLength(1);
+    expect(errors[0]).toContain("squad_metrics");
+  }
+  expect(
+    validateRoster({
+      grunts: {
+        "a/b": { description: "Flat-rate, 1M ctx, mechanical edits; weak on ambiguous specs" },
+      },
+    }),
+  ).toEqual([]);
+});
+
+test("an unchanged stale description on disk does not block an unrelated edit", () => {
+  const current = { grunts: { "a/b": { description: "Cheap ($0.1/M in)", variant: "low" } } };
+  const edited = { grunts: { "a/b": { description: "Cheap ($0.1/M in)", variant: "high" } } };
+  expect(validateRoster(edited, current)).toEqual([]);
+  const rewritten = { grunts: { "a/b": { description: "Cheap ($0.2/M in)" } } };
+  expect(validateRoster(rewritten, current)).toHaveLength(1);
+});
+
+test("staleDescriptions flags numbers for the next cleanup", () => {
+  const notes = staleDescriptions({
+    grunts: { "a/b": { description: "Balanced (intel 55)" }, "c/d": { description: "fine" } },
+  });
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toContain('grunts["a/b"].description contains a benchmark score');
 });

@@ -139,16 +139,51 @@ export function buildRoster(files, defaultDescriptions = {}) {
   return { roster, conflicts };
 }
 
+// What a description must not carry: numbers that go stale. Benchmarks,
+// prices and release dates change under a drafted squad, and a frozen copy in
+// the description then contradicts the live numbers squad_metrics serves —
+// which is how a GLM grunt came to advertise a score its source had since
+// re-scored by half. A context size ("1M ctx") is a stable fact and allowed.
+const STALE_IN_DESCRIPTION = [
+  [/\$\s*\d/, "a price"],
+  [/\d\s*\/\s*M\b/, "a per-token price"],
+  [/\b\d{4}-\d{2}(?:-\d{2})?\b/, "a date"],
+  [/\(\s*\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)+\s*\)/, "a score tuple"],
+  [
+    /\b(?:intel\w*|cod(?:e|ing)|agentic|si|swe[\w-]*|terminal[\w-]*|\w*bench\w*|score|index|elo|rank)\s*[:=#]?\s*\d/i,
+    "a benchmark score",
+  ],
+  [/\d+(?:\.\d+)?\s*%/, "a percentage"],
+];
+
+/**
+ * @param {string} text
+ * @returns {string|null} what stale number the text carries, if any
+ */
+function staleNumberIn(text) {
+  for (const [re, what] of STALE_IN_DESCRIPTION) {
+    if (re.test(text)) return what;
+  }
+  return null;
+}
+
 /**
  * Validate an edited roster. Hand-rolled rather than schema-driven: the shape
  * is shallow, and a validator dependency in a scaffolder earns less than it
  * costs. Reports every problem at once — someone fixing an edited document
  * should not discover the mistakes one run at a time.
  *
+ * A description that already sits on disk unchanged is not re-checked for
+ * stale numbers: rosters drafted before the rule carry prices, and refusing an
+ * unrelated edit (a variant change) over them would block every such squad.
+ * squad_dump flags those for cleanup instead.
+ *
  * @param {unknown} doc
+ * @param {{grunts?: Record<string, {description?: string}>,
+ *   drills?: Record<string, {description?: string}>}} [current]  roster on disk
  * @returns {string[]}  empty when valid
  */
-export function validateRoster(doc) {
+export function validateRoster(doc, current) {
   const errors = [];
   if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
     return ["roster must be a JSON object"];
@@ -182,6 +217,16 @@ export function validateRoster(doc) {
       for (const k of ["variant", "description", "notes"]) {
         if (entry[k] !== undefined && (typeof entry[k] !== "string" || !String(entry[k]).trim())) {
           errors.push(`${at}.${k} must be a non-empty string when present`);
+        }
+      }
+      const unchanged = current?.[key]?.[modelId]?.description === entry.description;
+      if (typeof entry.description === "string" && !unchanged) {
+        const stale = staleNumberIn(entry.description);
+        if (stale) {
+          errors.push(
+            `${at}.description contains ${stale}. Descriptions say WHEN to pick a model; ` +
+              "benchmarks, prices and dates go stale there — squad_metrics serves them live.",
+          );
         }
       }
       if (entry.steps !== undefined && (!Number.isInteger(entry.steps) || entry.steps <= 0)) {
@@ -251,4 +296,28 @@ export function diffRoster(current, next) {
     changed: changed.sort(),
     unchanged: unchanged.sort(),
   };
+}
+
+/**
+ * Dump notes for descriptions that carry stale numbers, so the orchestrator
+ * proposes rewriting them as part of its next delta.
+ *
+ * @param {{grunts?: Record<string, {description?: string}>,
+ *   drills?: Record<string, {description?: string}>}} roster
+ * @returns {string[]}
+ */
+export function staleDescriptions(roster) {
+  const out = [];
+  for (const key of Object.keys(ROLE_KEYS)) {
+    for (const [id, entry] of Object.entries(roster?.[key] ?? {})) {
+      const stale = typeof entry?.description === "string" && staleNumberIn(entry.description);
+      if (stale) {
+        out.push(
+          `${key}["${id}"].description contains ${stale} — rewrite it without numbers ` +
+            "(squad_metrics serves them live) the next time you patch the squad.",
+        );
+      }
+    }
+  }
+  return out;
 }
