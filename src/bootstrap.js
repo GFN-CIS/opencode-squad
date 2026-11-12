@@ -79,8 +79,15 @@ compaction absorb the overflow. Delegating isn't free either way — a fresh
 grunt session gets no cache hit on your context, so for a quick task on a large
 already-cached context, doing it yourself can beat offloading on raw cost. When
 routing, also weigh subscription vs metered API billing on the candidate grunts
-(inventory) — a flat-rate one is ~free at the margin. Full reasoning on all
-three lives in \`squad-delegate\`.
+— a flat-rate one is ~free at the margin. Full reasoning on all three lives in
+\`squad-delegate\`.
+
+**Model numbers are not in this block.** Benchmarks, list prices and billing for
+every connected model come from the \`squad_metrics\` tool: call it ONCE in this
+chat, before your first routing decision, and route on what it returns — not on
+numbers you remember. The result stays in your history; call it again only
+after your context was compacted or the squad changed. For a close call between
+specific models, \`squad_metrics({models: [...]})\` returns every metric for them.
 
 If you stall — past the effort your verdict assumed, repeating with no new
 information, or no new artifact — stop and change the frame (re-decide; usually

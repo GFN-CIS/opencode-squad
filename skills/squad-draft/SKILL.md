@@ -42,12 +42,12 @@ job. (If they hand you an explicit list, honor it.)
    how a squad of seven became a squad of one; `squad_patch` will refuse it, but
    the refusal is a backstop, not the plan.
 
-1. **Discover** the models actually available in this install:
-   ```bash
-   opencode models
-   ```
-   (Filter if useful, e.g. `opencode models anthropic`.) Skip the noise —
-   free/preview/image/tts/embedding/`-lite` models — unless the user wants them.
+1. **Discover** the models actually available in this install and how they
+   compare: call `squad_metrics` — one line per connected model with its
+   SuperIndex score, agentic/coding benchmarks, list price or subscription,
+   and context. Skip the noise — free/preview/image/tts/embedding/`-lite`
+   models — unless the user wants them. For a close call between two
+   candidates, `squad_metrics({models: [...]})` returns every metric.
 
 2. **Propose a roster.** From what's available, pick a curated, *tiered* set that
    gives sarge real choice without bloat — roughly one or two per tier, spread
@@ -74,6 +74,16 @@ job. (If they hand you an explicit list, honor it.)
    choose on but the model name. Write when to pick this one: "cheap, 1M context,
    mechanical edits", "strong analysis, slow and expensive", "code-specialized,
    weak at ambiguous specs". One line, concrete, comparative.
+
+   **No numbers that go stale: no benchmark scores, no prices, no release
+   dates.** Those change under a drafted squad, and a frozen copy then
+   contradicts the live numbers — a GLM grunt kept advertising "(60/75/84)"
+   long after its source re-scored it at half that. Sarge gets the numbers
+   from the `squad_metrics` tool. Read them there to decide the tiers and the
+   wording, then write the qualitative conclusion ("agentic coding close to
+   the balanced tier, weaker on open-ended analysis"). `squad_patch` rejects a
+   description carrying a price, a score or a date. A context size ("1M
+   ctx") is a stable fact and allowed.
 
 4. **Pick a reasoning `variant` for each agent whose model publishes one.**
    Without a variant, opencode sends NO reasoning parameter — and for an

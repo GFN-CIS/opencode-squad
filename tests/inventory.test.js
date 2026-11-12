@@ -35,15 +35,7 @@ test("handles missing description", () => {
   expect(out).toContain("- `x`: (no description) (model: inherited)");
 });
 
-test("appends the minimal AA bench summary when a snapshot is given", () => {
-  const models = {
-    "gpt-5-5": {
-      intelligence: 54.8,
-      coding: 74.9,
-      agentic: { tau2: 0.9, terminalbench_v2_1: 0.8, terminalbench_v4_0: 0.8 },
-      price_blended: 11.25,
-    },
-  };
+test("never carries benchmarks or prices — those come from squad_metrics", () => {
   const agents = [
     {
       name: "grunt-openai-gpt-5-5",
@@ -52,24 +44,9 @@ test("appends the minimal AA bench summary when a snapshot is given", () => {
       model: { providerID: "openai", modelID: "gpt-5.5" },
     },
   ];
-  const out = formatInventory(agents, models);
-  expect(out).toContain("AA intel 55 · code 75 · agentic 80 · $11.25/M");
-  // without a snapshot, no bench tail
-  expect(formatInventory(agents)).not.toContain("AA intel");
-});
-
-test("uses a perf lookup function when given one (model_data path)", () => {
-  const agents = [
-    {
-      name: "grunt-openai-gpt-5-5",
-      mode: "subagent",
-      description: "Per-model grunt.",
-      model: { providerID: "openai", modelID: "gpt-5.5" },
-    },
-  ];
-  const lookup = (id) => (id === "openai/gpt-5.5" ? "AA intel 55 · note: good for coding" : null);
-  const out = formatInventory(agents, lookup);
-  expect(out).toContain("— AA intel 55 · note: good for coding");
+  expect(formatInventory(agents, { "openai/gpt-5.5": 400000 })).toBe(
+    "- `grunt-openai-gpt-5-5`: Per-model grunt. (model: openai/gpt-5.5 · ctx 400k)",
+  );
 });
 
 test("adds the context window from the limits map", () => {
@@ -88,7 +65,7 @@ test("adds the context window from the limits map", () => {
     },
   ];
   const limits = { "openai/gpt-5.5": 400000, "anthropic/claude-opus-4-8": 1000000 };
-  const out = formatInventory(agents, null, limits);
+  const out = formatInventory(agents, limits);
   expect(out).toContain("ctx 400k");
   expect(out).toContain("ctx 1M");
 });

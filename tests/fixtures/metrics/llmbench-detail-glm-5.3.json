@@ -1,0 +1,90 @@
+{
+  "id": "z-ai/glm-5.3",
+  "name": "Z.ai: GLM 5.3",
+  "scores": [
+    {
+      "metric": "cursorbench_4_0_score",
+      "source": "cursorbench",
+      "value": 0.426,
+      "unit": "ratio",
+      "setting": "max"
+    },
+    {
+      "metric": "webdev_elo",
+      "source": "lmarena",
+      "value": 1622.2915959585985,
+      "unit": "elo",
+      "setting": "Max"
+    },
+    {
+      "metric": "webdev_elo_votes",
+      "source": "lmarena",
+      "value": 12605.0,
+      "unit": "count",
+      "setting": "Max"
+    },
+    {
+      "metric": "webdev_elo_interval",
+      "source": "lmarena",
+      "value": 6.87,
+      "unit": "elo",
+      "setting": "Max"
+    },
+    {
+      "metric": "mmlu_pro_accuracy",
+      "source": "vals-mmlu-pro",
+      "value": 0.8676999999999999,
+      "unit": "ratio",
+      "setting": null
+    },
+    {
+      "metric": "mmlu_pro_accuracy_latency_seconds",
+      "source": "vals-mmlu-pro",
+      "value": 61.78,
+      "unit": "count",
+      "setting": null
+    },
+    {
+      "metric": "valsai_index",
+      "source": "valsai",
+      "value": 0.5985,
+      "unit": "ratio",
+      "setting": null
+    },
+    {
+      "metric": "valsai_index_cost_per_test_usd",
+      "source": "valsai",
+      "value": 8.52,
+      "unit": "usd",
+      "setting": null
+    },
+    {
+      "metric": "ale_bench_performance",
+      "source": "ale-bench",
+      "value": 1317.4,
+      "unit": "points",
+      "setting": "High"
+    },
+    {
+      "metric": "ale_bench_cost_per_problem_usd",
+      "source": "ale-bench",
+      "value": 0.284001,
+      "unit": "usd",
+      "setting": "High"
+    },
+    {
+      "metric": "ale_bench_tokens_per_problem",
+      "source": "ale-bench",
+      "value": 67123.0,
+      "unit": "count",
+      "setting": "High"
+    },
+    {
+      "metric": "gpqa_accuracy",
+      "source": "vals-gpqa",
+      "value": 0.8813,
+      "unit": "ratio",
+      "setting": null
+    }
+  ]
+}

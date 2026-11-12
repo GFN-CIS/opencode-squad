@@ -16,7 +16,7 @@ import plugin from "../index.js";
 vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   ensureGlobalModelDataFresh: () => {},
-  startBenchmarkRefresh: () => {},
+  startMetricsRefresh: () => {},
 }));
 
 const dirs = [];
@@ -51,7 +51,7 @@ test("package exposes only setup and squad_patch generates native agents", async
     dispose();
   }
   expect([...tools.keys()]).toEqual(
-    expect.arrayContaining(["squad_compact", "squad_dump", "squad_patch"]),
+    expect.arrayContaining(["squad_compact", "squad_dump", "squad_metrics", "squad_patch"]),
   );
   for (const role of ["grunt", "drill"]) {
     const content = fs.readFileSync(path.join(directory, `${role}-a-b.md`), "utf8");
