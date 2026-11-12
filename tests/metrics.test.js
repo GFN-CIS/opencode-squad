@@ -160,6 +160,22 @@ describe("formatSummary", () => {
     for (const { label } of KEY_METRICS) expect(out).toContain(label);
   });
 
+  test("an unranked SuperIndex score is marked provisional, not shown as ranked", () => {
+    // gpt-6.1-terra has a score but no rank in the fixture.
+    const text = formatSummary({ models: [{ id: "openai/gpt-6.1-terra" }], data: DATA, now });
+    expect(text).toMatch(/SI 69\.8 \(provisional, conf \d+%\)/);
+  });
+
+  test("a -free tier says free instead of the paid base model's price", () => {
+    const text = formatSummary({
+      models: [{ id: "opencode/glm-5.3-flash-free" }],
+      data: DATA,
+      now,
+    });
+    expect(text).toContain("· free ·");
+    expect(text).not.toContain("$0.15");
+  });
+
   test("a serving tier of a listed model collapses to one line", () => {
     const text = formatSummary({
       models: [{ id: "openai/gpt-6.1-terra" }, { id: "openai/gpt-6.1-terra-fast" }],
@@ -185,6 +201,22 @@ describe("formatDetail", () => {
     expect(text).toContain("cursorbench (max): cursorbench_4_0_score=0.426");
     expect(text).toMatch(/lmarena \(Max\): webdev_elo=1622 elo/);
     expect(text).not.toContain("_votes");
+  });
+
+  test("Artificial Analysis rows relayed by llmbenchmark are dropped", () => {
+    const text = formatDetail(
+      "a/b",
+      {
+        id: "a/b",
+        scores: [
+          { metric: "aa_intelligence_index", source: "aa-api", value: 31.7, unit: "points" },
+          { metric: "tbench_4_0_accuracy", source: "terminal-bench", value: 0.4 },
+        ],
+      },
+      null,
+    );
+    expect(text).not.toContain("aa_intelligence_index");
+    expect(text).toContain("terminal-bench: tbench_4_0_accuracy=0.4");
   });
 
   test("unavailable detail is said, not hidden", () => {

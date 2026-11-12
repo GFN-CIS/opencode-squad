@@ -42,7 +42,7 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
-import { validateRoster } from "../../src/roster.js";
+import { staleDescriptions, validateRoster } from "../../src/roster.js";
 import {
   applySquad,
   defaultAgentDir,
@@ -298,7 +298,8 @@ export default {
         input: SQUAD_DUMP_INPUT,
         execute: async (input) => {
           const dir = input?.directory || defaultAgentDir();
-          const { roster, conflicts } = readSquad(dir);
+          const { roster, conflicts: readConflicts } = readSquad(dir);
+          const conflicts = [...readConflicts, ...staleDescriptions(roster)];
           const count =
             Object.keys(roster.grunts ?? {}).length + Object.keys(roster.drills ?? {}).length;
           const note = conflicts.length
@@ -380,7 +381,7 @@ export default {
           }
           const dir = input?.directory || defaultAgentDir();
           const roster = { grunts: input?.grunts ?? {}, drills: input?.drills ?? {} };
-          const errors = validateRoster(roster);
+          const errors = validateRoster(roster, readSquad(dir).roster);
           errors.push(...validateVariants(roster, await getVariantMap()));
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
