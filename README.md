@@ -62,9 +62,9 @@ The bootstrap carries live session facts resolved at injection time — the curr
 
 ### Model metrics: `squad_metrics`
 
-The inventory carries **no benchmarks and no prices** on purpose. The bootstrap is re-sent every turn, and numbers frozen into it — or into agent descriptions — go stale while still looking authoritative. Instead the bootstrap tells the orchestrator to call the `squad_metrics` tool **once per chat**, before its first routing decision; the result then stays in its history (it calls again only after compaction or a squad change).
+The inventory carries **no benchmarks and no prices** on purpose. The bootstrap is re-sent every turn, and numbers frozen into it — or into agent descriptions — go stale while still looking authoritative. Instead the bootstrap tells the orchestrator to call `squad_metrics({models: [...]})` **once per chat** with the models of its grunt/drill agents, before its first routing decision; the result then stays in its history (it calls again only after compaction or a squad change).
 
-`squad_metrics` with no arguments returns one line per model **connected in opencode** (not just the squad), with the squad's grunt/drill models marked:
+`squad_metrics` returns one line per model asked for, with the squad's grunt/drill models marked:
 
 ```
 - zai-coding-plan/glm-5.3 [grunt+drill]: SI 80.6 #19 · ctx 1M · billing: subscription · TerminalBench4 0.418 · APEX-Agents 0.566 · FrontierSWE 0.302 · ValsIndex 0.599
@@ -72,7 +72,7 @@ The inventory carries **no benchmarks and no prices** on purpose. The bootstrap 
 - openai/gpt-6.1-terra-fast: same data as openai/gpt-6.1-terra
 ```
 
-`squad_metrics({models: ["a/b", "c/d"]})` (up to 6) returns **every** metric the sources hold for those models, grouped by source and the setting it was measured at — for a close call the summary does not settle.
+`squad_metrics({models: ["a/b", "c/d"], full: true})` (up to 6) returns **every** metric the sources hold for those models, grouped by source and the setting it was measured at — for a close call the summary does not settle.
 
 Sources, both public and keyless:
 
@@ -295,7 +295,7 @@ So the roster is data you edit, exposed as two plugin tools:
 | --- | --- |
 | `squad_dump` | returns the current roster as JSON, derived from the agent files |
 | `squad_patch` | writes a roster back — `grunts` / `drills`, plus `allow_remove` and `directory`; rejects a `description` carrying a price, a benchmark score or a date |
-| `squad_metrics` | benchmarks, prices, context and billing for every connected model; `models` for every metric of a few — see [Model metrics](#model-metrics-squad_metrics) |
+| `squad_metrics` | benchmarks, prices, context and billing for the `models` given; `full: true` for every metric of up to 6 — see [Model metrics](#model-metrics-squad_metrics) |
 
 A third tool covers the other half of reuse:
 

@@ -56,9 +56,11 @@ export const SQUAD_METRICS_INPUT = {
     models: {
       type: "array",
       items: { type: "string" },
-      maxItems: 6,
+      minItems: 1,
       description: ARG_DESCRIPTIONS["metrics.models"],
     },
+    full: { type: "boolean", description: ARG_DESCRIPTIONS["metrics.full"] },
   },
+  required: ["models"],
   additionalProperties: false,
 };

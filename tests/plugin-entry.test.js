@@ -81,7 +81,7 @@ test("package exposes only setup and squad_patch generates native agents", async
   }
 });
 
-test("squad_metrics renders connected models, squad roles and per-model detail", async () => {
+test("squad_metrics renders the asked models, squad roles and full detail", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
   dirs.push(directory);
   const detail = JSON.parse(
@@ -123,8 +123,22 @@ test("squad_metrics renders connected models, squad roles and per-model detail",
     },
   });
   try {
-    const summary = (await tools.get("squad_metrics").execute({}, { agent: "build" })).content;
-    expect(summary).toContain("connected in opencode");
+    const metrics = tools.get("squad_metrics");
+    expect((await metrics.execute({}, { agent: "build" })).content).toContain("pass `models`");
+    const summary = (
+      await metrics.execute(
+        {
+          models: [
+            "zai-coding-plan/glm-5.3",
+            "anthropic/claude-sonnet-5-5",
+            "opencode/big-pickle",
+            "zai-coding-plan/glm-5.3",
+          ],
+        },
+        { agent: "build" },
+      )
+    ).content;
+    expect(summary).toContain("Model metrics for 3 model(s).");
     expect(summary).toMatch(
       /- zai-coding-plan\/glm-5\.3 \[grunt\]: SI 80\.6 #19 · ctx 1M · billing: subscription/,
     );
@@ -134,7 +148,7 @@ test("squad_metrics renders connected models, squad roles and per-model detail",
     const one = (
       await tools
         .get("squad_metrics")
-        .execute({ models: ["zai-coding-plan/glm-5.3"] }, { agent: "build" })
+        .execute({ models: ["zai-coding-plan/glm-5.3"], full: true }, { agent: "build" })
     ).content;
     expect(fetched).toEqual(["https://api.llmbenchmark.ai/v1/models/z-ai%2Fglm-5.3"]);
     expect(one).toContain("## zai-coding-plan/glm-5.3");

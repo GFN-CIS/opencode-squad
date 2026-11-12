@@ -26,13 +26,7 @@
 import { formatCompactReport } from "../../src/compact.js";
 import { buildLimitMap, buildVariantMap, estimateContextTokens } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
-import {
-  connectedModels,
-  formatDetail,
-  formatSummary,
-  lookup,
-  squadRoles,
-} from "../../src/metrics.js";
+import { formatDetail, formatSummary, lookup, squadRoles } from "../../src/metrics.js";
 import { fetchDetail } from "../../src/metrics-cache.js";
 import {
   evaluateRetry,
@@ -86,6 +80,9 @@ import {
   startMetricsRefresh,
   turnMemo,
 } from "./runtime.js";
+
+// squad_metrics({full: true}) returns ~2K tokens per model; cap the bill.
+const MAX_FULL_MODELS = 6;
 
 // How long squad_compact waits for the compaction before reporting anyway.
 // Timing out is not a failure: the compaction keeps running server-side.
@@ -321,17 +318,25 @@ export default {
         description: TOOL_DESCRIPTIONS.squad_metrics,
         input: SQUAD_METRICS_INPUT,
         execute: async (input) => {
+          const wanted = [
+            ...new Set(
+              (Array.isArray(input?.models) ? input.models : [])
+                .map((m) => String(m).trim())
+                .filter(Boolean),
+            ),
+          ];
+          if (!wanted.length) {
+            return {
+              content:
+                "squad_metrics: pass `models` — the provider/model ids of the grunt/drill " +
+                "agents in your inventory (the `model:` of each line).",
+            };
+          }
           const data = await getMetrics();
           const now = Date.now();
-          const wanted = Array.isArray(input?.models)
-            ? input.models
-                .map((m) => String(m).trim())
-                .filter(Boolean)
-                .slice(0, 6)
-            : [];
-          if (wanted.length) {
+          if (input?.full === true) {
             const parts = await Promise.all(
-              wanted.map(async (id) => {
+              wanted.slice(0, MAX_FULL_MODELS).map(async (id) => {
                 const llmbId =
                   lookup(id, data?.ids?.index)?.entry ??
                   Object.values(data?.scores?.byMetric ?? {})
@@ -349,10 +354,14 @@ export default {
                 "setting it was measured at; values are 0-1 unless a unit is shown. " +
                 "SuperIndex: superindex.app (CC-BY-4.0).\n\n" +
                 parts.join("\n\n"),
-              metadata: { title: `metrics: ${wanted.length} model(s)` },
+              metadata: { title: `metrics (full): ${Math.min(wanted.length, MAX_FULL_MODELS)}` },
             };
           }
-          const models = connectedModels(await getProviders());
+          const limits = await getLimitMap();
+          const models = wanted.map((id) => ({
+            id,
+            ...(limits[id] ? { context: limits[id] } : {}),
+          }));
           return {
             content: formatSummary({
               models,
