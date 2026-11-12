@@ -136,6 +136,15 @@ job. (If they hand you an explicit list, honor it.)
    not prompting advice in general and not policy that belongs to the role. Most
    agents need none. Propose one only where you can name the reason.
 
+4b. **Know how each provider is paid for.** Read `providers` in
+   `~/.config/opencode/model_data.json`. For every provider in the squad that has
+   no entry there, ask the user once — in the same message as the delta below —
+   which plan it is on, in their own words ("Max 5x", "GLM Coding Pro", "ChatGPT
+   Plus") or "api" for metered billing. Write the answers into that file's
+   `providers` object yourself (one string per opencode provider id; keep every
+   other key). No limits or prices: you and sarge know what the common plans
+   include, and `squad_metrics` shows the plan next to each model.
+
 5. **Ask, as a delta.** In one message (use the question tool if available), show
    what will CHANGE against the dumped roster, not just the end state:
    ```
