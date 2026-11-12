@@ -26,6 +26,8 @@
 import { formatCompactReport } from "../../src/compact.js";
 import { buildLimitMap, buildVariantMap, estimateContextTokens } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
+import { formatDetail, formatSummary, lookup, squadRoles } from "../../src/metrics.js";
+import { fetchDetail } from "../../src/metrics-cache.js";
 import {
   evaluateRetry,
   formatGuardNote,
@@ -34,7 +36,7 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
-import { validateRoster } from "../../src/roster.js";
+import { staleDescriptions, validateRoster } from "../../src/roster.js";
 import {
   applySquad,
   defaultAgentDir,
@@ -60,18 +62,29 @@ import {
   retryToStatus,
   subagentOutcome,
 } from "../../src/v2/adapt.js";
-import { SQUAD_COMPACT_INPUT, SQUAD_DUMP_INPUT, SQUAD_PATCH_INPUT } from "../../src/v2/schemas.js";
+import {
+  SQUAD_COMPACT_INPUT,
+  SQUAD_DUMP_INPUT,
+  SQUAD_METRICS_INPUT,
+  SQUAD_PATCH_INPUT,
+} from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
 import {
-  buildPerfLookup,
   ensureGlobalModelDataFresh,
+  getMetrics,
+  loadAuthTypes,
   loadModelData,
+  loadProviderPlans,
   loadRolePrompt,
+  METRICS_DIR,
   ORCHESTRATOR_AGENT,
   SKILLS_DIR,
-  startBenchmarkRefresh,
+  startMetricsRefresh,
   turnMemo,
 } from "./runtime.js";
+
+// squad_metrics({full: true}) returns ~2K tokens per model; cap the bill.
+const MAX_FULL_MODELS = 6;
 
 // How long squad_compact waits for the compaction before reporting anyway.
 // Timing out is not a failure: the compaction keeps running server-side.
@@ -91,7 +104,7 @@ export default {
   id: "orchestrate",
   async setup(ctx) {
     ensureGlobalModelDataFresh();
-    startBenchmarkRefresh();
+    startMetricsRefresh();
 
     // { package: "opencode-squad", options: { rate_limit_guard } }.
     const guardConfig = normalizeGuardConfig(ctx.options?.rate_limit_guard);
@@ -132,7 +145,7 @@ export default {
       const agents = await getAgents();
       squadDrafted = hasSquad(agents ?? []);
       inventory = agents
-        ? formatInventory(agents, buildPerfLookup(directory), await getLimitMap())
+        ? formatInventory(agents, await getLimitMap())
         : "(no subagents available)";
       return inventory;
     };
@@ -284,7 +297,8 @@ export default {
         input: SQUAD_DUMP_INPUT,
         execute: async (input) => {
           const dir = input?.directory || defaultAgentDir();
-          const { roster, conflicts } = readSquad(dir);
+          const { roster, conflicts: readConflicts } = readSquad(dir);
+          const conflicts = [...readConflicts, ...staleDescriptions(roster)];
           const count =
             Object.keys(roster.grunts ?? {}).length + Object.keys(roster.drills ?? {}).length;
           const note = conflicts.length
@@ -297,6 +311,70 @@ export default {
               "To change the squad, pass this same document back to squad_patch with your " +
               "edits applied — keeping every agent you were not asked to touch.",
             metadata: { title: `squad: ${count} agent(s)`, dir, agents: count },
+          };
+        },
+      });
+
+      editor.add({
+        name: "squad_metrics",
+        description: TOOL_DESCRIPTIONS.squad_metrics,
+        input: SQUAD_METRICS_INPUT,
+        execute: async (input) => {
+          const wanted = [
+            ...new Set(
+              (Array.isArray(input?.models) ? input.models : [])
+                .map((m) => String(m).trim())
+                .filter(Boolean),
+            ),
+          ];
+          if (!wanted.length) {
+            return {
+              content:
+                "squad_metrics: pass `models` — the provider/model ids of the grunt/drill " +
+                "agents in your inventory (the `model:` of each line).",
+            };
+          }
+          const data = await getMetrics();
+          const now = Date.now();
+          if (input?.full === true) {
+            const parts = await Promise.all(
+              wanted.slice(0, MAX_FULL_MODELS).map(async (id) => {
+                const llmbId =
+                  lookup(id, data?.ids?.index)?.entry ??
+                  Object.values(data?.scores?.byMetric ?? {})
+                    .map((idx) => lookup(id, idx)?.entry.id)
+                    .find(Boolean);
+                const detail = llmbId
+                  ? await fetchDetail({ fetch: globalThis.fetch, dir: METRICS_DIR, now, llmbId })
+                  : null;
+                return formatDetail(id, detail, lookup(id, data?.superindex?.index)?.entry ?? null);
+              }),
+            );
+            return {
+              content:
+                "Every metric llmbenchmark.ai holds for these models, grouped by source and the " +
+                "setting it was measured at; values are 0-1 unless a unit is shown. " +
+                "SuperIndex: superindex.app (CC-BY-4.0).\n\n" +
+                parts.join("\n\n"),
+              metadata: { title: `metrics (full): ${Math.min(wanted.length, MAX_FULL_MODELS)}` },
+            };
+          }
+          const limits = await getLimitMap();
+          const models = wanted.map((id) => ({
+            id,
+            ...(limits[id] ? { context: limits[id] } : {}),
+          }));
+          return {
+            content: formatSummary({
+              models,
+              roles: squadRoles(await getAgents()),
+              notes: loadModelData(directory),
+              plans: loadProviderPlans(directory),
+              authTypes: loadAuthTypes(),
+              data,
+              now,
+            }),
+            metadata: { title: `metrics: ${models.length} model(s)` },
           };
         },
       });
@@ -316,7 +394,7 @@ export default {
           }
           const dir = input?.directory || defaultAgentDir();
           const roster = { grunts: input?.grunts ?? {}, drills: input?.drills ?? {} };
-          const errors = validateRoster(roster);
+          const errors = validateRoster(roster, readSquad(dir).roster);
           errors.push(...validateVariants(roster, await getVariantMap()));
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };

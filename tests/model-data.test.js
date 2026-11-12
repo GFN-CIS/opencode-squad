@@ -6,23 +6,11 @@ import {
   buildModelData,
   discoverSquadModels,
   extractModelId,
-  formatPerf,
+  LEGACY_PERF_KEYS,
   mergeModelData,
   modelsChanged,
-  perfFromBenchmark,
   readModelData,
 } from "../src/model-data.js";
-
-// Minimal AA-shaped snapshot for deterministic perf lookups.
-const BENCH = {
-  "gpt-5-5": {
-    name: "GPT-5.5",
-    intelligence: 54.8,
-    coding: 74.9,
-    agentic: { tau2: 0.9, terminalbench_v2_1: 0.8, terminalbench_v4_0: 0.8 },
-    price_blended: 11.25,
-  },
-};
 
 const dirs = [];
 afterEach(() => {
@@ -55,12 +43,12 @@ test("native drill variants dedupe with grunts and preserve drill-only model dat
     fs.writeFileSync(path.join(dir, "drill-shared.md"), "---\nmodel: openai/gpt-5.5#high\n---\n");
     fs.writeFileSync(path.join(dir, "drill-only.md"), "---\nmodel: local/reviewer#high\n---\n");
     expect(discoverSquadModels(dir)).toEqual(["local/reviewer", "openai/gpt-5.5"]);
-    const snapshot = buildModelData(dir, BENCH, {
+    const snapshot = buildModelData(dir, {
       models: { "local/reviewer": { info: "keep this note" } },
     });
     expect(Object.keys(snapshot.models)).toEqual(["local/reviewer", "openai/gpt-5.5"]);
     expect(snapshot.models["local/reviewer"].info).toBe("keep this note");
-    expect(snapshot.models["openai/gpt-5.5"].coding).toBe(75);
+    expect(snapshot.models["openai/gpt-5.5"]).toEqual({ info: "" });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -80,48 +68,30 @@ test("discoverSquadModels returns [] for a missing dir", () => {
   expect(discoverSquadModels("/no/such/dir/here")).toEqual([]);
 });
 
-test("perfFromBenchmark copies indices and the matched aa slug", () => {
-  const p = perfFromBenchmark("openai/gpt-5.5", BENCH);
-  expect(p.aa_slug).toBe("gpt-5-5");
-  expect(p.intelligence).toBe(55);
-  expect(p.coding).toBe(75);
-  expect(p.agentic).toBe(80);
-  expect(p.price_blended).toBe(11.25);
-  expect("info" in p).toBe(false); // perf overlay must not carry info
-});
-
-test("perfFromBenchmark returns an all-null entry on no AA match", () => {
-  const p = perfFromBenchmark("local/unknown-model", BENCH);
-  expect(p).toEqual({
-    name: null,
-    aa_slug: null,
-    intelligence: null,
-    coding: null,
-    agentic: null,
-    price_blended: null,
-  });
-});
-
-test("mergeModelData refreshes perf but preserves info and hand-added fields", () => {
+test("mergeModelData keeps hand fields and strips legacy AA perf fields", () => {
   const existing = {
     models: {
-      "openai/gpt-5.5": {
+      "zai-coding-plan/glm-5.3": {
         info: "great at coding",
-        myNote: "keep me",
-        intelligence: 1, // stale hand-edited perf -> must be overwritten
+        billing: "subscription",
+        cache_ttl_seconds: 300,
+        name: "GLM-5.3 (Max)",
+        aa_slug: "glm-5-3",
+        intelligence: 32,
+        coding: null,
+        agentic: null,
+        price_blended: 2.15,
       },
     },
   };
-  const merged = mergeModelData(["openai/gpt-5.5"], BENCH, existing);
-  const e = merged["openai/gpt-5.5"];
-  expect(e.info).toBe("great at coding"); // preserved
-  expect(e.myNote).toBe("keep me"); // arbitrary hand field preserved
-  expect(e.intelligence).toBe(55); // perf refreshed, not the stale 1
+  const e = mergeModelData(["zai-coding-plan/glm-5.3"], existing)["zai-coding-plan/glm-5.3"];
+  expect(e).toEqual({ info: "great at coding", billing: "subscription", cache_ttl_seconds: 300 });
+  for (const k of LEGACY_PERF_KEYS) expect(k in e).toBe(false);
 });
 
 test("mergeModelData gives new models empty info and drops removed ones", () => {
   const existing = { models: { "old/removed": { info: "gone" } } };
-  const merged = mergeModelData(["openai/gpt-5.5"], BENCH, existing);
+  const merged = mergeModelData(["openai/gpt-5.5"], existing);
   expect(merged["openai/gpt-5.5"].info).toBe("");
   expect("old/removed" in merged).toBe(false); // not in the squad anymore -> dropped
 });
@@ -129,64 +99,19 @@ test("mergeModelData gives new models empty info and drops removed ones", () => 
 test("buildModelData scans a dir and stamps meta", () => {
   const dir = tmpdir();
   fs.writeFileSync(path.join(dir, "grunt-openai-gpt-5-5.md"), "---\nmodel: openai/gpt-5.5\n---\n");
-  const snap = buildModelData(dir, BENCH, {}, "2026-06-30");
+  const snap = buildModelData(dir, {}, "2026-06-30");
   expect(snap._meta.generated).toBe("2026-06-30");
   expect(snap._meta.model_count).toBe(1);
-  expect(snap.models["openai/gpt-5.5"].coding).toBe(75);
-});
-
-test("formatPerf renders indices plus the info note", () => {
-  const s = formatPerf({
-    intelligence: 55,
-    coding: 75,
-    agentic: 85,
-    price_blended: 11.25,
-    info: "good for coding, weak at long context",
-  });
-  expect(s).toBe(
-    "AA intel 55 · code 75 · agentic 85 · $11.25/M · note: good for coding, weak at long context",
-  );
-});
-
-test("formatPerf with only a note (no AA match) still surfaces it", () => {
-  expect(formatPerf({ intelligence: null, info: "local model" })).toBe("note: local model");
-});
-
-test("formatPerf surfaces subscription billing instead of the API price", () => {
-  const s = formatPerf({
-    intelligence: 55,
-    price_blended: 11.25,
-    billing: "subscription",
-  });
-  expect(s).toBe("AA intel 55 · billing: subscription (flat-rate, ~$0 marginal)");
-  expect(s).not.toContain("$11.25/M");
-});
-
-test("formatPerf keeps the API price when billing is unset or not subscription", () => {
-  expect(formatPerf({ price_blended: 11.25 })).toBe("AA $11.25/M");
-  expect(formatPerf({ price_blended: 11.25, billing: "api" })).toBe("AA $11.25/M");
-});
-
-test("formatPerf doesn't mislabel billing as an AA metric when there's no AA match", () => {
-  // No intelligence/coding/agentic/price at all — just billing. Must not read
-  // "AA billing: ..." since billing isn't an AA-sourced number.
-  expect(formatPerf({ billing: "subscription" })).toBe(
-    "billing: subscription (flat-rate, ~$0 marginal)",
-  );
-});
-
-test("formatPerf returns null for an empty entry", () => {
-  expect(formatPerf({ intelligence: null, info: "" })).toBeNull();
-  expect(formatPerf(null)).toBeNull();
+  expect(snap.models["openai/gpt-5.5"]).toEqual({ info: "" });
 });
 
 test("modelsChanged detects real model diffs and ignores rebuild churn", () => {
   const dir = tmpdir();
   fs.writeFileSync(path.join(dir, "grunt-openai-gpt-5-5.md"), "---\nmodel: openai/gpt-5.5\n---\n");
-  const first = buildModelData(dir, BENCH, {}, "2026-06-30");
+  const first = buildModelData(dir, {}, "2026-06-30");
   // rebuild on a later date over the prior output: same models -> no change,
   // so the startup auto-regen must NOT rewrite just because the date moved.
-  const second = buildModelData(dir, BENCH, first, "2026-07-15");
+  const second = buildModelData(dir, first, "2026-07-15");
   expect(modelsChanged(first, second)).toBe(false);
   // a hand-edited info IS a change worth persisting
   const edited = { models: { ...first.models } };
@@ -194,7 +119,7 @@ test("modelsChanged detects real model diffs and ignores rebuild churn", () => {
   expect(modelsChanged(first, edited)).toBe(true);
   // a new squad member is a change
   fs.writeFileSync(path.join(dir, "grunt-anthropic-x.md"), "---\nmodel: anthropic/x\n---\n");
-  const third = buildModelData(dir, BENCH, second, "2026-07-15");
+  const third = buildModelData(dir, second, "2026-07-15");
   expect(modelsChanged(second, third)).toBe(true);
 });
 
@@ -204,4 +129,23 @@ test("readModelData round-trips a written file and tolerates a missing one", () 
   fs.writeFileSync(file, JSON.stringify({ models: { "a/b": { info: "x" } } }));
   expect(readModelData(file).models["a/b"].info).toBe("x");
   expect(readModelData(path.join(dir, "nope.json"))).toBeNull();
+});
+
+test("buildModelData keeps the hand-written providers section", () => {
+  const dir = tmpdir();
+  fs.writeFileSync(path.join(dir, "grunt-anthropic-x.md"), "---\nmodel: anthropic/x\n---\n");
+  const snap = buildModelData(
+    dir,
+    { providers: { anthropic: "Max 5x" }, models: {} },
+    "2026-11-12",
+  );
+  expect(snap.providers).toEqual({ anthropic: "Max 5x" });
+  expect(modelsChanged({ models: {} }, snap)).toBe(true);
+});
+
+test("readModelData accepts a file with only providers", () => {
+  const dir = tmpdir();
+  const file = path.join(dir, "model_data.json");
+  fs.writeFileSync(file, JSON.stringify({ providers: { openai: "api" } }));
+  expect(readModelData(file)).toEqual({ models: {}, providers: { openai: "api" } });
 });

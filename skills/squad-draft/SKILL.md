@@ -48,6 +48,9 @@ job. (If they hand you an explicit list, honor it.)
    ```
    (Filter if useful, e.g. `opencode models anthropic`.) Skip the noise —
    free/preview/image/tts/embedding/`-lite` models — unless the user wants them.
+   Then compare the candidates with `squad_metrics({models: [...]})`: SuperIndex
+   score, agentic/coding benchmarks, list price or subscription, context. Add
+   `full: true` for a close call between a few.
 
 2. **Propose a roster.** From what's available, pick a curated, *tiered* set that
    gives sarge real choice without bloat — roughly one or two per tier, spread
@@ -74,6 +77,18 @@ job. (If they hand you an explicit list, honor it.)
    choose on but the model name. Write when to pick this one: "cheap, 1M context,
    mechanical edits", "strong analysis, slow and expensive", "code-specialized,
    weak at ambiguous specs". One line, concrete, comparative.
+
+   **No numbers that go stale: no benchmark scores, no prices, no release
+   dates.** Those change under a drafted squad, and a frozen copy then
+   contradicts the live numbers — a GLM grunt kept advertising "(60/75/84)"
+   long after its source re-scored it at half that. Sarge gets the numbers
+   from the `squad_metrics` tool. Read them there to decide the tiers, then
+   write the role and the stable facts: what the model is for, when to pick
+   it, subscription or not, context size ("1M ctx" is allowed). Rankings
+   against other models ("strongest", "below X") go stale the same way the
+   numbers do — leave them to `squad_metrics`. `squad_patch` rejects a new
+   description carrying a price, a score or a date; `squad_dump` flags old
+   ones so you can propose rewriting them in the same delta.
 
 4. **Pick a reasoning `variant` for each agent whose model publishes one.**
    Without a variant, opencode sends NO reasoning parameter — and for an
@@ -120,6 +135,15 @@ job. (If they hand you an explicit list, honor it.)
    model and false of the others — a quirk you have actually watched it exhibit,
    not prompting advice in general and not policy that belongs to the role. Most
    agents need none. Propose one only where you can name the reason.
+
+4b. **Know how each provider is paid for.** Read `providers` in
+   `~/.config/opencode/model_data.json`. For every provider in the squad that has
+   no entry there, ask the user once — in the same message as the delta below —
+   which plan it is on, in their own words ("Max 5x", "GLM Coding Pro", "ChatGPT
+   Plus") or "api" for metered billing. Write the answers into that file's
+   `providers` object yourself (one string per opencode provider id; keep every
+   other key). No limits or prices: you and sarge know what the common plans
+   include, and `squad_metrics` shows the plan next to each model.
 
 5. **Ask, as a delta.** In one message (use the question tool if available), show
    what will CHANGE against the dumped roster, not just the end state:

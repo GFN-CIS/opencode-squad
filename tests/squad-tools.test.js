@@ -68,6 +68,7 @@ describe("V2 schemas", () => {
     expect(Object.keys(TOOL_DESCRIPTIONS).sort()).toEqual([
       "squad_compact",
       "squad_dump",
+      "squad_metrics",
       "squad_patch",
     ]);
   });

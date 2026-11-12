@@ -49,3 +49,18 @@ export const SQUAD_PATCH_INPUT = {
   },
   additionalProperties: false,
 };
+
+export const SQUAD_METRICS_INPUT = {
+  type: "object",
+  properties: {
+    models: {
+      type: "array",
+      items: { type: "string" },
+      minItems: 1,
+      description: ARG_DESCRIPTIONS["metrics.models"],
+    },
+    full: { type: "boolean", description: ARG_DESCRIPTIONS["metrics.full"] },
+  },
+  required: ["models"],
+  additionalProperties: false,
+};
