@@ -228,3 +228,26 @@ test("syncDescriptions leaves legacy-named files for squad_patch to migrate", ()
   expect(syncDescriptions({ dir, describe: () => "new" })).toEqual([]);
   expect(syncDescriptions({ dir: path.join(dir, "nope"), describe: () => "x" })).toEqual([]);
 });
+
+test("formatApplyReport lists descriptions refreshed from model_data.json", () => {
+  apply({ grunts: { "a/b": {} } });
+  const result = applySquad({
+    roster: { grunts: { "a/b": {} } },
+    dir,
+    describe: () => "grunt. Owner rule: no secrets.",
+  });
+  expect(result.diff.unchanged).toEqual(["grunt a/b"]);
+  const report = formatApplyReport(result);
+  expect(report).toContain("Descriptions refreshed from model_data.json (1):");
+  expect(report).toContain('~ grunt a/b: "grunt. Owner rule: no secrets."');
+  // Same description again: nothing to report.
+  expect(
+    formatApplyReport(
+      applySquad({
+        roster: { grunts: { "a/b": {} } },
+        dir,
+        describe: () => "grunt. Owner rule: no secrets.",
+      }),
+    ),
+  ).not.toContain("refreshed");
+});

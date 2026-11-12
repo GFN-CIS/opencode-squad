@@ -78,7 +78,7 @@ export function readSquad(dir) {
  *
  * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean,
  *   describe?: (role: "grunt"|"drill", modelId: string) => string|undefined}} input
- * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[]}, written: Array<{role:string,id:string,variant?:string,filename:string}>, pruned: string[], conflicts: string[], dir: string}}
+ * @returns {{ok: boolean, diff: {added:string[],removed:string[],changed:string[],unchanged:string[]}, written: Array<{role:string,id:string,variant?:string,filename:string}>, pruned: string[], refreshed?: string[], conflicts: string[], dir: string}}
  */
 export function applySquad({ roster, dir, allowRemove = false, describe }) {
   const { roster: current, conflicts, filesByAgent } = readSquad(dir);
@@ -95,13 +95,23 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
   fs.mkdirSync(dir, { recursive: true });
 
   const written = [];
+  // Descriptions follow model_data.json, not the roster, so the roster diff
+  // cannot see them change; report them separately or an `info` edit
+  // re-applied reads as "=14 unchanged" while 14 files changed.
+  const refreshed = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
     for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
       const { filename, content } = agentMarkdown(role, modelId, {
         ...entry,
         description: describe?.(role, modelId),
       });
-      writeAtomic(path.join(dir, filename), content);
+      const file = path.join(dir, filename);
+      if (fs.existsSync(file)) {
+        const before = descriptionLine(fs.readFileSync(file, "utf8"));
+        const after = descriptionLine(content);
+        if (before !== after) refreshed.push(`${role} ${modelId}: ${after}`);
+      }
+      writeAtomic(file, content);
       written.push({ role, id: modelId, variant: entry?.variant, filename });
     }
   }
@@ -114,7 +124,7 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
     pruned.push(f);
   }
 
-  return { ok: true, diff, written, pruned, conflicts, dir };
+  return { ok: true, diff, written, pruned, refreshed, conflicts, dir };
 }
 
 /**
@@ -155,6 +165,11 @@ export function syncDescriptions({ dir, describe }) {
     }
   }
   return rewritten;
+}
+
+/** The frontmatter `description:` value as written (quoted or not). */
+function descriptionLine(text) {
+  return /^description: (.*)$/m.exec(text)?.[1] ?? "";
 }
 
 // A watcher (opencode's) sees either the old file or the new one, never half.
@@ -201,6 +216,13 @@ export function formatApplyReport(result) {
     ...result.diff.changed.map((c) => `  ~ ${c}`),
     ...result.diff.removed.map((r) => `  - ${r}`),
   );
+  if (result.refreshed?.length) {
+    lines.push(
+      "",
+      `Descriptions refreshed from model_data.json (${result.refreshed.length}):`,
+      ...result.refreshed.map((r) => `  ~ ${r}`),
+    );
+  }
 
   const variants = result.written.filter((w) => w.variant);
   if (variants.length > 0) {
