@@ -30,32 +30,6 @@ export function normalizeAgents(agents) {
 }
 
 /**
- * Model.Info[] (ctx.model.list) -> provider list as buildLimitMap and
- * buildVariantMap read it: `[{id, models: {[modelID]: {limit, variants}}}]`.
- * Host variants are `[{id, settings}]`; normalize them to a keyed object.
- *
- * @param {readonly any[]} models
- */
-export function normalizeProviders(models) {
-  /** @type {Map<string, {id: string, models: Record<string, object>}>} */
-  const byProvider = new Map();
-  for (const m of Array.isArray(models) ? models : []) {
-    if (!m?.providerID || !m?.id) continue;
-    const provider = byProvider.get(m.providerID) ?? { id: m.providerID, models: {} };
-    provider.models[m.id] = {
-      ...(m.limit ? { limit: m.limit } : {}),
-      variants: Object.fromEntries(
-        (Array.isArray(m.variants) ? m.variants : [])
-          .filter((v) => typeof v?.id === "string")
-          .map((v) => [v.id, v.settings ?? {}]),
-      ),
-    };
-    byProvider.set(m.providerID, provider);
-  }
-  return [...byProvider.values()];
-}
-
-/**
  * SessionMessageInfo[] (ctx.session.context) -> internal `{info}` items carrying
  * what estimateContextTokens and the task-outcome scan read off assistant
  * messages: role, time, finish, tokens, model.

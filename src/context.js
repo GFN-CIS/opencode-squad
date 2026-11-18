@@ -80,72 +80,56 @@ export const formatContextSize = (n) =>
 export const formatThousands = (n) => `${Math.round(n / 1000)}k`;
 
 /**
- * Build a {modelID/providerID -> context window} lookup from the resolved
- * normalized provider list, keyed both as
- * `providerID/modelID` and bare `modelID`. Using the resolved list (not raw
- * user config) is what makes built-in models like opus-4-7 (1M) resolve to
- * their real window instead of the fallback.
+ * Index OpenCode's model catalog (`ctx.model.list()`, a flat `Model.Info[]`)
+ * in one pass into the two lookups the plugin reads:
  *
- * @param {Array<{id?:string, models?:Record<string,{limit?:{context?:number}}>}>} providers
- * @returns {Record<string, number>}
+ *   limits   — context window keyed both as `providerID/modelID` and as bare
+ *              `modelID` (first provider wins). Using the resolved catalog,
+ *              not raw user config, is what makes built-in models like
+ *              opus-4-7 (1M) resolve to their real window instead of a
+ *              fallback.
+ *   variants — `providerID/modelID` -> the reasoning variant names opencode
+ *              will actually accept. An empty list means "this model has
+ *              none", which callers keep distinct from "could not ask".
+ *
+ * Variants come from opencode itself rather than being derived from
+ * models.dev, because deriving them is a trap. opencode builds a model's
+ * variants from `reasoning_options` by TYPE, and each type produces different
+ * names: `effort` yields the published values verbatim, `budget_tokens` yields
+ * `high`/`max` (but only for providers that have a budget parameter —
+ * openai-compatible does not, so those get nothing), and `toggle` yields
+ * `none`/`high` for exactly two npm packages. Observed consequence:
+ * `claude-haiku-4-5` publishes only `[{type: "budget_tokens", min: 1024}]`, so
+ * reading the effort values gives "no variants" while opencode in fact accepts
+ * `high` and `max`. Getting it wrong is silent — opencode drops an
+ * unrecognized variant without erroring.
+ *
+ * Host variants are `[{id, settings}]`; a keyed object or a list of names is
+ * accepted too.
+ *
+ * @param {unknown} models
+ * @returns {{limits: Record<string, number>, variants: Record<string, string[]>}}
  */
-export function buildLimitMap(providers) {
+export function indexModelCatalog(models) {
   /** @type {Record<string, number>} */
-  const map = {};
-  if (!Array.isArray(providers)) return map;
-  for (const p of providers) {
-    const pid = p?.id;
-    const models = p?.models;
-    if (!pid || !models || typeof models !== "object") continue;
-    for (const [mid, m] of Object.entries(models)) {
-      const ctx = m?.limit?.context;
-      if (typeof ctx === "number" && ctx > 0) {
-        map[`${pid}/${mid}`] = ctx;
-        if (!(mid in map)) map[mid] = ctx;
-      }
-    }
-  }
-  return map;
-}
-
-/**
- * `providerID/modelID` -> the reasoning variant names opencode will actually
- * accept for that model.
- *
- * Read from opencode's own provider list rather than derived from models.dev,
- * because deriving it is a trap. opencode builds a model's variants from
- * `reasoning_options` by TYPE, and each type produces different names: `effort`
- * yields the published values verbatim, `budget_tokens` yields `high`/`max`
- * (but only for providers that have a budget parameter — openai-compatible does
- * not, so those get nothing), and `toggle` yields `none`/`high` for exactly two
- * npm packages. Observed consequence: `claude-haiku-4-5` publishes only
- * `[{type: "budget_tokens", min: 1024}]`, so reading the effort values gives
- * "no variants" while opencode in fact accepts `high` and `max`.
- *
- * Getting it wrong is silent — opencode drops an unrecognized variant without
- * erroring — which is exactly why this comes from the horse's mouth.
- *
- * @param {Array<{id?:string, models?:Record<string, {variants?:unknown}>}>} providers
- * @returns {Record<string, string[]>}
- */
-export function buildVariantMap(providers) {
+  const limits = {};
   /** @type {Record<string, string[]>} */
-  const map = {};
-  if (!Array.isArray(providers)) return map;
-  for (const p of providers) {
-    const pid = p?.id;
-    const models = p?.models;
-    if (!pid || !models || typeof models !== "object") continue;
-    for (const [mid, m] of Object.entries(models)) {
-      const v = m?.variants;
-      // Both shapes seen in the wild: a keyed object of settings, or a list.
-      const names = Array.isArray(v)
-        ? v.filter((x) => typeof x === "string")
-        : v && typeof v === "object"
-          ? Object.keys(v)
-          : [];
-      map[`${pid}/${mid}`] = names;
+  const variants = {};
+  for (const m of Array.isArray(models) ? models : []) {
+    const pid = m?.providerID;
+    const mid = m?.id;
+    if (typeof pid !== "string" || !pid || typeof mid !== "string" || !mid) continue;
+    const ctx = m.limit?.context;
+    if (typeof ctx === "number" && ctx > 0) {
+      limits[`${pid}/${mid}`] = ctx;
+      if (!(mid in limits)) limits[mid] = ctx;
     }
+    const v = m.variants;
+    variants[`${pid}/${mid}`] = Array.isArray(v)
+      ? v.map((x) => (typeof x === "string" ? x : x?.id)).filter((x) => typeof x === "string")
+      : v && typeof v === "object"
+        ? Object.keys(v)
+        : [];
   }
-  return map;
+  return { limits, variants };
 }
