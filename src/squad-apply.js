@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { writeFileAtomic } from "./fs-atomic.js";
 import { opencodeConfigDir } from "./paths.js";
 import { buildRoster, diffRoster, parseAgentFile, ROLE_KEYS } from "./roster.js";
 import { agentMarkdown, GENERATED_MARKER_DETECT } from "./workers.js";
@@ -111,7 +112,7 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
         const after = descriptionLine(content);
         if (before !== after) refreshed.push(`${role} ${modelId}: ${after}`);
       }
-      writeAtomic(file, content);
+      writeFileAtomic(file, content);
       written.push({ role, id: modelId, variant: entry?.variant, filename });
     }
   }
@@ -160,7 +161,7 @@ export function syncDescriptions({ dir, describe }) {
         continue;
       }
       if (current === content) continue;
-      writeAtomic(file, content);
+      writeFileAtomic(file, content);
       rewritten.push(filename);
     }
   }
@@ -170,13 +171,6 @@ export function syncDescriptions({ dir, describe }) {
 /** The frontmatter `description:` value as written (quoted or not). */
 function descriptionLine(text) {
   return /^description: (.*)$/m.exec(text)?.[1] ?? "";
-}
-
-// A watcher (opencode's) sees either the old file or the new one, never half.
-function writeAtomic(file, content) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, file);
 }
 
 /**
