@@ -112,7 +112,8 @@ test("an OpenCode 2 database is read from session_v2/session_message, read-only"
   db.close();
   const before = digest(file);
   const r = run(["--db", file, "--json"]);
-  expect(r.stderr).toBe("");
+  // Node may print an ExperimentalWarning for node:sqlite; nothing else.
+  expect(r.stderr).not.toMatch(/Unsupported|No usable|Error:/);
   expect(r.status).toBe(0);
   const out = JSON.parse(r.stdout);
   expect(out.storage).toBe("OpenCode 2");
