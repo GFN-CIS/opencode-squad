@@ -103,10 +103,30 @@ function where(path) {
  * @returns {string[]}  empty when valid
  */
 export function validateRoster(doc) {
+  return validateWith(RosterSchema, doc);
+}
+
+/**
+ * validateRoster for squad_patch's whole input: the roster plus `allow_remove`
+ * and `directory`, against the same schema the tool advertises.
+ *
+ * @param {unknown} input
+ * @returns {string[]}  empty when valid
+ */
+export function validatePatchInput(input) {
+  return validateWith(SquadPatchInputSchema, input);
+}
+
+/**
+ * @param {typeof RosterSchema | typeof SquadPatchInputSchema} schema
+ * @param {unknown} doc
+ * @returns {string[]}
+ */
+function validateWith(schema, doc) {
   if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
     return ["roster must be a JSON object"];
   }
-  const result = RosterSchema.safeParse(doc);
+  const result = schema.safeParse(doc);
   if (result.success) return [];
   const errors = [];
   for (const issue of result.error.issues) {
@@ -114,7 +134,7 @@ export function validateRoster(doc) {
     if (issue.code === "unrecognized_keys" && issue.path.length === 0) {
       for (const key of issue.keys) {
         errors.push(
-          `unknown top-level key "${key}" (expected ${Object.keys(RosterSchema.shape).join(", ")})`,
+          `unknown top-level key "${key}" (expected ${Object.keys(schema.shape).join(", ")})`,
         );
       }
     } else if (issue.code === "unrecognized_keys") {
@@ -127,6 +147,10 @@ export function validateRoster(doc) {
             : `${at} has unknown key "${key}"`,
         );
       }
+    } else if (issue.path.length === 1 && !(String(issue.path[0]) in RosterSchema.shape)) {
+      errors.push(
+        `${at} must be a ${issue.code === "invalid_type" ? issue.expected : "valid value"} when present`,
+      );
     } else if (issue.path.length <= 1) {
       errors.push(issue.message);
     } else if (issue.code === "invalid_key") {

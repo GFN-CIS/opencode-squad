@@ -35,7 +35,7 @@
 // means both", which had to be explained in three places; here an agent either
 // appears in a role map or it does not, and there is no rule to misread.
 
-import { readFrontmatter } from "./frontmatter.js";
+import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
 
 /** Roster key -> opencode agent role. `grunts` reads better than `grunt`. */
 export const ROLE_KEYS = /** @type {const} */ ({ grunts: "grunt", drills: "drill" });
@@ -63,9 +63,11 @@ export const NOTES_CLOSE = "<!-- /squad:notes -->";
  * The frontmatter goes through the YAML parser (src/frontmatter.js) — the same
  * reading OpenCode gives the file — so a quoted `model: "p/m#high"` yields
  * `p/m` + `high`, not a stray quote. Legacy fields are still understood:
- * a separate `variant:` key and `disable:` from V1 files. A file without a
- * frontmatter block, or with one that does not parse, yields no model: it is
- * not a squad agent this roster can represent.
+ * a separate `variant:` key and `disable:` from V1 files. A header that is
+ * not valid YAML — this plugin's own files before 0.4.1 wrote descriptions
+ * unquoted — is read line by line instead (legacyHeaderFields), so such an
+ * agent stays in the roster and the next write repairs it. A file without a
+ * frontmatter block yields no model.
  *
  * @param {string} text  contents of a `grunt-*.md` / `drill-*.md`
  * @returns {{modelId?: string, entry: Record<string, any>}}
@@ -76,8 +78,12 @@ export function parseAgentFile(text) {
   const entry = {};
   let modelId;
   const fm = readFrontmatter(src);
-  if (fm.state === "ok") {
-    const { model, variant, steps, disable, disabled } = fm.fields;
+  // A header that is not YAML is read line by line: that is what this
+  // plugin's own files from before 0.4.1 need (see legacyHeaderFields).
+  const fields =
+    fm.state === "ok" ? fm.fields : fm.state === "invalid" ? legacyHeaderFields(fm.header) : null;
+  if (fields) {
+    const { model, variant, steps, disable, disabled } = fields;
     if (typeof model === "string" && model.trim()) {
       const [id, suffix] = model.trim().split("#");
       modelId = id.trim() || undefined;

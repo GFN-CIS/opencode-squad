@@ -52,7 +52,7 @@ function eventStream() {
   };
 }
 
-/** @param {{interrupt?: () => Promise<unknown>, modelList?: () => Promise<unknown>}} [over] */
+/** @param {{interrupt?: () => Promise<unknown>, modelList?: () => Promise<unknown>, getDelayMs?: number}} [over] */
 async function host(over = {}) {
   const events = eventStream();
   const notes = [];
@@ -66,8 +66,10 @@ async function host(over = {}) {
     model: { list: over.modelList ?? (async () => []) },
     session: {
       hook: async () => {},
-      get: async ({ sessionID }) =>
-        sessionID === "child" ? { id: "child", parentID: "parent", agent: "grunt-a-b" } : {},
+      get: async ({ sessionID }) => {
+        if (over.getDelayMs) await new Promise((resolve) => setTimeout(resolve, over.getDelayMs));
+        return sessionID === "child" ? { id: "child", parentID: "parent", agent: "grunt-a-b" } : {};
+      },
       interrupt: async (input) => {
         interrupts.push(input);
         return over.interrupt ? over.interrupt() : { interrupted: true };
@@ -187,6 +189,20 @@ test("a resumed child that keeps producing events is not interrupted", async () 
       h.events.push("session.text.delta", { sessionID: "child" });
       await flush();
     }
+    h.events.push("session.execution.succeeded", { sessionID: "child" });
+    await flush();
+    await silence();
+    expect(h.interrupts).toHaveLength(0);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("an execution that ends while its session lookup is in flight is not watched", async () => {
+  const h = await host({ getDelayMs: 1000 });
+  try {
+    // No session.created: the plugin has to ask the host who this is.
+    h.events.push("session.execution.started", { sessionID: "child" });
     h.events.push("session.execution.succeeded", { sessionID: "child" });
     await flush();
     await silence();

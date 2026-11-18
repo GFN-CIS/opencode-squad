@@ -187,11 +187,11 @@ export function ensureGlobalModelDataFresh() {
       return { wrote: false, problem };
     }
     const agentDir = path.join(path.dirname(file), "agent");
-    // A squad file whose header does not parse has an unknown model; the
-    // merge would drop that model's entry and its owner rules with it.
+    // A squad file that cannot be read has an unknown model; the merge would
+    // drop that model's entry and its owner rules with it.
     const { unreadable } = scanSquadModels(agentDir);
     if (unreadable.length) {
-      const problem = `${agentDir}: frontmatter does not parse in ${unreadable.join(", ")}`;
+      const problem = `${agentDir}: cannot read ${unreadable.join(", ")}`;
       console.warn(`[opencode-squad] model_data.json left untouched — ${problem}`);
       return { wrote: false, problem };
     }
@@ -203,7 +203,9 @@ export function ensureGlobalModelDataFresh() {
     writeFileAtomic(file, `${JSON.stringify(snapshot, null, 2)}\n`);
     return { wrote: true };
   } catch (e) {
-    return { wrote: false, problem: `${file}: ${e?.code ?? e?.name ?? "error"}` };
+    const problem = `${file}: ${e?.code ?? e?.name ?? "error"}`;
+    console.warn(`[opencode-squad] model_data.json refresh failed — ${problem}`);
+    return { wrote: false, problem };
   }
 }
 
