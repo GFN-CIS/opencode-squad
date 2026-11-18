@@ -195,8 +195,27 @@ describe("formatSummary", () => {
     expect(line("zai-coding-plan/glm-5.3")).toContain("TerminalBench4 0.418");
   });
 
-  test("models with no data collapse into one trailing line", () => {
-    expect(out).toContain("- no benchmark data: opencode/big-pickle, opencode/iceman-free");
+  test("only models with nothing to show collapse into one trailing line", () => {
+    expect(out).toContain("- no benchmark data: opencode/big-pickle");
+    expect(out).not.toContain("- no benchmark data: opencode/big-pickle,");
+    // Free is how it is paid for: that stays visible.
+    expect(line("opencode/iceman-free")).toBe("- opencode/iceman-free: free · no benchmark data");
+  });
+
+  test("a model without benchmarks keeps its context, plan and rules (#34)", () => {
+    const text = formatSummary({
+      models: [{ id: "zai-coding-plan/glm-9-unlisted", context: 200_000 }],
+      roles: { "zai-coding-plan/glm-9-unlisted": ["grunt"] },
+      notes: { "zai-coding-plan/glm-9-unlisted": { info: "short tasks" } },
+      plans: { "zai-coding-plan": "GLM Coding Pro" },
+      data: DATA,
+      now,
+    });
+    expect(text).toContain(
+      "- zai-coding-plan/glm-9-unlisted [grunt]: ctx 200k · subscription: GLM Coding Pro · " +
+        "no benchmark data · owner rule: short tasks",
+    );
+    expect(text).not.toContain("- no benchmark data:");
   });
 
   test("no data at all says so instead of rendering an empty table", () => {
@@ -224,7 +243,7 @@ describe("formatSummary", () => {
     expect(text).not.toContain("$0.15");
   });
 
-  test("a serving tier of a listed model collapses to one line", () => {
+  test("a serving tier shares benchmarks only, not the other model's price", () => {
     const text = formatSummary({
       models: [{ id: "openai/gpt-6.1-terra" }, { id: "openai/gpt-6.1-terra-fast" }],
       roles: { "openai/gpt-6.1-terra-fast": ["grunt"] },
@@ -232,8 +251,23 @@ describe("formatSummary", () => {
       now,
     });
     expect(text).toContain(
-      "- openai/gpt-6.1-terra-fast [grunt]: same data as openai/gpt-6.1-terra",
+      "- openai/gpt-6.1-terra-fast [grunt]: ctx 1.1M · same benchmarks as openai/gpt-6.1-terra",
     );
+  });
+
+  test("a free tier with shared scores stays free, with its own context limit (#34)", () => {
+    const text = formatSummary({
+      models: [
+        { id: "openai/gpt-6.1-terra", context: 1_000_000 },
+        { id: "openai/gpt-6.1-terra-free", context: 128_000 },
+      ],
+      data: DATA,
+      now,
+    });
+    expect(text).toContain(
+      "- openai/gpt-6.1-terra-free: ctx 128k · free · same benchmarks as openai/gpt-6.1-terra",
+    );
+    expect(text).toContain("- openai/gpt-6.1-terra: SI 69.8");
   });
 });
 
