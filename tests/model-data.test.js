@@ -9,7 +9,7 @@ import {
   LEGACY_PERF_KEYS,
   mergeModelData,
   modelsChanged,
-  readModelData,
+  readModelDataFile,
 } from "../src/model-data.js";
 
 const dirs = [];
@@ -123,12 +123,38 @@ test("modelsChanged detects real model diffs and ignores rebuild churn", () => {
   expect(modelsChanged(second, third)).toBe(true);
 });
 
-test("readModelData round-trips a written file and tolerates a missing one", () => {
+test("readModelDataFile round-trips a written file and reports a missing one as missing", () => {
   const dir = tmpdir();
   const file = path.join(dir, "model_data.json");
   fs.writeFileSync(file, JSON.stringify({ models: { "a/b": { info: "x" } } }));
-  expect(readModelData(file).models["a/b"].info).toBe("x");
-  expect(readModelData(path.join(dir, "nope.json"))).toBeNull();
+  const read = readModelDataFile(file);
+  expect(read.state).toBe("ok");
+  expect(read.data.models["a/b"].info).toBe("x");
+  expect(readModelDataFile(path.join(dir, "nope.json"))).toEqual({ state: "missing" });
+});
+
+test("readModelDataFile tells an invalid file apart from a missing one, without quoting it", () => {
+  const dir = tmpdir();
+  const file = path.join(dir, "model_data.json");
+  fs.writeFileSync(file, '{"models": {"a/b": {"info": "SECRET-RULE"}},}');
+  const bad = readModelDataFile(file);
+  expect(bad.state).toBe("invalid");
+  expect(bad.reason).toMatch(/^invalid JSON/);
+  expect(bad.reason).not.toContain("SECRET");
+  fs.writeFileSync(file, "[1, 2]");
+  expect(readModelDataFile(file)).toEqual({ state: "invalid", reason: "not a JSON object" });
+  fs.writeFileSync(file, '{"models": []}');
+  expect(readModelDataFile(file)).toEqual({
+    state: "invalid",
+    reason: '"models" is not an object',
+  });
+  // A valid object with neither section is still the owner's file.
+  fs.writeFileSync(file, '{"note": "mine"}');
+  expect(readModelDataFile(file)).toEqual({ state: "ok", data: { models: {}, note: "mine" } });
+  // A directory where the file should be is unreadable, not missing.
+  const asDir = path.join(dir, "dir.json");
+  fs.mkdirSync(asDir);
+  expect(readModelDataFile(asDir)).toEqual({ state: "invalid", reason: "unreadable (EISDIR)" });
 });
 
 test("buildModelData keeps the hand-written providers section", () => {
@@ -143,9 +169,12 @@ test("buildModelData keeps the hand-written providers section", () => {
   expect(modelsChanged({ models: {} }, snap)).toBe(true);
 });
 
-test("readModelData accepts a file with only providers", () => {
+test("readModelDataFile accepts a file with only providers", () => {
   const dir = tmpdir();
   const file = path.join(dir, "model_data.json");
   fs.writeFileSync(file, JSON.stringify({ providers: { openai: "api" } }));
-  expect(readModelData(file)).toEqual({ models: {}, providers: { openai: "api" } });
+  expect(readModelDataFile(file)).toEqual({
+    state: "ok",
+    data: { models: {}, providers: { openai: "api" } },
+  });
 });

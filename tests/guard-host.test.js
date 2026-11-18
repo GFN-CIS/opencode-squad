@@ -2,13 +2,15 @@
 // .opencode/lib/orchestrate-v2.js, driven through plugin.setup with a simulated
 // OpenCode 2 host: an event stream, session.interrupt / synthetic, and
 // model.list. Timers are faked; the silence poll runs every 15 s. Startup
-// file writers and metric refreshes are stubbed at the runtime boundary.
+// file writers, metric refreshes and model_data reads are stubbed at the
+// runtime boundary.
 // Run: npx vitest run tests/guard-host.test.js
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { loadModelSettings } from "../.opencode/lib/runtime.js";
 import plugin from "../index.js";
 
 vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => ({
@@ -18,8 +20,7 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => ({
   squadDescriber: () => (role, id) => `${role} on ${id}.`,
   startMetricsRefresh: () => {},
   getMetrics: async () => null,
-  loadModelData: () => null,
-  loadProviderPlans: () => ({}),
+  loadModelSettings: vi.fn(() => ({ models: {}, providers: {}, found: false, problems: [] })),
   loadAuthTypes: () => ({}),
 }));
 
@@ -222,6 +223,28 @@ test("a failed model catalog lookup is retried by the next call", async () => {
     // A successful catalog is kept.
     await dump.execute({ directory });
     expect(calls).toBe(2);
+  } finally {
+    h.dispose();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("squad_patch refuses while model_data.json is unreadable, writing nothing", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-unreadable-"));
+  const h = await host();
+  vi.mocked(loadModelSettings).mockReturnValueOnce({
+    models: {},
+    providers: {},
+    found: false,
+    problems: ["/cfg/opencode/model_data.json: invalid JSON at line 3, column 1"],
+  });
+  try {
+    const res = await h.tools
+      .get("squad_patch")
+      .execute({ directory, grunts: { "a/b": {} } }, { agent: "build" });
+    expect(res.content).toContain("Refused: model_data.json cannot be read");
+    expect(res.content).toContain("invalid JSON at line 3, column 1");
+    expect(fs.readdirSync(directory)).toEqual([]);
   } finally {
     h.dispose();
     fs.rmSync(directory, { recursive: true, force: true });

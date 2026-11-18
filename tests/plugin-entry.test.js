@@ -37,8 +37,12 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
     squadDescriber: () => (role, id) => `${role} on ${id}. Owner rule: no secrets.`,
     startMetricsRefresh: () => {},
     getMetrics: async () => data,
-    loadModelData: () => null,
-    loadProviderPlans: () => ({ "zai-coding-plan": "GLM Coding Pro" }),
+    loadModelSettings: () => ({
+      models: {},
+      providers: { "zai-coding-plan": "GLM Coding Pro" },
+      found: true,
+      problems: [],
+    }),
     loadAuthTypes: () => ({}),
     METRICS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-metrics-")),
   };

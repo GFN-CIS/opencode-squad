@@ -73,11 +73,11 @@ import {
 } from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
 import {
+  describerScope,
   ensureGlobalModelDataFresh,
   getMetrics,
   loadAuthTypes,
-  loadModelData,
-  loadProviderPlans,
+  loadModelSettings,
   loadRolePrompt,
   METRICS_DIR,
   ORCHESTRATOR_AGENT,
@@ -243,7 +243,7 @@ export default {
               }),
             };
           }
-          const modelData = loadModelData(directory);
+          const modelData = loadModelSettings(directory).models;
           const reports = await Promise.all(
             ids.map(async (sessionID) => {
               let facts;
@@ -254,7 +254,7 @@ export default {
                   e?.message || e?._tag || e?.name || JSON.stringify(e) || "unknown error";
                 return `session ${sessionID}: could not be read (${why}). Treat it as cold.`;
               }
-              const ttl = facts.model ? modelData?.[facts.model]?.cache_ttl_seconds : undefined;
+              const ttl = facts.model ? modelData[facts.model]?.cache_ttl_seconds : undefined;
               return formatSessionStatus({
                 sessionID,
                 facts,
@@ -409,20 +409,27 @@ export default {
             };
           }
           const limits = await getLimitMap();
+          const settings = loadModelSettings(directory);
           const models = wanted.map((id) => ({
             id,
             ...(limits[id] ? { context: limits[id] } : {}),
           }));
           return {
-            content: formatSummary({
-              models,
-              roles: squadRoles(await getAgents()),
-              notes: loadModelData(directory),
-              plans: loadProviderPlans(directory),
-              authTypes: loadAuthTypes(),
-              data,
-              now,
-            }),
+            content:
+              formatSummary({
+                models,
+                roles: squadRoles(await getAgents()),
+                notes: settings.found ? settings.models : null,
+                plans: settings.providers,
+                authTypes: loadAuthTypes(),
+                data,
+                now,
+              }) +
+              (settings.problems.length
+                ? `\n\nmodel_data.json ignored (owner notes missing above):\n${settings.problems
+                    .map((p) => `  - ${p}`)
+                    .join("\n")}`
+                : ""),
             metadata: { title: `metrics: ${models.length} model(s)` },
           };
         },
@@ -460,6 +467,17 @@ export default {
           errors.push(...validateVariants(roster, await getVariantMap()));
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
+          }
+          // Descriptions carry the owner's routing rules from model_data.json;
+          // writing from an unreadable file would strip them from every agent.
+          const problems = loadModelSettings(describerScope(dir, directory)).problems;
+          if (problems.length) {
+            return {
+              content:
+                "Refused: model_data.json cannot be read, and agent descriptions are built " +
+                "from it — writing now would drop the owner's routing rules. Nothing was " +
+                `written. Ask the user to fix:\n${problems.map((p) => `  - ${p}`).join("\n")}`,
+            };
           }
           const result = applySquad({
             roster,

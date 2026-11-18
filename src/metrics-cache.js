@@ -14,6 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { writeFileAtomic } from "./fs-atomic.js";
 import { indexModelIds, indexScoreRows, indexSuperIndex, KEY_METRICS } from "./metrics.js";
 
 export const TTL_MS = 48 * 3600_000;
@@ -49,12 +50,10 @@ function readJson(file) {
   }
 }
 
-/** tmp + rename so a concurrent reader never sees a half-written file. */
+/** A concurrent reader never sees a half-written cache file. */
 function writeJsonAtomic(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value));
-  fs.renameSync(tmp, file);
+  writeFileAtomic(file, JSON.stringify(value));
 }
 
 /** @param {string} dir */
