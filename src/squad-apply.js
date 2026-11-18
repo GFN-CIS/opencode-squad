@@ -60,7 +60,9 @@ export function readSquad(dir) {
     if (read.state === "missing" || !isGenerated(read.text)) continue;
     const { modelId, entry } = parseAgentFile(read.text);
     if (!modelId) {
-      unreadable.push(`${name}: generated file with no readable model; left as is`);
+      unreadable.push(
+        `${name}: generated file with no readable model (damaged header). It is left as is and blocks the model_data.json refresh: ask the user to repair or delete it`,
+      );
       continue;
     }
     // Legacy `worker-` files predate the grunt/drill split; treat them as the

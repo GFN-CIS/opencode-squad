@@ -29,37 +29,17 @@ import { GENERATED_MARKER_DETECT } from "./workers.js";
  * @returns {string|null}
  */
 export function extractModelId(content) {
-  return readModel(content).id;
-}
-
-/**
- * The model id plus whether a missing one is really absent. A header that is
- * cut off (`incomplete`) or unparseable (`invalid`, with no model line the
- * legacy reader recognises) leaves the model UNKNOWN: the file may well name
- * one that the damage hides. An incomplete header is not read line by line —
- * the cut may run through the model line itself and yield a wrong id.
- *
- * @param {string} content
- * @returns {{id: string|null, known: boolean}}
- */
-function readModel(content) {
   const fm = readFrontmatter(content);
-  /** @type {unknown} */
-  let model;
-  switch (fm.state) {
-    case "ok":
-      model = fm.fields.model;
-      break;
-    case "invalid":
-      model = legacyHeaderFields(fm.header).model;
-      break;
-    case "incomplete":
-      return { id: null, known: false };
-    case "none":
-      return { id: null, known: true };
-  }
-  const id = typeof model === "string" ? model.split("#")[0].trim() || null : null;
-  return { id, known: id !== null || fm.state === "ok" };
+  // A cut-off header is not read line by line: the cut may run through the
+  // model line itself and yield a wrong id.
+  const model =
+    fm.state === "ok"
+      ? fm.fields.model
+      : fm.state === "invalid"
+        ? legacyHeaderFields(fm.header).model
+        : undefined;
+  if (typeof model !== "string") return null;
+  return model.split("#")[0].trim() || null;
 }
 
 /**
@@ -72,8 +52,11 @@ function readModel(content) {
  * Two lists name files whose model is unknown, not absent, so a caller that
  * would DROP models missing from `ids` must not act on this scan:
  *   unreadable   — the file could not be read at all;
- *   undetermined — a generated file, or one with a cut-off or unparseable
- *                  header, from which no model could be read.
+ *   undetermined — a generated file from which no model could be read (a
+ *                  cut-off or broken header): every generated agent has one.
+ * A hand-authored file without a model owns no model_data entry, so it is
+ * simply not counted — blocking on it would freeze the refresh for good over
+ * a file that is not the squad's.
  *
  * @param {string} dir  agent directory (e.g. ~/.config/opencode/agent)
  * @returns {{ids: string[], unreadable: string[], undetermined: string[]}}  ids sorted and deduped
@@ -101,9 +84,9 @@ export function scanSquadModels(dir) {
     const generated = txt.includes(GENERATED_MARKER_DETECT);
     // A hand-authored worker-* agent was never part of the squad.
     if (m[1] === "worker" && !generated) continue;
-    const { id, known } = readModel(txt);
+    const id = extractModelId(txt);
     if (id) ids.add(id);
-    else if (generated || !known) undetermined.push(f);
+    else if (generated) undetermined.push(f);
   }
   return { ids: [...ids].sort(), unreadable, undetermined };
 }

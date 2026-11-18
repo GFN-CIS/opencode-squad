@@ -111,6 +111,27 @@ test("a hand-authored worker- file is not part of the squad", () => {
   expect(Object.keys(JSON.parse(fs.readFileSync(globalFile, "utf8")).models)).toEqual(["a/b"]);
 });
 
+test("a hand-authored grunt- file without a readable model does not block the refresh", () => {
+  addAgent("grunt", "a/b");
+  // Not valid YAML (": " in a plain scalar) and no model line: the file owns no entry.
+  fs.writeFileSync(
+    path.join(agentDir, "grunt-mine.md"),
+    "---\ndescription: Reviews code: fast\n---\nMINE\n",
+  );
+  fs.writeFileSync(path.join(agentDir, "grunt-rule.md"), "---\nHorizontal rule above, no header\n");
+  addAgent("grunt", "c/d");
+  fs.writeFileSync(globalFile, JSON.stringify({ models: { "a/b": { info: "rule ab" } } }));
+  expect(ensureGlobalModelDataFresh()).toEqual({ wrote: true });
+  expect(Object.keys(JSON.parse(fs.readFileSync(globalFile, "utf8")).models)).toEqual([
+    "a/b",
+    "c/d",
+  ]);
+});
+
+test("a CRLF header that is never closed is incomplete too", () => {
+  expect(readFrontmatter("---\r\nmodel: a/b\r\n").state).toBe("incomplete");
+});
+
 // #16
 
 test.skipIf(isRoot)("an unreadable file at a planned destination refuses the whole apply", () => {
