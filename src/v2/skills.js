@@ -1,5 +1,6 @@
 /**
- * Bundled skills for OpenCode 2 (shared verbatim with opencode-time-logger).
+ * Bundled skills for OpenCode 2 (derived from opencode-time-logger's loader;
+ * the frontmatter is now read by src/frontmatter.js).
  *
  * OpenCode 2 has no config hook, so the plugin reads each `<dir>/<skill>/SKILL.md`
  * itself and registers it through `ctx.skill.transform`. The registered entry

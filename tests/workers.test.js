@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { readFrontmatter } from "../src/frontmatter.js";
 import { PROMPT_CLOSE, promptOpen } from "../src/prompt-inject.js";
 import { NOTES_CLOSE, NOTES_OPEN, parseAgentFile } from "../src/roster.js";
 import {
@@ -9,6 +10,13 @@ import {
   slugForModel,
   squadRoleOf,
 } from "../src/workers.js";
+
+/** The frontmatter fields of a generated document; throws unless it parses. */
+function frontmatterOf(content) {
+  const fm = readFrontmatter(content);
+  if (fm.state !== "ok") throw new Error(`frontmatter ${fm.state}`);
+  return fm.fields;
+}
 
 test("slug collapses provider/model and punctuation, prefixed by role", () => {
   expect(slugForModel("openai/gpt-5.5")).toBe("grunt-openai-gpt-5-5"); // default role
@@ -51,11 +59,7 @@ test("V2 drill markdown denies by default, allowing only local reads, web and na
   expect(slug).toBe("drill-openai-gpt-5-5");
   expect(content).toContain("permissions:\n");
   expect(content).not.toContain("permission:");
-  const rules = content
-    .split("permissions:\n")[1]
-    .split("\n---")[0]
-    .split("\n")
-    .map((line) => JSON.parse(line.trim().slice(2)));
+  const rules = frontmatterOf(content).permissions;
   expect(rules).toEqual([
     { action: "*", resource: "*", effect: "deny" },
     { action: "read", resource: "*", effect: "allow" },
@@ -135,11 +139,7 @@ test("V2 drill markdown denies by default, allowing only local reads, web and na
 
 test("V2 write guards and env exceptions come after their broad allows", () => {
   const { content } = agentMarkdown("drill", "a/b");
-  const rules = content
-    .split("permissions:\n")[1]
-    .split("\n---")[0]
-    .split("\n")
-    .map((line) => JSON.parse(line.trim().slice(2)));
+  const rules = frontmatterOf(content).permissions;
   const index = (action, resource) =>
     rules.findIndex((r) => r.action === action && r.resource === resource);
   for (const resource of ["*--output*", "sort *-o*", "*>*"]) {
@@ -181,9 +181,32 @@ test("unknown role throws", () => {
   expect(() => agentMarkdown("captain", "openai/gpt-5.5")).toThrow();
 });
 
-test("frontmatter block is well-formed (opens and closes with ---)", () => {
+test.each(["grunt", "drill"])(
+  "the generated %s document parses as YAML frontmatter + body",
+  (role) => {
+    const { content } = agentMarkdown(role, "openai/gpt-5.5", {
+      variant: "high",
+      description: 'routes on: "quotes" # and hashes',
+      notes: "n",
+    });
+    const fields = frontmatterOf(content);
+    expect(fields).toMatchObject({
+      description: 'routes on: "quotes" # and hashes',
+      mode: "subagent",
+      model: "openai/gpt-5.5#high",
+      hidden: true,
+    });
+    expect(Array.isArray(fields.permissions)).toBe(true);
+    const { body } = readFrontmatter(content);
+    expect(body.trimStart().startsWith(promptOpen(role))).toBe(true);
+  },
+);
+
+test("the document-level check catches a broken frontmatter boundary", () => {
   const { content } = agentMarkdown("grunt", "openai/gpt-5.5");
-  expect(content.indexOf("\n---\n", 4)).toBeGreaterThan(0);
+  const unclosed = content.replace("\n---\n", "\n");
+  expect(readFrontmatter(unclosed).state).not.toBe("ok");
+  expect(() => frontmatterOf(unclosed)).toThrow();
 });
 
 test("agentMarkdown emits variant only when one is given", () => {
@@ -197,9 +220,9 @@ test("agentMarkdown emits variant only when one is given", () => {
   expect(without).toContain("model: anthropic/claude-opus-5\nhidden: true\n");
 });
 
-test("agentMarkdown ignores a blank variant rather than writing an empty key", () => {
+test("agentMarkdown ignores a blank variant rather than writing a bare #", () => {
   const { content } = agentMarkdown("drill", "openai/gpt-5.5", { variant: "   " });
-  expect(content).not.toContain("variant:");
+  expect(frontmatterOf(content).model).toBe("openai/gpt-5.5");
 });
 
 test("the variant does not leak into the slug — one agent per model, not per variant", () => {

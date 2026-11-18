@@ -23,9 +23,12 @@ test("keeps the decision principles inline (capability + risk one-liners)", () =
 });
 
 test("tells a weak orchestrator to escalate capability UP", () => {
-  const out = buildBootstrap("(no subagents available)").toLowerCase();
-  expect(out).toContain("cuts both ways"); // capability applies to self too
-  expect(out).toContain("up"); // delegate up / consult up
+  // The guidance, not the slogan: when the task is beyond the orchestrator's own
+  // model, hand it (or the pivotal call) to a stronger grunt, or consult one.
+  const out = buildBootstrap("(no subagents available)").toLowerCase().replace(/\s+/g, " ");
+  expect(out).toContain("beyond your own model's depth");
+  expect(out).toContain("delegate it up to the strongest fit grunt");
+  expect(out).toContain("second opinion before you commit");
 });
 
 test("forbids `general` unless explicitly asked (it inherits the primary model)", () => {
@@ -42,10 +45,10 @@ test("keeps the stall trigger inline and points to the squad-stall skill", () =>
   expect(out).toContain("squad-stall"); // full ladder is a separate skill
 });
 
-test("warns that context pressure is not a panic button (compaction exists)", () => {
-  const out = buildBootstrap("(no subagents available)").toLowerCase();
-  expect(out).toContain("panic button");
-  expect(out).toContain("compact");
+test("warns that context pressure alone is no reason to delegate (compaction exists)", () => {
+  const out = buildBootstrap("(no subagents available)").toLowerCase().replace(/\s+/g, " ");
+  expect(out).toContain("opencode compacts automatically");
+  expect(out).toContain("delegating a *minor* task just because the percentage looks high");
 });
 
 test("mentions caching cost and subscription-vs-api billing, pointing to squad-delegate", () => {
