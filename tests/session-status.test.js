@@ -6,7 +6,13 @@
 // Run: npx vitest run tests/session-status.test.js
 
 import { describe, expect, test } from "vitest";
-import { formatOwnStatus, formatSessionStatus, sessionFacts } from "../src/session-status.js";
+import {
+  formatNow,
+  formatOwnStatus,
+  formatSessionStatus,
+  requestedSessions,
+  sessionFacts,
+} from "../src/session-status.js";
 
 const T0 = Date.UTC(2026, 10, 18, 9, 0, 0);
 const usage = (read) => ({ input: 1, output: 50, reasoning: 10, cache: { read, write: 100 } });
@@ -79,11 +85,11 @@ describe("sessionFacts", () => {
 describe("formatSessionStatus", () => {
   const facts = sessionFacts(finished);
   const report = (now, extra = {}) =>
-    formatSessionStatus({ sessionID: "ses_x", facts, now, timeZone: "UTC", ...extra });
+    formatSessionStatus({ sessionID: "ses_x", facts, now, ...extra });
 
   test("warm: says how many seconds are left, with the TTL and its source", () => {
     const s = report(T0 + 110_000, { contextLimit: 1_000_000 });
-    expect(s).toContain("now: 2026-11-18 09:01:50 (UTC)");
+    expect(s.startsWith("session ses_x")).toBe(true);
     expect(s).toContain(
       "session ses_x (grunt-anthropic-claude-sonnet-5-5, anthropic/claude-sonnet-5-5)",
     );
@@ -109,7 +115,6 @@ describe("formatSessionStatus", () => {
       sessionID: "ses_x",
       facts: { ...facts, running: true },
       now: T0 + 20_000,
-      timeZone: "UTC",
     });
     expect(s).toContain("probably RUNNING — its current step started 20 s ago");
     expect(s).not.toContain("cache:");
@@ -126,7 +131,6 @@ describe("formatSessionStatus", () => {
         reasoningTokens: 31_991,
       },
       now: T0 + 1_000,
-      timeZone: "UTC",
     });
     expect(s).toContain("[TASK OUTCOME] sessionID=ses_x");
     expect(s).toContain("hit max_tokens");
@@ -137,7 +141,6 @@ describe("formatSessionStatus", () => {
       sessionID: "ses_new",
       facts: sessionFacts([msg("user")]),
       now: T0,
-      timeZone: "UTC",
     });
     expect(s).toContain("no cache to reuse");
   });
@@ -157,4 +160,16 @@ test("formatOwnStatus: the clock and the caller's own context", () => {
   expect(s).toContain("now: 2026-11-18 09:00:00 (UTC)");
   expect(s).toContain("your context: ~98k / 1000k (10%)");
   expect(formatOwnStatus({ now: T0, timeZone: "UTC" })).not.toContain("your context");
+});
+
+test("formatNow stamps the wall clock in the given zone", () => {
+  expect(formatNow(T0, "UTC")).toBe("now: 2026-11-18 09:00:00 (UTC)");
+});
+
+test("requestedSessions takes an array or one bare id, deduplicated", () => {
+  expect(requestedSessions({ sessionIDs: ["a", " b ", "a", ""] })).toEqual(["a", "b"]);
+  expect(requestedSessions({ sessionIDs: "a" })).toEqual(["a"]);
+  expect(requestedSessions({ sessionID: "c" })).toEqual(["c"]);
+  expect(requestedSessions({})).toEqual([]);
+  expect(requestedSessions(undefined)).toEqual([]);
 });

@@ -212,10 +212,17 @@ test("squad_session reports a child's cache verdict and the caller's own clock",
   });
   try {
     const session = tools.get("squad_session");
-    const child = (await session.execute({ sessionID: "ses_child" }, { agent: "build" })).content;
-    expect(child).toMatch(/^now: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
-    expect(child).toMatch(/cache: WARM — expires in 2[34]\d s/);
-    expect(child).toContain("context: ~40k");
+    const both = (
+      await session.execute({ sessionIDs: ["ses_child", "ses_gone"] }, { agent: "build" })
+    ).content;
+    expect(both).toMatch(/^now: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    expect(both).toMatch(/cache: WARM — expires in 2[34]\d s/);
+    expect(both).toContain("context: ~40k");
+    expect(both).toContain("session ses_gone\nNo provider request found");
+    expect(both.match(/^now: /gm)).toHaveLength(1);
+    // One bare id instead of an array still works.
+    const one = (await session.execute({ sessionIDs: "ses_child" }, { agent: "build" })).content;
+    expect(one).toContain("session ses_child (grunt-anthropic-claude-sonnet-5-5");
     const own = (await session.execute({}, { agent: "build", sessionID: "ses_none" })).content;
     expect(own).toMatch(/^now: /);
     expect(own).not.toContain("your context");

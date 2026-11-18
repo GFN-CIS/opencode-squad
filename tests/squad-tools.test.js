@@ -55,8 +55,9 @@ describe("V2 schemas", () => {
     expect(SQUAD_COMPACT_INPUT.required).toEqual(["sessionID"]);
     expect(Object.keys(SQUAD_COMPACT_INPUT.properties)).toEqual(["sessionID"]);
     expect(SQUAD_SESSION_INPUT.required).toBeUndefined();
-    expect(SQUAD_SESSION_INPUT.properties.sessionID.description).toBe(
-      ARG_DESCRIPTIONS["session.sessionID"],
+    expect(SQUAD_SESSION_INPUT.properties.sessionIDs.type).toBe("array");
+    expect(SQUAD_SESSION_INPUT.properties.sessionIDs.description).toBe(
+      ARG_DESCRIPTIONS["session.sessionIDs"],
     );
     expect(Object.keys(SQUAD_PATCH_INPUT.properties).sort()).toEqual([
       "allow_remove",
