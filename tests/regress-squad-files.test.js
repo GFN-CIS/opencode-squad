@@ -148,7 +148,8 @@ test.skipIf(isRoot)("an unreadable file at a planned destination refuses the who
   expect(formatApplyReport(result)).toMatch(/REFUSED: an agent file this roster would replace/);
   // Nothing else was written, and the file is as it was.
   expect(fs.readdirSync(agentDir)).toEqual(["grunt-a-b.md"]);
-  expect(fs.statSync(target).mode & 0o777).toBe(0o000);
+  // Still unreadable at that path: neither replaced nor re-permissioned.
+  expect(() => fs.readFileSync(target)).toThrow(/EACCES/);
   fs.chmodSync(target, 0o600);
   expect(fs.readFileSync(target, "utf8")).toBe("---\nmodel: a/b\n---\nMY OWN AGENT\n");
 });
