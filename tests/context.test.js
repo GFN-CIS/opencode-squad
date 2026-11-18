@@ -2,9 +2,7 @@ import { expect, test } from "vitest";
 import {
   buildLimitMap,
   buildVariantMap,
-  CONTEXT_MARKER,
   estimateContextTokens,
-  formatContextLine,
   formatLocalDateTime,
 } from "../src/context.js";
 
@@ -68,34 +66,6 @@ test("estimate reports the latest turn's count (no suppression, no thresholds)",
   ];
   const r = estimateContextTokens(messages);
   expect(r).toEqual({ used: 24000, modelID: "claude-opus-4-8", providerID: "anthropic" });
-});
-
-test("format returns null when there is no usage", () => {
-  expect(formatContextLine(null, 200000)).toBe(null);
-  expect(formatContextLine(0, 200000)).toBe(null);
-});
-
-test("format states the facts with no threshold, judgment, or caveats", () => {
-  // 58% of a 1M window must NOT carry any "prefer delegating" instruction —
-  // the model decides; we report only the number. No compaction caveat either:
-  // it would hand the model an excuse to dismiss the figure.
-  const out = formatContextLine(580000, 1000000);
-  expect(out.startsWith(CONTEXT_MARKER)).toBe(true);
-  expect(out).toContain("(58%)");
-  expect(out.toUpperCase()).not.toContain("PREFER DELEGAT");
-  expect(out.toLowerCase()).not.toContain("compaction");
-});
-
-test("format shows percent/size for a small fill too", () => {
-  const out = formatContextLine(40000, 200000);
-  expect(out).toContain("(20%)");
-  expect(out.toUpperCase()).not.toContain("PREFER DELEGATING");
-});
-
-test("format degrades gracefully without a known limit", () => {
-  const out = formatContextLine(50000, null);
-  expect(out).toContain("~50k tokens");
-  expect(out).not.toContain("%");
 });
 
 test("formatLocalDateTime renders ISO-like time with the zone", () => {

@@ -1,16 +1,6 @@
-// Live context-budget signal for the orchestrator.
-//
-// Delegation offloads raw reading / long tool output / iteration into the
-// subagent's own session; the orchestrator only pays for (brief + compact
-// result). The bigger the orchestrator's context already is, the more that
-// trade favours delegating. This module turns the last assistant message's
-// token usage into a short line injected each turn.
-
-export const CONTEXT_MARKER = "<ORCHESTRATE_CONTEXT>";
-
-// Fallback window when the model's limit is unknown (conservative: a smaller
-// window over-reports the percentage, which only nudges delegation earlier).
-export const DEFAULT_LIMIT = 200_000;
+// Context-size and model-limit helpers: a session's current size from its
+// last assistant message's token usage (squad_session, squad_compact), and the
+// context windows / reasoning variants opencode resolves per model.
 
 /**
  * Estimate the orchestrator's current context size from message history.
@@ -69,35 +59,6 @@ export function formatLocalDateTime(date, timeZone) {
   } catch {
     return null;
   }
-}
-
-const k = (n) => `${Math.round(n / 1000)}k`;
-
-/**
- * Render the context-budget line: just the facts (current size, window), no
- * thresholds and no "you should delegate" judgment — the orchestrator decides
- * what counts as a lot for its model and window. Returns null when there is
- * nothing to report yet.
- *
- * @param {number|null} used
- * @param {number|null} [limit]
- * @returns {string|null}
- */
-export function formatContextLine(used, limit) {
-  if (used == null || used <= 0) return null;
-  const lim = limit && limit > 0 ? limit : null;
-  const pct = lim ? Math.round((used / lim) * 100) : null;
-  const size = lim ? `~${k(used)} / ${k(lim)} (${pct}%)` : `~${k(used)} tokens`;
-  return (
-    `${CONTEXT_MARKER}\n` +
-    `Your context at the start of this turn: ${size}. ` +
-    `It is stamped once per turn and does not move while you work — which is ` +
-    `the right value for a verdict you state at the top of the turn. ` +
-    `Factor it into the self-vs-delegate decision as you see fit: doing heavy ` +
-    `work yourself burns the raw reading and iterations into THIS context, ` +
-    `while delegating costs you only the brief plus a compact result.\n` +
-    `</ORCHESTRATE_CONTEXT>`
-  );
 }
 
 /**
