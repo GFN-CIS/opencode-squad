@@ -37,7 +37,7 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
-import { validateRoster } from "../../src/roster.js";
+import { validateRoster } from "../../src/roster-schema.js";
 import {
   formatNow,
   formatOwnStatus,
