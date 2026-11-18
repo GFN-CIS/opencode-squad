@@ -16,6 +16,12 @@
 // Note what these report: not "remaining" but "used". Anthropic gives a
 // fraction (0.07), codex a percent (51). Remaining is 1 - used.
 //
+// Re-checked on OpenCode 2.1.3 (2026-11-18) through the plugin's
+// `http.response` session hook: Anthropic OAuth still sends the unified block
+// on every 200; the Codex (ChatGPT OAuth) path now sends no `x-codex-*` quota
+// headers at all (only an opaque turn-state), so for Codex this reports
+// nothing until the provider sends them again.
+//
 // z.ai returns nothing of the sort on success (checked: alt-svc, ga-traceid,
 // x-log-id and plumbing only), which is why absent data must stay absent — see
 // parseQuotaHeaders returning null.
@@ -185,4 +191,45 @@ export function formatQuotaClause(providerID, snapshot, opts = {}) {
     clause += " Route further work to a different provider unless it must run here.";
   }
   return clause;
+}
+
+// In the top band a note is repeated only when the binding window has moved
+// this much since the last one: a child makes a model call every few seconds,
+// and a steady 96% said once per call would bury the orchestrator.
+export const TOP_BAND_STEP = 0.02;
+
+/**
+ * A stateful reporter over parseQuotaHeaders + formatQuotaClause, keyed by
+ * whoever is being told (the orchestrator session) and the provider: each
+ * orchestrator hears about a provider on a band change, and in the top band
+ * again only once it has climbed by TOP_BAND_STEP. Falling below the first
+ * band resets, so the next climb is reported afresh.
+ *
+ * @returns {(key: string, providerID: string, headers: Record<string, string>, now: number) => string}
+ *   the clause to deliver, or "" when there is nothing new to say
+ */
+export function createQuotaReporter() {
+  /** @type {Map<string, {band: number|null, used: number}>} */
+  const last = new Map();
+  return (key, providerID, headers, now) => {
+    const snapshot = parseQuotaHeaders(headers);
+    if (!snapshot) return "";
+    const binding =
+      snapshot.windows.find((w) => w.label === snapshot.binding) ?? snapshot.windows[0];
+    const band = bandOf(binding.used);
+    const prev = last.get(key);
+    if (band === null) {
+      last.set(key, { band: null, used: binding.used });
+      return "";
+    }
+    const top = band === QUOTA_BANDS.length - 1;
+    const changed = prev?.band !== band;
+    if (!changed && !(top && binding.used - (prev?.used ?? 0) >= TOP_BAND_STEP)) return "";
+    const clause = formatQuotaClause(providerID, snapshot, {
+      previousBand: changed ? (prev?.band ?? null) : null,
+      now,
+    });
+    if (clause) last.set(key, { band, used: binding.used });
+    return clause;
+  };
 }
