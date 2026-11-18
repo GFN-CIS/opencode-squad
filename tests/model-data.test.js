@@ -32,6 +32,18 @@ test("extractModelId returns null when absent", () => {
   expect(extractModelId("---\nmode: subagent\n---\nbody")).toBeNull();
 });
 
+test("extractModelId ignores model: text in the body, with or without a header", () => {
+  expect(extractModelId("no header\nmodel: x/y\n")).toBeNull();
+  expect(extractModelId("---\r\nmode: subagent\r\n---\r\nmodel: x/y\r\n")).toBeNull();
+  expect(extractModelId("---\nmode: [broken\n---\nmodel: x/y\n")).toBeNull();
+});
+
+test("extractModelId reads CRLF and quoted headers", () => {
+  expect(extractModelId("---\r\nmodel: p/m#high\r\n---\r\n")).toBe("p/m");
+  expect(extractModelId('---\nmodel: "p/m#high"\n---\n')).toBe("p/m");
+  expect(extractModelId("---\nmodel: 'p/m'\n---\n")).toBe("p/m");
+});
+
 test("extractModelId strips the native V2 variant suffix", () => {
   expect(extractModelId("---\nmodel: openai/gpt-5.5#high\n---\n")).toBe("openai/gpt-5.5");
 });

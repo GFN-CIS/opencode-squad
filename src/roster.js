@@ -35,6 +35,8 @@
 // means both", which had to be explained in three places; here an agent either
 // appears in a role map or it does not, and there is no rule to misread.
 
+import { readFrontmatter } from "./frontmatter.js";
+
 /** Roster key -> opencode agent role. `grunts` reads better than `grunt`. */
 export const ROLE_KEYS = /** @type {const} */ ({ grunts: "grunt", drills: "drill" });
 
@@ -61,9 +63,12 @@ export const NOTES_CLOSE = "<!-- /squad:notes -->";
 /**
  * Read one generated agent file back into a roster entry.
  *
- * A narrow line-scan of the frontmatter rather than a YAML parse: these files
- * are written by `agentMarkdown()`, so the shape is known, and a parser would
- * be a dependency bought for nothing.
+ * The frontmatter goes through the YAML parser (src/frontmatter.js) — the same
+ * reading OpenCode gives the file — so a quoted `model: "p/m#high"` yields
+ * `p/m` + `high`, not a stray quote. Legacy fields are still understood:
+ * a separate `variant:` key and `disable:` from V1 files. A file without a
+ * frontmatter block, or with one that does not parse, yields no model: it is
+ * not a squad agent this roster can represent.
  *
  * @param {string} text  contents of a `grunt-*.md` / `drill-*.md`
  * @returns {{modelId?: string, entry: Record<string, any>}}
@@ -73,22 +78,17 @@ export function parseAgentFile(text) {
   /** @type {Record<string, any>} */
   const entry = {};
   let modelId;
-  const lines = src.split("\n");
-  if (lines[0]?.trim() === "---") {
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.trim() === "---") break;
-      const m = line.match(/^([a-z_]+):\s*(\S.*?)\s*$/);
-      if (!m) continue;
-      const [, key, value] = m;
-      if (key === "model") {
-        const [id, variant] = value.split("#");
-        modelId = id;
-        if (variant) entry.variant = variant;
-      } else if (key === "variant") entry.variant = value;
-      else if (key === "steps") entry.steps = Number(value);
-      else if ((key === "disable" || key === "disabled") && value === "true") entry.disable = true;
+  const fm = readFrontmatter(src);
+  if (fm.state === "ok") {
+    const { model, variant, steps, disable, disabled } = fm.fields;
+    if (typeof model === "string" && model.trim()) {
+      const [id, suffix] = model.trim().split("#");
+      modelId = id.trim() || undefined;
+      if (suffix?.trim()) entry.variant = suffix.trim();
     }
+    if (typeof variant === "string" && variant.trim()) entry.variant = variant.trim();
+    if (steps !== undefined && steps !== null) entry.steps = Number(steps);
+    if ([disable, disabled].some((v) => v === true || v === "true")) entry.disable = true;
   }
   const open = src.indexOf(NOTES_OPEN);
   const close = src.indexOf(NOTES_CLOSE);
