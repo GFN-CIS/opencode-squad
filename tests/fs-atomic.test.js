@@ -37,8 +37,7 @@ test("a symlinked destination is written through and stays a link", () => {
 
 test("the existing file's permission bits are kept", () => {
   const file = path.join(dir, "private.json");
-  fs.writeFileSync(file, "old");
-  fs.chmodSync(file, 0o600);
+  fs.writeFileSync(file, "old", { mode: 0o600 });
   writeFileAtomic(file, "new");
   expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   expect(fs.readFileSync(file, "utf8")).toBe("new");
