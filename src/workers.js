@@ -121,6 +121,19 @@ export function slugForModel(modelId, role = "grunt") {
 }
 
 /**
+ * The squad role a runtime agent id belongs to (`grunt-…` / `drill-…`, as
+ * slugForModel names them), or null for any other agent. Legacy `worker-`
+ * FILES are a disk-migration concern (src/squad-apply.js), not a runtime name.
+ *
+ * @param {unknown} name
+ * @returns {"grunt"|"drill"|null}
+ */
+export function squadRoleOf(name) {
+  const m = /^(grunt|drill)-/.exec(typeof name === "string" ? name : "");
+  return m ? /** @type {"grunt"|"drill"} */ (m[1]) : null;
+}
+
+/**
  * Render the agent markdown file for one role+model.
  *
  * `variant` selects the model's reasoning level. opencode builds a model's

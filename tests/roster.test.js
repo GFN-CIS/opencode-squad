@@ -1,12 +1,6 @@
 import { expect, test } from "vitest";
-import {
-  buildRoster,
-  diffRoster,
-  NOTES_CLOSE,
-  NOTES_OPEN,
-  parseAgentFile,
-  validateRoster,
-} from "../src/roster.js";
+import { buildRoster, diffRoster, NOTES_CLOSE, NOTES_OPEN, parseAgentFile } from "../src/roster.js";
+import { validateRoster } from "../src/roster-schema.js";
 
 const FILE = [
   "---",
@@ -41,6 +35,36 @@ test("parseAgentFile reads the frontmatter and the fenced notes, ignoring the bo
 
 test("parseAgentFile returns an empty entry for a file with no frontmatter", () => {
   expect(parseAgentFile("just a body\nmodel: x/y")).toEqual({ modelId: undefined, entry: {} });
+});
+
+test("parseAgentFile reads a quoted model and variant without the quotes, LF or CRLF", () => {
+  for (const eol of ["\n", "\r\n"]) {
+    const text = ["---", 'model: "p/m#high"', "steps: 7", "disabled: true", "---", "body"].join(
+      eol,
+    );
+    expect(parseAgentFile(text)).toEqual({
+      modelId: "p/m",
+      entry: { variant: "high", steps: 7, disable: true },
+    });
+  }
+});
+
+test("parseAgentFile reads a pre-0.4.1 header (unquoted description, not YAML) line by line", () => {
+  const legacy = [
+    "---",
+    "# generated-by: opencode-squad squad-draft",
+    "description: Per-model grunt. Owner rule: no secrets.",
+    "mode: subagent",
+    "model: p/m#high",
+    "steps: 9",
+    "---",
+    "body",
+  ].join("\n");
+  expect(parseAgentFile(legacy)).toEqual({ modelId: "p/m", entry: { variant: "high", steps: 9 } });
+});
+
+test("parseAgentFile ignores a leading BOM", () => {
+  expect(parseAgentFile("\uFEFF---\nmodel: p/m\n---\n").modelId).toBe("p/m");
 });
 
 test("buildRoster groups by role, keyed and sorted by model id", () => {

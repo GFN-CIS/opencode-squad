@@ -35,19 +35,18 @@
 // means both", which had to be explained in three places; here an agent either
 // appears in a role map or it does not, and there is no rule to misread.
 
+import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
+
 /** Roster key -> opencode agent role. `grunts` reads better than `grunt`. */
 export const ROLE_KEYS = /** @type {const} */ ({ grunts: "grunt", drills: "drill" });
 
-/**
- * Per-agent fields the roster owns.
- *
- * Deliberately NOT exposed, though opencode's agent schema has them:
- * `permission`/`permissions` (the read-only contract of a drill is a safety
- * property, not a preference), `mode`/`hidden`/`color` (ours), and `temperature`/`top_p`/
- * `options` — nobody has needed those, and `options` in particular can override
- * the variant silently, which is the opposite of what this roster is for.
- */
-const AGENT_KEYS = new Set(["variant", "notes", "steps", "disable"]);
+// Per-agent fields the roster owns are defined once, in the squad_patch
+// schema (src/roster-schema.js). Deliberately NOT exposed, though opencode's
+// agent schema has them: `permission`/`permissions` (the read-only contract of
+// a drill is a safety property, not a preference), `mode`/`hidden`/`color`
+// (ours), and `temperature`/`top_p`/`options` — nobody has needed those, and
+// `options` in particular can override the variant silently, which is the
+// opposite of what this roster is for.
 
 /**
  * Fences the roster-supplied `notes` inside the generated prompt body so a dump
@@ -61,9 +60,14 @@ export const NOTES_CLOSE = "<!-- /squad:notes -->";
 /**
  * Read one generated agent file back into a roster entry.
  *
- * A narrow line-scan of the frontmatter rather than a YAML parse: these files
- * are written by `agentMarkdown()`, so the shape is known, and a parser would
- * be a dependency bought for nothing.
+ * The frontmatter goes through the YAML parser (src/frontmatter.js) — the same
+ * reading OpenCode gives the file — so a quoted `model: "p/m#high"` yields
+ * `p/m` + `high`, not a stray quote. Legacy fields are still understood:
+ * a separate `variant:` key and `disable:` from V1 files. A header that is
+ * not valid YAML — this plugin's own files before 0.4.1 wrote descriptions
+ * unquoted — is read line by line instead (legacyHeaderFields), so such an
+ * agent stays in the roster and the next write repairs it. A file without a
+ * frontmatter block yields no model.
  *
  * @param {string} text  contents of a `grunt-*.md` / `drill-*.md`
  * @returns {{modelId?: string, entry: Record<string, any>}}
@@ -73,22 +77,21 @@ export function parseAgentFile(text) {
   /** @type {Record<string, any>} */
   const entry = {};
   let modelId;
-  const lines = src.split("\n");
-  if (lines[0]?.trim() === "---") {
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.trim() === "---") break;
-      const m = line.match(/^([a-z_]+):\s*(\S.*?)\s*$/);
-      if (!m) continue;
-      const [, key, value] = m;
-      if (key === "model") {
-        const [id, variant] = value.split("#");
-        modelId = id;
-        if (variant) entry.variant = variant;
-      } else if (key === "variant") entry.variant = value;
-      else if (key === "steps") entry.steps = Number(value);
-      else if ((key === "disable" || key === "disabled") && value === "true") entry.disable = true;
+  const fm = readFrontmatter(src);
+  // A header that is not YAML is read line by line: that is what this
+  // plugin's own files from before 0.4.1 need (see legacyHeaderFields).
+  const fields =
+    fm.state === "ok" ? fm.fields : fm.state === "invalid" ? legacyHeaderFields(fm.header) : null;
+  if (fields) {
+    const { model, variant, steps, disable, disabled } = fields;
+    if (typeof model === "string" && model.trim()) {
+      const [id, suffix] = model.trim().split("#");
+      modelId = id.trim() || undefined;
+      if (suffix?.trim()) entry.variant = suffix.trim();
     }
+    if (typeof variant === "string" && variant.trim()) entry.variant = variant.trim();
+    if (steps !== undefined && steps !== null) entry.steps = Number(steps);
+    if ([disable, disabled].some((v) => v === true || v === "true")) entry.disable = true;
   }
   const open = src.indexOf(NOTES_OPEN);
   const close = src.indexOf(NOTES_CLOSE);
@@ -131,72 +134,6 @@ export function buildRoster(files) {
   return { roster, conflicts };
 }
 
-/**
- * Validate an edited roster. Hand-rolled rather than schema-driven: the shape
- * is shallow, and a validator dependency in a scaffolder earns less than it
- * costs. Reports every problem at once — someone fixing an edited document
- * should not discover the mistakes one run at a time.
- *
- * `description` is refused with a pointer to where it belongs: the plugin
- * builds it from model_data.json (describeAgent in workers.js), so a
- * hand-written one would be overwritten at the next start anyway.
- *
- * @param {unknown} doc
- * @returns {string[]}  empty when valid
- */
-export function validateRoster(doc) {
-  const errors = [];
-  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
-    return ["roster must be a JSON object"];
-  }
-  const obj = /** @type {Record<string, unknown>} */ (doc);
-  for (const key of Object.keys(obj)) {
-    if (!(key in ROLE_KEYS)) {
-      errors.push(`unknown top-level key "${key}" (expected ${Object.keys(ROLE_KEYS).join(", ")})`);
-    }
-  }
-  for (const key of Object.keys(ROLE_KEYS)) {
-    const map = obj[key];
-    if (map === undefined) continue;
-    if (typeof map !== "object" || map === null || Array.isArray(map)) {
-      errors.push(`${key} must be an object keyed by model id`);
-      continue;
-    }
-    for (const [modelId, raw] of Object.entries(map)) {
-      const at = `${key}["${modelId}"]`;
-      if (!/^[^/#]+\/[^#]+$/.test(modelId)) {
-        errors.push(`${at}: "${modelId}" is not a provider/model id`);
-      }
-      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-        errors.push(`${at} must be an object (use {} for no overrides)`);
-        continue;
-      }
-      const entry = /** @type {Record<string, unknown>} */ (raw);
-      for (const k of Object.keys(entry)) {
-        if (k === "description") {
-          errors.push(
-            `${at}.description: descriptions are generated by the plugin from ` +
-              `model_data.json — put a routing rule in its models["${modelId}"].info ` +
-              "instead, and leave description out.",
-          );
-        } else if (!AGENT_KEYS.has(k)) errors.push(`${at} has unknown key "${k}"`);
-      }
-      for (const k of ["variant", "notes"]) {
-        if (entry[k] !== undefined && (typeof entry[k] !== "string" || !String(entry[k]).trim())) {
-          errors.push(`${at}.${k} must be a non-empty string when present`);
-        }
-      }
-      if (entry.steps !== undefined && (!Number.isInteger(entry.steps) || entry.steps <= 0)) {
-        errors.push(`${at}.steps must be a positive integer when present`);
-      }
-      if (entry.disable !== undefined && typeof entry.disable !== "boolean") {
-        errors.push(`${at}.disable must be a boolean when present`);
-      }
-    }
-  }
-  return errors;
-}
-
 /** Flatten a roster tree to `"<role> <modelId>" -> entry`, for diffing. */
 function flatten(roster) {
   const out = new Map();
@@ -231,9 +168,11 @@ export function diffRoster(current, next) {
       added.push(k);
       continue;
     }
-    const fields = [...AGENT_KEYS].filter(
-      (f) => JSON.stringify(before[f] ?? null) !== JSON.stringify(entry[f] ?? null),
-    );
+    // Every field either side carries: entries are validated against the
+    // roster schema, and parseAgentFile reads back only those fields.
+    const fields = [...new Set([...Object.keys(before), ...Object.keys(entry ?? {})])]
+      .sort()
+      .filter((f) => JSON.stringify(before[f] ?? null) !== JSON.stringify(entry[f] ?? null));
     if (fields.length === 0) {
       unchanged.push(k);
       continue;

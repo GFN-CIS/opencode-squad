@@ -2,8 +2,7 @@
 // opencodeDataDir) and the default agent dir built on it (src/squad-apply.js).
 // Covers set/unset/empty XDG env vars and the regression guard that keeps
 // dotdir path segments in src/paths.js and /tmp literals out of tests.
-// Not covered: cacheDir (src/benchmark-cache.js) — tested in
-// tests/benchmark-cache.test.js. Run: npx vitest run tests/paths.test.js
+// Run: npx vitest run tests/paths.test.js
 
 import fs from "node:fs";
 import path from "node:path";
@@ -43,15 +42,15 @@ test("defaultAgentDir honors XDG_CONFIG_HOME", () => {
   expect(defaultAgentDir()).toBe(path.join("/xdg/cfg", "opencode", "agent"));
 });
 
-// The dotdir building blocks live only in src/paths.js (XDG-aware) and
-// src/benchmark-cache.js (cacheDir); tmp paths use os.tmpdir(), never a
-// hardcoded "/tmp/" literal — that only exists on this dev machine, not CI.
+// The dotdir building blocks live only in src/paths.js (XDG-aware); tmp paths
+// use os.tmpdir(), never a hardcoded "/tmp/" literal — that only exists on this
+// dev machine, not CI.
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GUARD_SELF = path
   .relative(ROOT, fileURLToPath(import.meta.url))
   .split(path.sep)
   .join("/");
-const DOTDIR_ALLOWED = new Set(["src/paths.js", "src/benchmark-cache.js"]);
+const DOTDIR_ALLOWED = new Set(["src/paths.js"]);
 const GUARD_ROOTS = ["src", path.join(".opencode", "lib"), "scripts", "tests"];
 
 function listJsFiles(dir, out = []) {

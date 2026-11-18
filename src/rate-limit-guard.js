@@ -237,9 +237,20 @@ function humanizeSeconds(seconds) {
  * this guard abort it purely because the wall clock ran out, so there is no
  * error text and no retry-after to report at all.
  *
- * @param {{model: string, provider: string, reason: "single_wait" | "cumulative" | "terminal_error" | "silent_hang", waitMs?: number, cumulativeMs?: number, until?: number, silentMs?: number, description?: string, errorText?: string}} info
+ * Every variant says the subagent may already have acted: a grunt edits and
+ * runs commands, so a provider failure mid-task can follow a completed write.
+ * For `silent_hang`, `interrupt` says what the interrupt call actually did —
+ * "confirmed" (the host stopped an active execution), "idle" (nothing was
+ * running any more) or "unconfirmed" (the call failed or said nothing), in
+ * which case the child may still be running.
+ *
+ * @param {{model: string, provider: string, reason: "single_wait" | "cumulative" | "terminal_error" | "silent_hang", waitMs?: number, cumulativeMs?: number, until?: number, silentMs?: number, description?: string, errorText?: string, interrupt?: "confirmed" | "idle" | "unconfirmed"}} info
  */
 export function formatGuardNote(info) {
+  const SIDE_EFFECTS =
+    "The subagent may already have changed files or run commands before it stopped: check the outcome before redispatching work with side effects.";
+  const REROUTE =
+    "Pick a different grunt/drill (a different model/provider) from your inventory and retry what is left of the task.";
   // `until` is an absolute epoch ms (from the provider's own retry-after
   // signal) when we have one; otherwise honestly say "unknown" instead of
   // implying a deadline that doesn't exist (e.g. terminal_error/silent_hang
@@ -251,18 +262,36 @@ export function formatGuardNote(info) {
       "[RATE LIMIT GUARD]",
       `The task${info.description ? ` "${info.description}"` : ""} on \`${info.model}\` (${info.provider}) failed with an error matching this guard's rate/usage-limit patterns${info.errorText ? `: "${info.errorText}"` : ""}.`,
       `Rate limited till ${untilStr}.`,
-      "This is NOT a real task failure — it never got a chance to run.",
-      "Pick a different grunt/drill (a different model/provider) from your inventory and retry the same task.",
+      "The provider failed, not the task.",
+      SIDE_EFFECTS,
+      REROUTE,
     ].join(" ");
   }
   if (info.reason === "silent_hang") {
     const silentStr = humanizeSeconds((info.silentMs ?? 0) / 1000);
+    const head = `The task${info.description ? ` "${info.description}"` : ""} on \`${info.model}\` (${info.provider}) produced no activity at all for ~${silentStr}`;
+    if (info.interrupt === "confirmed") {
+      return [
+        "[RATE LIMIT GUARD]",
+        `${head} and was interrupted — likely a provider/SDK-internal retry loop that never surfaced as a visible error or retry signal.`,
+        `Rate limited till ${untilStr}.`,
+        SIDE_EFFECTS,
+        REROUTE,
+      ].join(" ");
+    }
+    if (info.interrupt === "idle") {
+      return [
+        "[RATE LIMIT GUARD]",
+        `${head}, but by the time the guard tried to interrupt it, it was no longer running: it may have finished or failed on its own.`,
+        "Read its result (squad_session) before doing anything else.",
+        "If it did not finish the work, check what it changed, then pick a different grunt/drill (a different model/provider) from your inventory for the rest.",
+      ].join(" ");
+    }
     return [
       "[RATE LIMIT GUARD]",
-      `The task${info.description ? ` "${info.description}"` : ""} on \`${info.model}\` (${info.provider}) produced no activity at all for ~${silentStr} and was aborted — likely a provider/SDK-internal retry loop that never surfaced as a visible error or retry signal.`,
-      `Rate limited till ${untilStr}.`,
-      "This is NOT a real task failure — it never got a chance to run.",
-      "Pick a different grunt/drill (a different model/provider) from your inventory and retry the same task.",
+      `${head}. The guard tried to interrupt it but could NOT confirm the interrupt — it may STILL be running.`,
+      "Check it with squad_session before dispatching this task anywhere else: two agents on one task will collide.",
+      "Once it is stopped, check what it changed, then pick a different grunt/drill (a different model/provider) from your inventory for what is left.",
     ].join(" ");
   }
   const waitStr = humanizeSeconds((info.waitMs ?? 0) / 1000);
@@ -275,7 +304,8 @@ export function formatGuardNote(info) {
     "[RATE LIMIT GUARD]",
     `The task${info.description ? ` "${info.description}"` : ""} on \`${info.model}\` (${info.provider}) was cancelled because ${why} — past this guard's configured threshold.`,
     `Rate limited till ${untilStr}${info.reason === "cumulative" ? " (last announced wait — the provider may extend this on the next retry)" : ""}.`,
-    "This is NOT a real task failure. Do not wait for this model to recover.",
-    "Pick a different grunt/drill (a different model/provider) from your inventory and retry the same task.",
+    "The provider failed, not the task. Do not wait for this model to recover.",
+    SIDE_EFFECTS,
+    REROUTE,
   ].join(" ");
 }

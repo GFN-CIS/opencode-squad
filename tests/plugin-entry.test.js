@@ -37,12 +37,39 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
     squadDescriber: () => (role, id) => `${role} on ${id}. Owner rule: no secrets.`,
     startMetricsRefresh: () => {},
     getMetrics: async () => data,
-    loadModelData: () => null,
-    loadProviderPlans: () => ({ "zai-coding-plan": "GLM Coding Pro" }),
+    loadModelSettings: () => ({
+      models: {},
+      providers: { "zai-coding-plan": "GLM Coding Pro" },
+      found: true,
+      problems: [],
+    }),
     loadAuthTypes: () => ({}),
     METRICS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-metrics-")),
   };
 });
+
+/**
+ * plugin.setup against a minimal OpenCode 2 host with the guard off. Each
+ * override replaces a whole host domain, so a test shows exactly what it feeds.
+ *
+ * @param {{directory: string} & Record<string, unknown>} host
+ */
+async function setupHost({ directory, ...over }) {
+  const tools = new Map();
+  const dispose = await plugin.setup({
+    location: { directory },
+    options: { rate_limit_guard: { enabled: false } },
+    skill: { transform: async () => {} },
+    session: { hook: async () => {} },
+    model: { list: async () => [] },
+    tool: {
+      hook: async () => {},
+      transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
+    },
+    ...over,
+  });
+  return { tools, dispose };
+}
 
 const dirs = [];
 afterEach(() => {
@@ -58,18 +85,7 @@ test("package exposes only setup and squad_patch generates native agents", async
     grunts: { "a/b": { variant: "high" } },
     drills: { "a/b": { variant: "high" } },
   };
-  const tools = new Map();
-  const dispose = await plugin.setup({
-    location: { directory },
-    options: { rate_limit_guard: { enabled: false } },
-    skill: { transform: async () => {} },
-    session: { hook: async () => {} },
-    model: { list: async () => [] },
-    tool: {
-      hook: async () => {},
-      transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
-    },
-  });
+  const { tools, dispose } = await setupHost({ directory });
   let wrapped;
   try {
     const patch = tools.get("squad_patch");
@@ -113,12 +129,8 @@ test("squad_metrics renders the asked models, squad roles and full detail", asyn
     fetched.push(String(url));
     return { ok: true, status: 200, text: async () => JSON.stringify(detail) };
   });
-  const tools = new Map();
-  const dispose = await plugin.setup({
-    location: { directory },
-    options: { rate_limit_guard: { enabled: false } },
-    skill: { transform: async () => {} },
-    session: { hook: async () => {} },
+  const { tools, dispose } = await setupHost({
+    directory,
     agent: {
       list: async () => [
         {
@@ -134,10 +146,6 @@ test("squad_metrics renders the asked models, squad roles and full detail", asyn
         { providerID: "anthropic", id: "claude-sonnet-5-5" },
         { providerID: "opencode", id: "big-pickle" },
       ],
-    },
-    tool: {
-      hook: async () => {},
-      transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
     },
   });
   try {
@@ -195,11 +203,8 @@ test("squad_session reports a child's cache verdict and the caller's own clock",
       },
     ],
   };
-  const tools = new Map();
-  const dispose = await plugin.setup({
-    location: { directory },
-    options: { rate_limit_guard: { enabled: false } },
-    skill: { transform: async () => {} },
+  const { tools, dispose } = await setupHost({
+    directory,
     session: {
       hook: async () => {},
       context: async ({ sessionID }) => {
@@ -207,11 +212,6 @@ test("squad_session reports a child's cache verdict and the caller's own clock",
         if (sessionID === "ses_bogus") throw { _tag: "NotFoundError" };
         return { data: sessions[sessionID] ?? [] };
       },
-    },
-    model: { list: async () => [] },
-    tool: {
-      hook: async () => {},
-      transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
     },
   });
   try {
@@ -235,6 +235,52 @@ test("squad_session reports a child's cache verdict and the caller's own clock",
     const own = (await session.execute({}, { agent: "build", sessionID: "ses_none" })).content;
     expect(own).toMatch(/^now: /);
     expect(own).not.toContain("your context");
+  } finally {
+    dispose();
+  }
+});
+
+test("squad_patch validates its input with the same schema it advertises", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { tools, dispose } = await setupHost({ directory });
+  const patch = tools.get("squad_patch");
+  const run = async (input) =>
+    (await patch.execute({ directory, ...input }, { agent: "build" })).content;
+  try {
+    // Advertised: the plain JSON Schema subset, no Zod-only keywords.
+    const advertised = JSON.stringify(patch.input);
+    for (const keyword of ["$schema", "propertyNames", "pattern", "9007199254740991"]) {
+      expect(advertised).not.toContain(keyword);
+    }
+    expect(patch.input.properties.grunts.additionalProperties.additionalProperties).toBe(false);
+
+    // Invalid fields and keys — even with allow_remove — write nothing.
+    for (const allow_remove of [false, true]) {
+      const bad = await run({
+        allow_remove,
+        grunts: { "a/b": { variant: "  ", steps: 0, colour: "red" }, nope: {} },
+      });
+      expect(bad).toContain("Roster is invalid");
+      expect(bad).toContain('grunts["a/b"].variant must be a non-empty string when present');
+      expect(bad).toContain('grunts["a/b"].steps must be a positive integer when present');
+      expect(bad).toContain('grunts["a/b"] has unknown key "colour"');
+      expect(bad).toContain('grunts["nope"]: "nope" is not a provider/model id');
+      expect(fs.readdirSync(directory)).toEqual([]);
+    }
+    // The call's own switches go through the same schema.
+    const switches = await run({ allow_remove: "true", grunts: { "a/b": {} } });
+    expect(switches).toContain("allow_remove must be a boolean when present");
+    expect(fs.readdirSync(directory)).toEqual([]);
+
+    // Wrapped or missing roster: refused before validation, nothing written.
+    expect(await run({ roster: { grunts: { "a/b": {} } } })).toContain("Refused: pass `grunts`");
+    expect(await run({})).toContain("Refused: pass `grunts`");
+    expect(fs.readdirSync(directory)).toEqual([]);
+
+    // A valid one-role roster is written.
+    expect(await run({ grunts: { "a/b": { variant: "high" } } })).toContain("wrote  grunt-a-b.md");
+    expect(fs.readdirSync(directory)).toEqual(["grunt-a-b.md"]);
   } finally {
     dispose();
   }

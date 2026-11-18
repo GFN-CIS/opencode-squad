@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { BOOTSTRAP_MARKER } from "../src/bootstrap.js";
-import { buildLimitMap, buildVariantMap, estimateContextTokens } from "../src/context.js";
+import { estimateContextTokens, indexModelCatalog } from "../src/context.js";
 import { formatInventory, hasSquad } from "../src/inventory.js";
 import { PROMPT_CLOSE, promptOpen } from "../src/prompt-inject.js";
 import { evaluateRetry, initGuardState, normalizeGuardConfig } from "../src/rate-limit-guard.js";
@@ -8,7 +8,6 @@ import {
   applyOrchestratorTransformV2,
   applySystemPartsTransform,
   normalizeAgents,
-  normalizeProviders,
   normalizeUsageMessages,
   retryToStatus,
 } from "../src/v2/adapt.js";
@@ -69,14 +68,13 @@ describe("agents and providers", () => {
     expect(normalizeAgents(undefined)).toEqual([]);
   });
 
-  test("normalizeProviders feeds buildLimitMap and buildVariantMap", () => {
-    const providers = normalizeProviders(v2Models);
-    expect(buildLimitMap(providers)).toMatchObject({ "zai/glm-5.3": 200000, "glm-5.3": 200000 });
-    expect(buildVariantMap(providers)).toEqual({
+  test("indexModelCatalog reads the host's flat model list in one pass", () => {
+    const { limits, variants } = indexModelCatalog(v2Models);
+    expect(limits).toMatchObject({ "zai/glm-5.3": 200000, "glm-5.3": 200000 });
+    expect(variants).toEqual({
       "zai/glm-5.3": ["low", "max"],
       "opencode/big-pickle": [],
     });
-    expect(normalizeProviders(null)).toEqual([]);
   });
 });
 

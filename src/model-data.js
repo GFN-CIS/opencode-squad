@@ -15,20 +15,28 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
+
 /**
- * Pull the model id out of an agent markdown file's YAML frontmatter.
- * Scoped to the leading `---`…`---` block so a stray `model:` in the body
- * (prompt text) can't be mistaken for the agent's model.
+ * Pull the model id out of an agent markdown file's frontmatter, without its
+ * `#variant` suffix. Only the leading frontmatter block counts: a `model:`
+ * line in the body (prompt text) is not the agent's model, and a file with no
+ * block has none. A block that is not valid YAML is read line by line (see
+ * legacyHeaderFields), as the roster reader does.
  *
  * @param {string} content
  * @returns {string|null}
  */
 export function extractModelId(content) {
-  const txt = String(content);
-  const fm = txt.match(/^---\n([\s\S]*?)\n---/);
-  const scope = fm ? fm[1] : txt;
-  const m = scope.match(/^model:\s*(.+?)\s*$/m);
-  return m ? m[1].split("#")[0].trim() : null;
+  const fm = readFrontmatter(content);
+  const model =
+    fm.state === "ok"
+      ? fm.fields.model
+      : fm.state === "invalid"
+        ? legacyHeaderFields(fm.header).model
+        : undefined;
+  if (typeof model !== "string") return null;
+  return model.split("#")[0].trim() || null;
 }
 
 /**
@@ -36,29 +44,43 @@ export function extractModelId(content) {
  * `provider/model` ids they target (a grunt and a drill of the same model
  * collapse to one entry). Hand-authored grunt-/drill- agents count too.
  *
+ * `unreadable` lists files that could not be read at all: their model is
+ * unknown, not absent, so a caller that would DROP models missing from `ids`
+ * must not act on this scan.
+ *
  * @param {string} dir  agent directory (e.g. ~/.config/opencode/agent)
- * @returns {string[]}  sorted, deduped model ids
+ * @returns {{ids: string[], unreadable: string[]}}  ids sorted and deduped
  */
-export function discoverSquadModels(dir) {
+export function scanSquadModels(dir) {
   let files;
   try {
     files = fs.readdirSync(dir);
   } catch {
-    return [];
+    return { ids: [], unreadable: [] };
   }
   const ids = new Set();
-  for (const f of files) {
+  const unreadable = [];
+  for (const f of files.sort()) {
     if (!/^(?:grunt|drill)-.*\.md$/.test(f)) continue;
     let txt;
     try {
       txt = fs.readFileSync(path.join(dir, f), "utf8");
     } catch {
+      unreadable.push(f);
       continue;
     }
     const id = extractModelId(txt);
     if (id) ids.add(id);
   }
-  return [...ids].sort();
+  return { ids: [...ids].sort(), unreadable };
+}
+
+/**
+ * @param {string} dir  agent directory
+ * @returns {string[]}  sorted, deduped model ids (see scanSquadModels)
+ */
+export function discoverSquadModels(dir) {
+  return scanSquadModels(dir).ids;
 }
 
 // Fields earlier versions copied in from Artificial Analysis. They are stale
@@ -144,16 +166,55 @@ export function modelsChanged(existing, snapshot) {
 }
 
 /**
- * Read and parse a model_data.json file. Returns null if absent/unreadable.
+ * Read a model_data.json file, keeping three outcomes apart:
+ *
+ *   missing — no file: the first-run path, safe to generate one;
+ *   invalid — the file exists but cannot be read or is not a JSON object with
+ *             object-valued `models` / `providers`. It is the owner's
+ *             hand-edited file, so NOTHING may overwrite it; `reason` names
+ *             the problem without quoting its contents (V8's JSON errors embed
+ *             a snippet of the text, which may hold private routing rules);
+ *   ok      — parsed, with `models` defaulted to {}.
  *
  * @param {string} file  path to model_data.json
- * @returns {{_meta?:object, models:Record<string, any>}|null}
+ * @returns {{state: "missing"} | {state: "invalid", reason: string} |
+ *   {state: "ok", data: {_meta?: object, models: Record<string, any>, providers?: Record<string, any>, [k: string]: any}}}
  */
-export function readModelData(file) {
+export function readModelDataFile(file) {
+  let text;
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return parsed?.models || parsed?.providers ? { models: {}, ...parsed } : null;
-  } catch {
-    return null;
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    if (e?.code === "ENOENT") return { state: "missing" };
+    return { state: "invalid", reason: `unreadable (${e?.code ?? e?.name ?? "error"})` };
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    return { state: "invalid", reason: jsonErrorWhere(e) };
+  }
+  const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+  if (!isObject(parsed)) return { state: "invalid", reason: "not a JSON object" };
+  for (const key of ["models", "providers"]) {
+    if (parsed[key] !== undefined && !isObject(parsed[key])) {
+      return { state: "invalid", reason: `"${key}" is not an object` };
+    }
+  }
+  return { state: "ok", data: { models: {}, ...parsed } };
+}
+
+/**
+ * Where a JSON.parse failed, without the source snippet V8 puts in the message.
+ *
+ * @param {unknown} e
+ */
+function jsonErrorWhere(e) {
+  const msg = e instanceof Error ? e.message : "";
+  const lc = /\(line (\d+) column (\d+)\)/.exec(msg);
+  if (lc) return `invalid JSON at line ${lc[1]}, column ${lc[2]}`;
+  const pos = /at position (\d+)/.exec(msg);
+  if (pos) return `invalid JSON at position ${pos[1]}`;
+  if (/end of JSON input/i.test(msg)) return "invalid JSON: unexpected end of input";
+  return "invalid JSON";
 }

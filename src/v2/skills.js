@@ -1,5 +1,6 @@
 /**
- * Bundled skills for OpenCode 2 (shared verbatim with opencode-time-logger).
+ * Bundled skills for OpenCode 2 (derived from opencode-time-logger's loader;
+ * the frontmatter is now read by src/frontmatter.js).
  *
  * OpenCode 2 has no config hook, so the plugin reads each `<dir>/<skill>/SKILL.md`
  * itself and registers it through `ctx.skill.transform`. The registered entry
@@ -11,10 +12,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { readFrontmatter } from "../frontmatter.js";
+
 /**
- * Split a SKILL.md into its frontmatter fields and body. Handles the subset of
- * YAML that skill frontmatter uses: `key: value`, single- or double-quoted
- * values, and `>` / `|` block scalars. Anything fancier is read as plain text.
+ * Split a SKILL.md into its frontmatter fields and body. Fields are read with
+ * the YAML parser (src/frontmatter.js); only string values are kept, since the
+ * skill entry carries text. A file without frontmatter is all body; a header
+ * that is not valid YAML gives no fields (the folder name stands in for the
+ * name) and the text after it as the body.
  *
  * Pure function — no I/O.
  *
@@ -22,35 +27,14 @@ import path from "node:path";
  * @returns {{ fields: Record<string, string>, body: string }}
  */
 export function parseSkillFile(text) {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
-  if (!match) return { fields: {}, body: text };
-
+  const fm = readFrontmatter(text);
+  if (fm.state !== "ok") return { fields: {}, body: fm.body };
   /** @type {Record<string, string>} */
   const fields = {};
-  const lines = match[1].split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const kv = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(lines[i]);
-    if (!kv) continue;
-    const [, key, raw] = kv;
-    let value = raw.trim();
-    if (value === ">" || value === "|" || value === ">-" || value === "|-") {
-      const block = [];
-      while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1])) {
-        block.push(lines[++i].trim());
-      }
-      value = block.join(value.startsWith(">") ? " " : "\n");
-    } else if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
-      try {
-        value = JSON.parse(value);
-      } catch {
-        value = value.slice(1, -1);
-      }
-    } else if (value.startsWith("'") && value.endsWith("'") && value.length >= 2) {
-      value = value.slice(1, -1).replace(/''/g, "'");
-    }
-    fields[key] = value;
+  for (const [key, value] of Object.entries(fm.fields)) {
+    if (typeof value === "string") fields[key] = value;
   }
-  return { fields, body: text.slice(match[0].length) };
+  return { fields, body: fm.body };
 }
 
 /**
