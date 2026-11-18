@@ -43,6 +43,25 @@ test("parseAgentFile returns an empty entry for a file with no frontmatter", () 
   expect(parseAgentFile("just a body\nmodel: x/y")).toEqual({ modelId: undefined, entry: {} });
 });
 
+test("parseAgentFile reads a quoted model and variant without the quotes, LF or CRLF", () => {
+  for (const eol of ["\n", "\r\n"]) {
+    const text = ["---", 'model: "p/m#high"', "steps: 7", "disabled: true", "---", "body"].join(
+      eol,
+    );
+    expect(parseAgentFile(text)).toEqual({
+      modelId: "p/m",
+      entry: { variant: "high", steps: 7, disable: true },
+    });
+  }
+});
+
+test("parseAgentFile treats a header that is not YAML as no agent", () => {
+  expect(parseAgentFile("---\nmodel: p/m\npermissions: [oops\n---\n")).toEqual({
+    modelId: undefined,
+    entry: {},
+  });
+});
+
 test("buildRoster groups by role, keyed and sorted by model id", () => {
   const { roster, conflicts } = buildRoster([
     { role: "grunt", modelId: "z/last", entry: {} },

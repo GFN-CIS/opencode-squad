@@ -15,20 +15,21 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { readFrontmatter } from "./frontmatter.js";
+
 /**
- * Pull the model id out of an agent markdown file's YAML frontmatter.
- * Scoped to the leading `---`…`---` block so a stray `model:` in the body
- * (prompt text) can't be mistaken for the agent's model.
+ * Pull the model id out of an agent markdown file's YAML frontmatter, without
+ * its `#variant` suffix. Only the leading frontmatter block counts: a
+ * `model:` line in the body (prompt text) is not the agent's model, and a file
+ * with no block, or a block that is not valid YAML, has none.
  *
  * @param {string} content
  * @returns {string|null}
  */
 export function extractModelId(content) {
-  const txt = String(content);
-  const fm = txt.match(/^---\n([\s\S]*?)\n---/);
-  const scope = fm ? fm[1] : txt;
-  const m = scope.match(/^model:\s*(.+?)\s*$/m);
-  return m ? m[1].split("#")[0].trim() : null;
+  const fm = readFrontmatter(content);
+  if (fm.state !== "ok" || typeof fm.fields.model !== "string") return null;
+  return fm.fields.model.split("#")[0].trim() || null;
 }
 
 /**

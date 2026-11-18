@@ -96,10 +96,27 @@ describe("V2 skills", () => {
       description: 'say "hi"',
     });
     expect(parseSkillFile("---\nname: 'it''s'\n---\n").fields.name).toBe("it's");
+    // YAML block scalars: `|` keeps lines and the final newline, `>-` folds.
     const block = parseSkillFile("---\nname: b\ndescription: |\n  one\n  two\n---\nBody");
-    expect(block.fields.description).toBe("one\ntwo");
+    expect(block.fields.description).toBe("one\ntwo\n");
     expect(block.body).toBe("Body");
+    expect(parseSkillFile("---\ndescription: >-\n  one\n  two\n---\n").fields.description).toBe(
+      "one two",
+    );
     expect(parseSkillFile("plain").body).toBe("plain");
+  });
+
+  test("parseSkillFile keeps a literal description past an empty line, LF or CRLF", () => {
+    const lf = "---\nname: c\ndescription: |\n  first para\n\n  second para\n---\nBody\n";
+    expect(parseSkillFile(lf).fields.description).toBe("first para\n\nsecond para\n");
+    const crlf = lf.replaceAll("\n", "\r\n");
+    const parsed = parseSkillFile(crlf);
+    expect(parsed.fields.description).toBe("first para\n\nsecond para\n");
+    expect(parsed.body).toBe("Body\r\n");
+  });
+
+  test("parseSkillFile: a header that is not YAML gives no fields, and the body after it", () => {
+    expect(parseSkillFile("---\nname: [unclosed\n---\nBody")).toEqual({ fields: {}, body: "Body" });
   });
 
   test("loadSkills reads the bundled skills and skips what it cannot read", () => {
