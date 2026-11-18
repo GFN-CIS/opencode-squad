@@ -7,7 +7,7 @@ export const BOOTSTRAP_MARKER = "<ORCHESTRATE_BOOTSTRAP>";
 
 /**
  * @param {string} inventoryMarkdown
- * @param {{modelText?:string, hasSquad?:boolean}} [facts]
+ * @param {{modelText?:string|null, hasSquad?:boolean}} [facts]
  *        facts that change only with the session's model or the squad.
  *        `hasSquad` is whether a `grunt-*`/`drill-*`
  *        agent has been drafted — there is no bundled fallback agent, so when

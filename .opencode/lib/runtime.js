@@ -48,6 +48,7 @@ export const METRICS_DIR = metricsDir();
 const METRICS_CHECK_INTERVAL_MS = 4 * 3600_000;
 /** @type {Promise<unknown> | null} */
 let _metricsInflight = null;
+/** @type {ReturnType<typeof setInterval> | undefined} */
 let _metricsTimer;
 
 function refreshMetricsNow() {
@@ -203,7 +204,8 @@ export function ensureGlobalModelDataFresh() {
     writeFileAtomic(file, `${JSON.stringify(snapshot, null, 2)}\n`);
     return { wrote: true };
   } catch (e) {
-    const problem = `${file}: ${e?.code ?? e?.name ?? "error"}`;
+    const err = /** @type {NodeJS.ErrnoException} */ (e);
+    const problem = `${file}: ${err?.code ?? err?.name ?? "error"}`;
     console.warn(`[opencode-squad] model_data.json refresh failed — ${problem}`);
     return { wrote: false, problem };
   }
@@ -232,7 +234,10 @@ export function describerScope(agentDir, directory) {
   return path.resolve(agentDir) === path.resolve(defaultAgentDir()) ? null : (directory ?? null);
 }
 
-/** @param {ModelSettings} settings */
+/**
+ * @param {ModelSettings} settings
+ * @returns {(role: "grunt"|"drill", modelId: string) => string}
+ */
 function describerFrom({ models, providers }) {
   const authTypes = loadAuthTypes();
   return (role, modelId) =>

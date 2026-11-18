@@ -29,6 +29,7 @@ export const MIN_PREFIX_TOKENS = 2000;
 // Gap buckets, in seconds. Boundaries are placed on the TTLs actually in play
 // (300s Anthropic, 1800s OpenAI) so a cliff lands on an edge rather than being
 // smeared across one.
+/** @type {Array<[number, number]>} */
 const DEFAULT_BUCKETS = [
   [0, 300],
   [300, 600],
@@ -55,6 +56,7 @@ const DEFAULT_BUCKETS = [
  * @returns {Array<{gapSeconds:number, ratio:number, hit:boolean, providerID:string, modelID:string, sessionID?:string}>}
  */
 export function collectSamples(messages, sessionID) {
+  /** @type {Array<{gapSeconds:number, ratio:number, hit:boolean, providerID:string, modelID:string, sessionID?:string}>} */
   const out = [];
   if (!Array.isArray(messages)) return out;
   for (let i = 1; i < messages.length; i++) {
@@ -152,6 +154,7 @@ export function deriveTtl(rows, opts = {}) {
   return { ttlSeconds: ttl, reason, confidence: thinnest >= 30 ? "ok" : "weak" };
 }
 
+/** @param {number} s */
 const humanGap = (s) => (Number.isFinite(s) ? `${Math.round(s / 60)}m` : "∞");
 
 /**

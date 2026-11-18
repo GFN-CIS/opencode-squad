@@ -81,6 +81,7 @@ const { $schema: _dialect, ...patchJsonSchema } = z.toJSONSchema(SquadPatchInput
 export const SQUAD_PATCH_INPUT = patchJsonSchema;
 
 /** `grunts["a/b"].variant` for a Zod issue path. */
+/** @param {PropertyKey[]} path */
 function where(path) {
   let out = "";
   for (const [i, seg] of path.entries()) {
