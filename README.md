@@ -51,10 +51,11 @@ The package entry (`index.js`) exports the OpenCode 2 `setup` in `.opencode/lib/
 | `squad-stall` | skill | The orchestrator's stall-breaking ladder — loaded on demand when it recognizes it's stuck (kept separate so a stall doesn't pull in the whole delegation protocol) |
 | `squad-draft` | skill | Scaffolds the per-model squad — discovers available models, proposes a tiered set, asks what to add/remove, then generates a hidden `grunt-<provider>-<model>` (executor) **and** `drill-<provider>-<model>` (reviewer) for each, giving the orchestrator a menu of models for both roles |
 | `squad-redteam` | skill | Cross-model red-team / second-opinion review — dispatches the same artifact or question to several `grunt-*` agents in parallel (user picks the panel via a multi-select question, defaulting to the single strongest grunt per provider) and has the orchestrator cross-analyze their independent findings into one consolidated report. Uses grunts, not drills, since the panel needs live MCP/gitlab/webfetch access to fetch the artifact itself. Same parallel-dispatch-and-consolidate idea as [`@alexmkx/opencode-multi-delegate`](https://github.com/AlexMKX/opencode-multi-delegate), reusing the squad's own grunts instead of a separate delegate config |
-| Bootstrap | hidden injection | Injected into the first user message of the `build` agent; sets the orchestrator role and selection rules, the current local time, the orchestrator's own model, and an inventory of subagents (each with its model) |
-| Context signal | hidden injection | A live `<ORCHESTRATE_CONTEXT>` line added to the latest user message each turn, reporting current context usage so the orchestrator can weigh it in the decision |
+| Bootstrap | system prompt | Appended to the `build` agent's system prompt; sets the orchestrator role and selection rules, the orchestrator's own model, and an inventory of subagents (each with its model) |
 
-The bootstrap carries live session facts resolved at injection time — the current local time (with timezone) and the model the orchestrator is actually running on (so an Opus session does not mistake itself for Sonnet). Each subagent in the inventory is listed with its description, its model and its **context window** (`ctx`, from opencode):
+The bootstrap lives in the system prompt and changes only when the squad or the orchestrator's model does, so it is cached with the rest of the system prompt and the conversation is never modified. Earlier versions injected it — together with the current time and the context size — into the latest user message on every request. Every prompt-cache entry past the system prompt then contained a user message *with* that block, which reverted to its bare text on the next turn, so each warm user turn re-wrote the whole conversation: ~$299 of $869 over 14 days of measured orchestrator sessions. The current time and the orchestrator's context size now come from `squad_session` with no arguments.
+
+The bootstrap names the model the orchestrator is actually running on (so an Opus session does not mistake itself for Sonnet). Each subagent in the inventory is listed with its description, its model and its **context window** (`ctx`, from opencode):
 
 ```
 - `grunt-openai-gpt-6-1-terra`: Code-strong mid-tier … (model: openai/gpt-6.1-terra · ctx 1.1M)
@@ -107,7 +108,7 @@ Fetching: at plugin start and then whenever data is older than **48 hours** (che
 
 The global file is refreshed at opencode startup: new squad models get an empty entry, removed ones are dropped, every hand-added field is kept, and the benchmark fields earlier versions copied in from Artificial Analysis are stripped. It is written only when something actually changed. A project's file is never auto-touched.
 
-"Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via `subagent`. Both injections target **only the `build` agent's own sessions** — grunt/drill subagent sessions are never injected into, so there is no recursion.
+"Hidden" means the subagents are registered but do not appear in the `@` mention menu. The orchestrator invokes them programmatically via `subagent`. The bootstrap goes **only into the `build` agent's own requests** — grunt/drill subagent sessions are never injected into, so there is no recursion.
 
 ---
 
@@ -491,7 +492,7 @@ The orchestrator picks **DELEGATE** when *any* signal is present (this is the de
 - **Depth** — it would take more than ~3 tool steps.
 - **Artifact** — it produces code, docs, or config.
 - **Heavy I/O** — it would ingest or generate a lot of raw material when you only need a summary (offload it, keep the orchestrator's context clean).
-- **Context pressure** — the fuller the orchestrator's own context already is, the more a heavy task should be delegated rather than burned into it. A live `<ORCHESTRATE_CONTEXT>` line (e.g. `~120k / 1000k (12%)`) reports the current size each turn so this is a real number, not a guess.
+- **Context pressure** — the fuller the orchestrator's own context already is, the more a heavy task should be delegated rather than burned into it. `squad_session` with no arguments reports the current size (e.g. `~120k / 1000k (12%)`), so this is a real number, not a guess.
 
 It picks **SELF** only for: pure Q&A / explanation, a single trivial read, or when you explicitly told it to.
 
@@ -520,7 +521,7 @@ Delegation isn't automatically the cheap option — three factors can flip it:
 
 - **Prompt/KV caching** — a fresh `grunt-*` session starts with no cache hit on your accumulated context, while continuing yourself on a provider with prompt caching reuses your already-cached prefix at a steep discount. For a small task on top of a large, already-cached context, finishing it yourself can beat the cost of writing a brief, spinning up a grunt cold, and reading its result back.
 - **Subscription vs API billing** — a grunt shown as `subscription: <plan>` by `squad_metrics` (see above) costs the user ~$0 marginally regardless of tokens; an API-billed grunt's cost scales with usage. When quality is comparable, the orchestrator prefers the subscription-covered delegate and saves API-billed models for when they're genuinely the better fit — not by default.
-- **Context pressure is not a panic button** — the live `<ORCHESTRATE_CONTEXT>` line is for genuinely heavy work, not an excuse to delegate every minor task once usage looks high. opencode compacts automatically, and for small/quick work the overhead of a task brief plus a grunt round-trip usually costs more than just doing it and letting compaction absorb the overflow.
+- **Context pressure is not a panic button** — the context size from `squad_session` is for genuinely heavy work, not an excuse to delegate every minor task once usage looks high. opencode compacts automatically, and for small/quick work the overhead of a task brief plus a grunt round-trip usually costs more than just doing it and letting compaction absorb the overflow.
 
 For full routing rules, escape hatches, and edge-case handling see [skills/squad-delegate/SKILL.md](skills/squad-delegate/SKILL.md).
 

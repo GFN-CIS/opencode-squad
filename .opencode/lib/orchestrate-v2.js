@@ -4,8 +4,9 @@
  * Host wiring over pure decision modules in src/:
  *
  *   - skills: registered via ctx.skill.transform (V2 has no config hook);
- *   - bootstrap + context-budget line: the `context` session hook, gated on
- *     the hook's own agent id (src/v2/adapt.js: applyOrchestratorTransformV2);
+ *   - bootstrap: appended to the orchestrator's system prompt by the `context`
+ *     session hook, gated on the hook's own agent id (src/v2/adapt.js:
+ *     applyOrchestratorTransformV2). Messages are never modified;
  *   - role-prompt refresh: the same hook, on the first system part;
  *   - squad_session / squad_compact / squad_dump / squad_patch / squad_metrics:
  *     ctx.tool.transform with JSON
@@ -85,7 +86,6 @@ import {
   squadDescriber,
   startMetricsRefresh,
   syncGlobalSquadDescriptions,
-  turnMemo,
 } from "./runtime.js";
 
 // squad_metrics({full: true}) returns ~2K tokens per model; cap the bill.
@@ -200,10 +200,7 @@ export default {
         await applyOrchestratorTransformV2(event, {
           orchestratorAgent: ORCHESTRATOR_AGENT,
           getInventory,
-          getLimitMap,
           getHasSquad: () => squadDrafted,
-          getUsageMessages: async () => normalizeUsageMessages(await readContext(event.sessionID)),
-          turnMemo,
         });
       } catch {
         // Best-effort: the turn goes out without the bootstrap.

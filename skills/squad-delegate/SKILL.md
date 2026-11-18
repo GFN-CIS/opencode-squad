@@ -206,8 +206,8 @@ though: capability and risk (§1a) still gate the choice; billing only breaks
 ties between comparably-fit candidates, or nudges you to route more volume to
 the flat-rate option when both would do.
 
-**Context pressure is not a panic button.** The live `<ORCHESTRATE_CONTEXT>`
-line exists so you weigh genuinely heavy work — something that would ingest or
+**Context pressure is not a panic button.** Your context size (from
+`squad_session` with no arguments) exists so you weigh genuinely heavy work — something that would ingest or
 generate a lot of raw material — against offloading it. It is not a trigger to
 delegate every minor task the moment usage looks high. opencode compacts your
 context automatically; for a small, quick task the overhead of writing a task
