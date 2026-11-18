@@ -39,8 +39,14 @@ test("the existing file's permission bits are kept", () => {
   const file = path.join(dir, "private.json");
   fs.writeFileSync(file, "old", { mode: 0o600 });
   writeFileAtomic(file, "new");
-  expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-  expect(fs.readFileSync(file, "utf8")).toBe("new");
+  // One descriptor for both checks, so they see the same file.
+  const fd = fs.openSync(file, "r");
+  try {
+    expect(fs.fstatSync(fd).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(fd, "utf8")).toBe("new");
+  } finally {
+    fs.closeSync(fd);
+  }
 });
 
 test("a failed write leaves the original and no temp file", () => {
