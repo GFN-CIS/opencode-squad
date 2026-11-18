@@ -7,8 +7,8 @@
  *   - bootstrap + context-budget line: the `context` session hook, gated on
  *     the hook's own agent id (src/v2/adapt.js: applyOrchestratorTransformV2);
  *   - role-prompt refresh: the same hook, on the first system part;
- *   - [TASK OUTCOME] / [CACHE STATUS]: `execute.after` on the `subagent` tool;
- *   - squad_compact / squad_dump / squad_patch: ctx.tool.transform with JSON
+ *   - squad_session / squad_compact / squad_dump / squad_patch / squad_metrics:
+ *     ctx.tool.transform with JSON
  *     Schema inputs (src/v2/schemas.js);
  *   - rate-limit guard: the `retry` session hook vetoes the retry outright
  *     while the event stream covers
@@ -37,6 +37,7 @@ import {
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
 import { validateRoster } from "../../src/roster.js";
+import { formatOwnStatus, formatSessionStatus, sessionFacts } from "../../src/session-status.js";
 import {
   applySquad,
   defaultAgentDir,
@@ -49,24 +50,20 @@ import {
   TOOL_DESCRIPTIONS,
   validateVariants,
 } from "../../src/squad-tools.js";
-import { subagentUsage, taskNotes } from "../../src/task-notes.js";
-import { isTaskResultEmpty } from "../../src/task-outcome.js";
 import {
-  appendToResult,
   applyOrchestratorTransformV2,
   applySystemPartsTransform,
-  lastAssistantModel,
   normalizeAgents,
   normalizeProviders,
   normalizeUsageMessages,
   retryToStatus,
-  subagentOutcome,
 } from "../../src/v2/adapt.js";
 import {
   SQUAD_COMPACT_INPUT,
   SQUAD_DUMP_INPUT,
   SQUAD_METRICS_INPUT,
   SQUAD_PATCH_INPUT,
+  SQUAD_SESSION_INPUT,
 } from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
 import {
@@ -207,39 +204,61 @@ export default {
       }
     });
 
-    // --- subagent result notes ---
-
-    await ctx.tool.hook("execute.after", async (event) => {
-      if (event.tool !== "subagent" || event.status !== "completed") return;
-      const { sessionID: taskId, output } = subagentOutcome(event.result);
-      if (!taskId) return;
-
-      let usage;
-      let model = null;
-      try {
-        const messages = await readContext(taskId);
-        usage = subagentUsage(normalizeUsageMessages(messages));
-        model = lastAssistantModel(messages);
-      } catch {
-        usage = { lastHitMs: null, contextTokens: undefined, usageUnknown: true };
-      }
-
-      const notes = taskNotes({
-        taskId,
-        providerID: model?.providerID,
-        modelID: model?.modelID,
-        usage,
-        resultEmpty: isTaskResultEmpty(output),
-        modelData: loadModelData(directory),
-        limitMap: await getLimitMap(),
-        now: Date.now(),
-      });
-      if (notes.length) event.result = appendToResult(event.result, notes.join("\n\n"));
-    });
-
     // --- tools ---
 
     await ctx.tool.transform((editor) => {
+      editor.add({
+        name: "squad_session",
+        description: TOOL_DESCRIPTIONS.squad_session,
+        input: SQUAD_SESSION_INPUT,
+        execute: async (input, context) => {
+          const now = Date.now();
+          const limits = await getLimitMap();
+          const limitOf = (model) =>
+            model ? (limits[model] ?? limits[model.split("/").slice(1).join("/")]) : undefined;
+          const sessionID = String(input?.sessionID ?? "").trim();
+          if (!sessionID) {
+            const own = context?.sessionID;
+            let facts = null;
+            try {
+              if (own) facts = sessionFacts(await readContext(own));
+            } catch {
+              // The clock alone is still worth returning.
+            }
+            return {
+              content: formatOwnStatus({
+                contextTokens: facts?.contextTokens,
+                contextLimit: limitOf(facts?.model),
+                now,
+              }),
+            };
+          }
+          let facts;
+          try {
+            facts = sessionFacts(await readContext(sessionID));
+          } catch (e) {
+            return {
+              content:
+                `squad_session: could not read session ${sessionID} — ` +
+                `${e?.message ?? String(e)}. Treat it as cold.`,
+            };
+          }
+          const ttl = facts.model
+            ? loadModelData(directory)?.[facts.model]?.cache_ttl_seconds
+            : undefined;
+          return {
+            content: formatSessionStatus({
+              sessionID,
+              facts,
+              ttlSeconds: typeof ttl === "number" ? ttl : undefined,
+              contextLimit: limitOf(facts.model),
+              now,
+            }),
+            metadata: { title: `session ${sessionID}` },
+          };
+        },
+      });
+
       editor.add({
         name: "squad_compact",
         description: TOOL_DESCRIPTIONS.squad_compact,
@@ -253,8 +272,8 @@ export default {
                 "decides what to do about it.",
             };
           }
-          const taskId = String(input?.task_id ?? "").trim();
-          if (!taskId) return { content: "squad_compact: task_id is required." };
+          const taskId = String(input?.sessionID ?? "").trim();
+          if (!taskId) return { content: "squad_compact: sessionID is required." };
 
           let agentName;
           try {

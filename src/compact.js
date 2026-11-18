@@ -1,7 +1,7 @@
 // Compacting a SUBAGENT session on demand — the decision inputs and the report,
 // kept pure so the plugin tool is just plumbing.
 //
-// WHY. Reuse of a subagent session is all-or-nothing today: pass the task_id and
+// WHY. Reuse of a subagent session is all-or-nothing today: pass the sessionID and
 // the whole history is re-read on every step, or start fresh and throw the
 // history away. The middle option is OpenCode's session.compact, which accepts
 // subagent sessions too and uses the host's compaction model settings.
@@ -56,7 +56,7 @@ export function formatCompactReport({ taskId, agent, before, after, model, why, 
   if (timedOut) {
     lines.push(
       "NOTE: the compaction call did not return in time and was left running; the sizes above " +
-        "may be stale. Re-read them from the next [CACHE STATUS] before drawing conclusions.",
+        "may be stale. Re-read them with squad_session before drawing conclusions.",
     );
   }
   return lines.join(" ");

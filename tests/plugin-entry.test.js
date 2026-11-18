@@ -80,7 +80,13 @@ test("package exposes only setup and squad_patch generates native agents", async
     dispose();
   }
   expect([...tools.keys()]).toEqual(
-    expect.arrayContaining(["squad_compact", "squad_dump", "squad_metrics", "squad_patch"]),
+    expect.arrayContaining([
+      "squad_compact",
+      "squad_dump",
+      "squad_metrics",
+      "squad_patch",
+      "squad_session",
+    ]),
   );
   expect(wrapped).toContain("Refused: pass `grunts` and/or `drills` at the TOP level");
   expect(wrapped).toContain("`roster`");
@@ -168,5 +174,52 @@ test("squad_metrics renders the asked models, squad roles and full detail", asyn
   } finally {
     dispose();
     vi.unstubAllGlobals();
+  }
+});
+
+test("squad_session reports a child's cache verdict and the caller's own clock", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const lastHit = Date.now() - 60_000;
+  const sessions = {
+    ses_child: [
+      { type: "user", time: { created: lastHit } },
+      {
+        type: "assistant",
+        agent: "grunt-anthropic-claude-sonnet-5-5",
+        model: { providerID: "anthropic", id: "claude-sonnet-5-5" },
+        time: { created: lastHit, completed: lastHit + 1000 },
+        finish: "stop",
+        tokens: { input: 1, output: 10, reasoning: 0, cache: { read: 40_000, write: 0 } },
+        content: [{ type: "text", text: "ok" }],
+      },
+    ],
+  };
+  const tools = new Map();
+  const dispose = await plugin.setup({
+    location: { directory },
+    options: { rate_limit_guard: { enabled: false } },
+    skill: { transform: async () => {} },
+    session: {
+      hook: async () => {},
+      context: async ({ sessionID }) => ({ data: sessions[sessionID] ?? [] }),
+    },
+    model: { list: async () => [] },
+    tool: {
+      hook: async () => {},
+      transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
+    },
+  });
+  try {
+    const session = tools.get("squad_session");
+    const child = (await session.execute({ sessionID: "ses_child" }, { agent: "build" })).content;
+    expect(child).toMatch(/^now: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    expect(child).toMatch(/cache: WARM — expires in 2[34]\d s/);
+    expect(child).toContain("context: ~40k");
+    const own = (await session.execute({}, { agent: "build", sessionID: "ses_none" })).content;
+    expect(own).toMatch(/^now: /);
+    expect(own).not.toContain("your context");
+  } finally {
+    dispose();
   }
 });

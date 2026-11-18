@@ -24,9 +24,17 @@ const agentMap = (description) => ({
 export const SQUAD_COMPACT_INPUT = {
   type: "object",
   properties: {
-    task_id: { type: "string", description: ARG_DESCRIPTIONS["compact.task_id"] },
+    sessionID: { type: "string", description: ARG_DESCRIPTIONS["compact.sessionID"] },
   },
-  required: ["task_id"],
+  required: ["sessionID"],
+  additionalProperties: false,
+};
+
+export const SQUAD_SESSION_INPUT = {
+  type: "object",
+  properties: {
+    sessionID: { type: "string", description: ARG_DESCRIPTIONS["session.sessionID"] },
+  },
   additionalProperties: false,
 };
 

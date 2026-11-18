@@ -9,8 +9,12 @@ import {
   TOOL_DESCRIPTIONS,
   validateVariants,
 } from "../src/squad-tools.js";
-import { subagentUsage, taskNotes } from "../src/task-notes.js";
-import { SQUAD_COMPACT_INPUT, SQUAD_DUMP_INPUT, SQUAD_PATCH_INPUT } from "../src/v2/schemas.js";
+import {
+  SQUAD_COMPACT_INPUT,
+  SQUAD_DUMP_INPUT,
+  SQUAD_PATCH_INPUT,
+  SQUAD_SESSION_INPUT,
+} from "../src/v2/schemas.js";
 import { loadSkills, parseSkillFile } from "../src/v2/skills.js";
 
 describe("squad-tools", () => {
@@ -48,8 +52,12 @@ describe("squad-tools", () => {
 
 describe("V2 schemas", () => {
   test("declare tool arguments and carry the shared wording", () => {
-    expect(SQUAD_COMPACT_INPUT.required).toEqual(["task_id"]);
-    expect(Object.keys(SQUAD_COMPACT_INPUT.properties)).toEqual(["task_id"]);
+    expect(SQUAD_COMPACT_INPUT.required).toEqual(["sessionID"]);
+    expect(Object.keys(SQUAD_COMPACT_INPUT.properties)).toEqual(["sessionID"]);
+    expect(SQUAD_SESSION_INPUT.required).toBeUndefined();
+    expect(SQUAD_SESSION_INPUT.properties.sessionID.description).toBe(
+      ARG_DESCRIPTIONS["session.sessionID"],
+    );
     expect(Object.keys(SQUAD_PATCH_INPUT.properties).sort()).toEqual([
       "allow_remove",
       "directory",
@@ -62,7 +70,12 @@ describe("V2 schemas", () => {
     expect(SQUAD_DUMP_INPUT.properties.directory.description).toBe(
       ARG_DESCRIPTIONS["dump.directory"],
     );
-    for (const s of [SQUAD_COMPACT_INPUT, SQUAD_DUMP_INPUT, SQUAD_PATCH_INPUT]) {
+    for (const s of [
+      SQUAD_COMPACT_INPUT,
+      SQUAD_DUMP_INPUT,
+      SQUAD_PATCH_INPUT,
+      SQUAD_SESSION_INPUT,
+    ]) {
       expect(s.additionalProperties).toBe(false);
     }
     expect(Object.keys(TOOL_DESCRIPTIONS).sort()).toEqual([
@@ -70,73 +83,8 @@ describe("V2 schemas", () => {
       "squad_dump",
       "squad_metrics",
       "squad_patch",
+      "squad_session",
     ]);
-  });
-});
-
-describe("task notes", () => {
-  const msgs = [
-    { info: { role: "user", time: { created: 1 } } },
-    {
-      info: {
-        role: "assistant",
-        time: { created: 100 },
-        finish: "length",
-        tokens: { input: 10, output: 20, reasoning: 5, cache: { read: 0, write: 0 } },
-        modelID: "m",
-        providerID: "p",
-      },
-    },
-    { info: { role: "assistant", time: { created: 200 } } },
-  ];
-
-  test("subagentUsage separates newest contact from newest finished turn", () => {
-    expect(subagentUsage(msgs)).toEqual({
-      lastHitMs: 200,
-      contextTokens: 35,
-      finish: "length",
-      outputTokens: 20,
-      reasoningTokens: 5,
-    });
-    expect(subagentUsage([])).toEqual({
-      lastHitMs: null,
-      contextTokens: undefined,
-      finish: undefined,
-      outputTokens: undefined,
-      reasoningTokens: undefined,
-    });
-  });
-
-  test("taskNotes: outcome first, cache status only with model and timestamp", () => {
-    const usage = subagentUsage(msgs);
-    const base = {
-      taskId: "t1",
-      usage,
-      resultEmpty: false,
-      modelData: { "p/m": { cache_ttl_seconds: 300 } },
-      limitMap: { "p/m": 1000 },
-      now: 250,
-      timeZone: "UTC",
-    };
-    const both = taskNotes({ ...base, providerID: "p", modelID: "m" });
-    expect(both).toHaveLength(2);
-    expect(both[0]).toContain("[TASK OUTCOME] task_id=t1");
-    expect(both[1]).toContain("[CACHE STATUS]");
-    expect(taskNotes({ ...base })).toHaveLength(1);
-    const clean = taskNotes({
-      ...base,
-      usage: { ...usage, finish: "stop", lastHitMs: null },
-      providerID: "p",
-      modelID: "m",
-    });
-    expect(clean).toEqual([]);
-    const providerTtl = taskNotes({
-      ...base,
-      modelData: null,
-      providerID: "anthropic",
-      modelID: "m",
-    });
-    expect(providerTtl.at(-1)).toContain("[CACHE STATUS]");
   });
 });
 

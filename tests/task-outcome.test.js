@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatTaskOutcome, isTaskResultEmpty } from "../src/task-outcome.js";
+import { formatTaskOutcome } from "../src/task-outcome.js";
 
 // The real numbers from ses_fa3e7d7a6ffenuME30B4y0It5x (glm-5.3) — the case
 // that made the orchestrator announce a provider outage.
@@ -28,7 +28,7 @@ test("formatTaskOutcome says nothing when a normal finish produced a result", ()
 test("formatTaskOutcome names max_tokens, not a provider failure, on an empty truncated result", () => {
   const s = formatTaskOutcome(TRUNCATED_IN_REASONING);
   expect(s).toContain("[TASK OUTCOME]");
-  expect(s).toContain("task_id=ses_fa3e7d7a6ffenuME30B4y0It5x");
+  expect(s).toContain("sessionID=ses_fa3e7d7a6ffenuME30B4y0It5x");
   expect(s).toContain("zai-coding-plan/glm-5.3");
   expect(s).toContain("max_tokens (finish=length; 9 tokens output, 31991 tokens reasoning)");
   expect(s).toContain("not because the provider refused");
@@ -74,26 +74,10 @@ test("formatTaskOutcome distinguishes an empty result on a normal finish from tr
 
 test("formatTaskOutcome still reports with no model or token split available", () => {
   const s = formatTaskOutcome({ taskId: "ses_bare", finish: "length", resultEmpty: true });
-  expect(s).toContain("task_id=ses_bare");
+  expect(s).toContain("sessionID=ses_bare");
   expect(s).toContain("max_tokens (finish=length)");
   expect(s).not.toContain("undefined");
   expect(s).not.toContain("()");
-});
-
-test("isTaskResultEmpty reads the task_result element, not the whole tool output", () => {
-  const empty = '<task id="ses_x" state="completed">\n<task_result>\n\n</task_result>\n</task>';
-  expect(isTaskResultEmpty(empty)).toBe(true);
-  // A previously appended [CACHE STATUS] line must not read as a result.
-  expect(isTaskResultEmpty(`${empty}\n\n[CACHE STATUS] task_id=ses_x — ...`)).toBe(true);
-  expect(
-    isTaskResultEmpty(empty.replace("<task_result>\n\n", "<task_result>\nwrote 4 files\n")),
-  ).toBe(false);
-});
-
-test("isTaskResultEmpty falls back to the raw string when there is no task_result element", () => {
-  expect(isTaskResultEmpty("Tool execution aborted")).toBe(false);
-  expect(isTaskResultEmpty("   ")).toBe(true);
-  expect(isTaskResultEmpty(undefined)).toBe(true);
 });
 
 test("formatTaskOutcome refuses to guess when the subagent session could not be read", () => {

@@ -6,12 +6,7 @@
 // on OpenCode 2.1.3 — see tests/v2-adapt.test.js.
 
 import { BOOTSTRAP_MARKER, buildBootstrap } from "../bootstrap.js";
-import {
-  DEFAULT_LIMIT,
-  estimateContextTokens,
-  formatContextLine,
-  formatLocalDateTime,
-} from "../context.js";
+import { DEFAULT_LIMIT, estimateContextTokens, formatContextLine } from "../context.js";
 import { applySystemPromptTransform } from "../prompt-inject.js";
 
 /**
@@ -89,24 +84,6 @@ export function normalizeUsageMessages(messages) {
 }
 
 /**
- * The subagent's model, read off its newest assistant message (V2 keeps it
- * nowhere else a plugin can reach).
- *
- * @param {readonly any[]} messages V2 SessionMessageInfo[]
- * @returns {{providerID: string, modelID: string} | null}
- */
-export function lastAssistantModel(messages) {
-  if (!Array.isArray(messages)) return null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.type === "assistant" && m.model?.providerID && m.model?.id) {
-      return { providerID: m.model.providerID, modelID: m.model.id };
-    }
-  }
-  return null;
-}
-
-/**
  * Role-prompt refresh on V2's `SystemPart[]`. The agent's own prompt is the
  * text of the first part (verified live for a subagent session), so the prompt
  * transform runs on the first text part that carries a fence.
@@ -124,33 +101,6 @@ export function applySystemPartsTransform(system, loadPrompt) {
   const result = applySystemPromptTransform(holder, loadPrompt);
   if (result.changed) part.text = holder[0];
   return result;
-}
-
-/**
- * A copy of a V2 tool result with `text` appended as its own paragraph.
- * @param {any} result
- * @param {string} text
- */
-export function appendToResult(result, text) {
-  const content = result?.content;
-  if (Array.isArray(content)) {
-    return { ...result, content: [...content, { type: "text", text }] };
-  }
-  const base = typeof content === "string" ? content : "";
-  return { ...result, content: base ? `${base}\n\n${text}` : text };
-}
-
-/**
- * What the V2 `subagent` tool returned, in the terms the task-outcome and
- * cache-status code use: the child session id and the subagent's final text.
- *
- * @param {any} result
- * @returns {{sessionID?: string, output: string}}
- */
-export function subagentOutcome(result) {
-  const sessionID = result?.metadata?.sessionID ?? result?.output?.sessionID;
-  const text = result?.output?.output;
-  return { sessionID, output: typeof text === "string" ? text : "" };
 }
 
 /**
@@ -219,16 +169,11 @@ export async function applyOrchestratorTransformV2(event, opts) {
   let block = turnId && opts.turnMemo ? opts.turnMemo.get(turnId) : null;
   if (!block) {
     const inventory = await opts.getInventory();
-    const nowText = formatLocalDateTime(
-      new Date(),
-      Intl.DateTimeFormat().resolvedOptions().timeZone,
-    );
     const modelText =
       event.model?.providerID && event.model?.id
         ? `${event.model.providerID}/${event.model.id}`
         : null;
     const bootstrap = buildBootstrap(inventory, {
-      nowText,
       modelText,
       hasSquad: opts.getHasSquad(),
     });
