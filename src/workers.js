@@ -1,3 +1,4 @@
+import { parse } from "yaml";
 import { placeholderBody, wrapPrompt } from "./prompt-inject.js";
 import { NOTES_CLOSE, NOTES_OPEN } from "./roster.js";
 
@@ -199,7 +200,7 @@ export function agentMarkdown(role, modelId, opts = {}) {
     // string is valid YAML.
     `description: ${JSON.stringify(description)}`,
     "mode: subagent",
-    `model: ${modelId}${variant ? `#${variant}` : ""}`,
+    `model: ${yamlScalar(`${modelId}${variant ? `#${variant}` : ""}`)}`,
     // Each emitted only when asked for: an absent key leaves opencode on its
     // own default, which is the right behaviour for a model that publishes no
     // reasoning options, or an agent nobody has capped.
@@ -214,6 +215,23 @@ export function agentMarkdown(role, modelId, opts = {}) {
     "",
   ].join("\n");
   return { slug, filename: `${slug}.md`, content };
+}
+
+/**
+ * A string as a YAML scalar: plain when YAML reads it back unchanged, so the
+ * files every existing squad already has stay byte-identical; a JSON string
+ * (valid YAML) otherwise — an id like `p/m: x` or `p/m #x` written plain
+ * would be a parse error or a silently truncated value.
+ *
+ * @param {string} value
+ */
+function yamlScalar(value) {
+  try {
+    if (parse(`v: ${value}`)?.v === value) return value;
+  } catch {
+    // Not valid plain: quote it.
+  }
+  return JSON.stringify(value);
 }
 
 /**

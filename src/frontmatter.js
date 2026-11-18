@@ -8,20 +8,30 @@ import { parse } from "yaml";
 // `---` on the first line, then everything up to the next line that is `---`.
 // LF or CRLF; an empty header is allowed.
 const FRONTMATTER_RE = /^---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
+// The opening line alone: a block was started.
+const OPENING_RE = /^---[ \t]*(?:\r?\n|$)/;
 
 /**
  * @param {string} text  a whole Markdown file (a leading BOM is ignored)
  * @returns {{state: "none", body: string}
+ *   | {state: "incomplete", header: string, body: string}
  *   | {state: "invalid", header: string, body: string, reason: string}
  *   | {state: "ok", fields: Record<string, unknown>, body: string}}
- *   `none`: no leading block (body is the whole text); `invalid`: a block
- *   that is not a YAML mapping (`header` is its raw text); `ok`: its fields.
- *   `body` is the text after the block.
+ *   `none`: no leading block (body is the whole text); `incomplete`: a
+ *   block is opened but never closed — a truncated file, whose fields are
+ *   unknown rather than absent (`header` is everything after the opening
+ *   line, `body` the whole text); `invalid`: a block that is not a YAML
+ *   mapping (`header` is its raw text); `ok`: its fields. Otherwise `body` is
+ *   the text after the block.
  */
 export function readFrontmatter(text) {
   const src = String(text).replace(/^\uFEFF/, "");
   const m = FRONTMATTER_RE.exec(src);
-  if (!m) return { state: "none", body: src };
+  if (!m) {
+    const open = OPENING_RE.exec(src);
+    if (open) return { state: "incomplete", header: src.slice(open[0].length), body: src };
+    return { state: "none", body: src };
+  }
   const body = src.slice(m[0].length);
   const header = m[1] ?? "";
   let fields;

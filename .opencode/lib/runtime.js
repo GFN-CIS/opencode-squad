@@ -188,17 +188,23 @@ export function ensureGlobalModelDataFresh() {
       return { wrote: false, problem };
     }
     const agentDir = path.join(path.dirname(file), "agent");
-    // A squad file that cannot be read has an unknown model; the merge would
-    // drop that model's entry and its owner rules with it.
-    const { unreadable } = scanSquadModels(agentDir);
-    if (unreadable.length) {
-      const problem = `${agentDir}: cannot read ${unreadable.join(", ")}`;
+    // A squad file whose model cannot be determined (unreadable, or a cut-off
+    // or broken header) has an unknown model; the merge would drop that
+    // model's entry and its owner rules with it. One scan feeds both the check
+    // and the snapshot, so the snapshot is built from what was checked.
+    const scan = scanSquadModels(agentDir);
+    if (scan.unreadable.length || scan.undetermined.length) {
+      const why = [
+        ...(scan.unreadable.length ? [`cannot read ${scan.unreadable.join(", ")}`] : []),
+        ...(scan.undetermined.length ? [`no model in ${scan.undetermined.join(", ")}`] : []),
+      ];
+      const problem = `${agentDir}: ${why.join("; ")}`;
       console.warn(`[opencode-squad] model_data.json left untouched — ${problem}`);
       return { wrote: false, problem };
     }
     const existing = read.state === "ok" ? read.data : {};
     const generated = new Date().toISOString().slice(0, 10);
-    const snapshot = buildModelData(agentDir, existing, generated);
+    const snapshot = buildModelData(scan.ids, existing, generated);
     if (Object.keys(snapshot.models).length === 0) return { wrote: false }; // no squad
     if (!modelsChanged(existing, snapshot)) return { wrote: false }; // unchanged
     writeFileAtomic(file, `${JSON.stringify(snapshot, null, 2)}\n`);
