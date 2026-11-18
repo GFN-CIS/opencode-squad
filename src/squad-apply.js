@@ -270,6 +270,7 @@ export function syncDescriptions({ dir, describe }) {
 }
 
 /** The frontmatter `description:` value as written (quoted or not). */
+/** @param {string} text */
 function descriptionLine(text) {
   return /^description: (.*)$/m.exec(text)?.[1] ?? "";
 }

@@ -50,7 +50,7 @@ function readJson(file) {
   }
 }
 
-/** A concurrent reader never sees a half-written cache file. */
+/** A concurrent reader never sees a half-written cache file. @param {string} file @param {unknown} value */
 function writeJsonAtomic(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   writeFileAtomic(file, JSON.stringify(value));
@@ -100,6 +100,7 @@ async function getJson(fetch, url, timeoutMs) {
  */
 export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOUT_MS, force }) {
   const prev = readMetrics(dir) ?? {};
+  /** @param {{fetchedAt?: unknown} | undefined} s */
   const due = (s) => force || !isFresh(s, now);
   const next = { ...prev };
   const report = { superindex: "fresh", scores: "fresh", ids: "fresh" };
@@ -129,8 +130,8 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
             `${LLMBENCH_API}/scores?metric=${encodeURIComponent(metric)}`,
             timeoutMs,
           ).then(
-            (rows) => [metric, indexScoreRows(rows)],
-            () => [metric, null],
+            (rows) => /** @type {const} */ ([metric, indexScoreRows(rows)]),
+            () => /** @type {const} */ ([metric, null]),
           ),
         ),
       ).then((results) => {

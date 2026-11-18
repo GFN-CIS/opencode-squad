@@ -53,6 +53,7 @@ jobs:
           npm test
           npm run lint
           npm run knip
+          npm run typecheck
 
       - name: Create release
         if: steps.version.outputs.skip == 'false'

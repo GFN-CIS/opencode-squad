@@ -81,6 +81,7 @@ export const ASSUMED_CACHE_TTL_SECONDS = 300;
 export function resolveCacheTtl(providerID) {
   // Own-property check: a bare `[providerID]` lookup would resolve
   // "constructor"/"toString" to Object.prototype members.
+  /** @param {Record<string, number>} table */
   const at = (table) =>
     providerID && Object.hasOwn(table, providerID) ? table[providerID] : undefined;
 
