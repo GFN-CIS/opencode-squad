@@ -6,12 +6,6 @@
 // on OpenCode 2.1.3 — see tests/v2-adapt.test.js.
 
 import { BOOTSTRAP_MARKER, buildBootstrap } from "../bootstrap.js";
-import {
-  DEFAULT_LIMIT,
-  estimateContextTokens,
-  formatContextLine,
-  formatLocalDateTime,
-} from "../context.js";
 import { applySystemPromptTransform } from "../prompt-inject.js";
 
 /**
@@ -89,24 +83,6 @@ export function normalizeUsageMessages(messages) {
 }
 
 /**
- * The subagent's model, read off its newest assistant message (V2 keeps it
- * nowhere else a plugin can reach).
- *
- * @param {readonly any[]} messages V2 SessionMessageInfo[]
- * @returns {{providerID: string, modelID: string} | null}
- */
-export function lastAssistantModel(messages) {
-  if (!Array.isArray(messages)) return null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.type === "assistant" && m.model?.providerID && m.model?.id) {
-      return { providerID: m.model.providerID, modelID: m.model.id };
-    }
-  }
-  return null;
-}
-
-/**
  * Role-prompt refresh on V2's `SystemPart[]`. The agent's own prompt is the
  * text of the first part (verified live for a subagent session), so the prompt
  * transform runs on the first text part that carries a fence.
@@ -127,33 +103,6 @@ export function applySystemPartsTransform(system, loadPrompt) {
 }
 
 /**
- * A copy of a V2 tool result with `text` appended as its own paragraph.
- * @param {any} result
- * @param {string} text
- */
-export function appendToResult(result, text) {
-  const content = result?.content;
-  if (Array.isArray(content)) {
-    return { ...result, content: [...content, { type: "text", text }] };
-  }
-  const base = typeof content === "string" ? content : "";
-  return { ...result, content: base ? `${base}\n\n${text}` : text };
-}
-
-/**
- * What the V2 `subagent` tool returned, in the terms the task-outcome and
- * cache-status code use: the child session id and the subagent's final text.
- *
- * @param {any} result
- * @returns {{sessionID?: string, output: string}}
- */
-export function subagentOutcome(result) {
-  const sessionID = result?.metadata?.sessionID ?? result?.output?.sessionID;
-  const text = result?.output?.output;
-  return { sessionID, output: typeof text === "string" ? text : "" };
-}
-
-/**
  * The `retry` hook event -> the retry status object evaluateRetry
  * reads. `next` is the absolute wake-up time OpenCode is proposing.
  *
@@ -171,81 +120,44 @@ export function retryToStatus(event, now) {
 }
 
 /**
- * The message this turn's injection lands on: the latest user message with
- * text content. V2 hands the agent id to the hook directly and runs it only for
- * the agent loop (titles and compactions have hooks of their own).
+ * The orchestrator bootstrap, appended to the system prompt of the orchestrator
+ * agent's requests.
  *
- * @param {Array<{id?: string, role?: string, content?: any}>} messages
- */
-export function findV2InjectionTarget(messages) {
-  if (!Array.isArray(messages)) return null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.role !== "user" || !Array.isArray(m.content)) continue;
-    if (m.content.some((c) => c?.type === "text" && typeof c.text === "string")) return m;
-  }
-  return null;
-}
-
-/**
- * The bootstrap + context-budget line, built once per turn and replayed
- * byte-identically (see createTurnMemo for why that matters for cost).
+ * WHY the system prompt and not a message. The block used to be injected into
+ * the latest user message on every request and never persisted. Every prompt
+ * cache entry past the system prompt therefore contained some user message WITH
+ * the block, and on the next user turn that message went back to its bare
+ * text: nothing past the system prompt could ever be read back. Measured over
+ * 14 days of orchestrator sessions: the first call of every warm user turn read
+ * only the ~23k system prefix and re-wrote the whole conversation, ~$299 of
+ * $869. The block changes only with the squad (inventory) or the model, so in
+ * the system prompt it is cached once with the rest of it, and the messages
+ * are never touched. The clock and the context size it used to carry come from
+ * the squad_session tool instead.
  *
- * @param {{agent: string, model?: {providerID?: string, id?: string}, messages: any[]}} event
+ * @param {{agent: string, model?: {providerID?: string, id?: string}, system?: any[]}} event
  *   the `context` hook event (mutated in place)
  * @param {object} opts
  * @param {string} opts.orchestratorAgent
  * @param {() => Promise<string>} opts.getInventory
- * @param {() => Promise<Record<string, number>>} opts.getLimitMap
  * @param {() => boolean} opts.getHasSquad called after getInventory resolves
- * @param {() => Promise<any[]>} opts.getUsageMessages internal `{info}` items for the
- *   session (normalizeUsageMessages of ctx.session.context); request messages
- *   carry no token usage
- * @param {ReturnType<import("../message-transform.js").createTurnMemo>} [opts.turnMemo]
  */
 export async function applyOrchestratorTransformV2(event, opts) {
-  if (event?.agent !== opts.orchestratorAgent) return;
-  const target = findV2InjectionTarget(event.messages);
-  if (!target) return;
+  if (event?.agent !== opts.orchestratorAgent || !Array.isArray(event.system)) return;
   if (
-    target.content.some(
-      (c) => c?.type === "text" && typeof c.text === "string" && c.text.includes(BOOTSTRAP_MARKER),
+    event.system.some(
+      (p) => p?.type === "text" && typeof p.text === "string" && p.text.includes(BOOTSTRAP_MARKER),
     )
   ) {
     return;
   }
-
-  const turnId = typeof target.id === "string" ? target.id : null;
-  let block = turnId && opts.turnMemo ? opts.turnMemo.get(turnId) : null;
-  if (!block) {
-    const inventory = await opts.getInventory();
-    const nowText = formatLocalDateTime(
-      new Date(),
-      Intl.DateTimeFormat().resolvedOptions().timeZone,
-    );
-    const modelText =
-      event.model?.providerID && event.model?.id
-        ? `${event.model.providerID}/${event.model.id}`
-        : null;
-    const bootstrap = buildBootstrap(inventory, {
-      nowText,
-      modelText,
-      hasSquad: opts.getHasSquad(),
-    });
-
-    let contextLine = null;
-    const usage = estimateContextTokens(await opts.getUsageMessages());
-    if (usage) {
-      const limits = await opts.getLimitMap();
-      const limit =
-        limits[`${usage.providerID}/${usage.modelID}`] ?? limits[usage.modelID] ?? DEFAULT_LIMIT;
-      contextLine = formatContextLine(usage.used, limit);
-    }
-
-    block = { bootstrap, contextLine };
-    if (turnId && opts.turnMemo) opts.turnMemo.set(turnId, block);
-  }
-
-  target.content.unshift({ type: "text", text: block.bootstrap });
-  if (block.contextLine) target.content.push({ type: "text", text: block.contextLine });
+  const inventory = await opts.getInventory();
+  const modelText =
+    event.model?.providerID && event.model?.id
+      ? `${event.model.providerID}/${event.model.id}`
+      : null;
+  event.system.push({
+    type: "text",
+    text: buildBootstrap(inventory, { modelText, hasSquad: opts.getHasSquad() }),
+  });
 }

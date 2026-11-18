@@ -4,11 +4,12 @@
  * Host wiring over pure decision modules in src/:
  *
  *   - skills: registered via ctx.skill.transform (V2 has no config hook);
- *   - bootstrap + context-budget line: the `context` session hook, gated on
- *     the hook's own agent id (src/v2/adapt.js: applyOrchestratorTransformV2);
+ *   - bootstrap: appended to the orchestrator's system prompt by the `context`
+ *     session hook, gated on the hook's own agent id (src/v2/adapt.js:
+ *     applyOrchestratorTransformV2). Messages are never modified;
  *   - role-prompt refresh: the same hook, on the first system part;
- *   - [TASK OUTCOME] / [CACHE STATUS]: `execute.after` on the `subagent` tool;
- *   - squad_compact / squad_dump / squad_patch: ctx.tool.transform with JSON
+ *   - squad_session / squad_compact / squad_dump / squad_patch / squad_metrics:
+ *     ctx.tool.transform with JSON
  *     Schema inputs (src/v2/schemas.js);
  *   - rate-limit guard: the `retry` session hook vetoes the retry outright
  *     while the event stream covers
@@ -38,6 +39,13 @@ import {
 } from "../../src/rate-limit-guard.js";
 import { validateRoster } from "../../src/roster.js";
 import {
+  formatNow,
+  formatOwnStatus,
+  formatSessionStatus,
+  requestedSessions,
+  sessionFacts,
+} from "../../src/session-status.js";
+import {
   applySquad,
   defaultAgentDir,
   formatApplyReport,
@@ -49,24 +57,20 @@ import {
   TOOL_DESCRIPTIONS,
   validateVariants,
 } from "../../src/squad-tools.js";
-import { subagentUsage, taskNotes } from "../../src/task-notes.js";
-import { isTaskResultEmpty } from "../../src/task-outcome.js";
 import {
-  appendToResult,
   applyOrchestratorTransformV2,
   applySystemPartsTransform,
-  lastAssistantModel,
   normalizeAgents,
   normalizeProviders,
   normalizeUsageMessages,
   retryToStatus,
-  subagentOutcome,
 } from "../../src/v2/adapt.js";
 import {
   SQUAD_COMPACT_INPUT,
   SQUAD_DUMP_INPUT,
   SQUAD_METRICS_INPUT,
   SQUAD_PATCH_INPUT,
+  SQUAD_SESSION_INPUT,
 } from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
 import {
@@ -82,7 +86,6 @@ import {
   squadDescriber,
   startMetricsRefresh,
   syncGlobalSquadDescriptions,
-  turnMemo,
 } from "./runtime.js";
 
 // squad_metrics({full: true}) returns ~2K tokens per model; cap the bill.
@@ -197,49 +200,70 @@ export default {
         await applyOrchestratorTransformV2(event, {
           orchestratorAgent: ORCHESTRATOR_AGENT,
           getInventory,
-          getLimitMap,
           getHasSquad: () => squadDrafted,
-          getUsageMessages: async () => normalizeUsageMessages(await readContext(event.sessionID)),
-          turnMemo,
         });
       } catch {
         // Best-effort: the turn goes out without the bootstrap.
       }
     });
 
-    // --- subagent result notes ---
-
-    await ctx.tool.hook("execute.after", async (event) => {
-      if (event.tool !== "subagent" || event.status !== "completed") return;
-      const { sessionID: taskId, output } = subagentOutcome(event.result);
-      if (!taskId) return;
-
-      let usage;
-      let model = null;
-      try {
-        const messages = await readContext(taskId);
-        usage = subagentUsage(normalizeUsageMessages(messages));
-        model = lastAssistantModel(messages);
-      } catch {
-        usage = { lastHitMs: null, contextTokens: undefined, usageUnknown: true };
-      }
-
-      const notes = taskNotes({
-        taskId,
-        providerID: model?.providerID,
-        modelID: model?.modelID,
-        usage,
-        resultEmpty: isTaskResultEmpty(output),
-        modelData: loadModelData(directory),
-        limitMap: await getLimitMap(),
-        now: Date.now(),
-      });
-      if (notes.length) event.result = appendToResult(event.result, notes.join("\n\n"));
-    });
-
     // --- tools ---
 
     await ctx.tool.transform((editor) => {
+      editor.add({
+        name: "squad_session",
+        description: TOOL_DESCRIPTIONS.squad_session,
+        input: SQUAD_SESSION_INPUT,
+        execute: async (input, context) => {
+          const now = Date.now();
+          const limits = await getLimitMap();
+          const limitOf = (model) =>
+            model ? (limits[model] ?? limits[model.split("/").slice(1).join("/")]) : undefined;
+          const ids = requestedSessions(input);
+          if (!ids.length) {
+            const own = context?.sessionID;
+            let facts = null;
+            try {
+              if (own) facts = sessionFacts(await readContext(own));
+            } catch {
+              // The clock alone is still worth returning.
+            }
+            return {
+              content: formatOwnStatus({
+                contextTokens: facts?.contextTokens,
+                contextLimit: limitOf(facts?.model),
+                now,
+              }),
+            };
+          }
+          const modelData = loadModelData(directory);
+          const reports = await Promise.all(
+            ids.map(async (sessionID) => {
+              let facts;
+              try {
+                facts = sessionFacts(await readContext(sessionID));
+              } catch (e) {
+                const why =
+                  e?.message || e?._tag || e?.name || JSON.stringify(e) || "unknown error";
+                return `session ${sessionID}: could not be read (${why}). Treat it as cold.`;
+              }
+              const ttl = facts.model ? modelData?.[facts.model]?.cache_ttl_seconds : undefined;
+              return formatSessionStatus({
+                sessionID,
+                facts,
+                ttlSeconds: typeof ttl === "number" ? ttl : undefined,
+                contextLimit: limitOf(facts.model),
+                now,
+              });
+            }),
+          );
+          return {
+            content: [formatNow(now), ...reports].join("\n\n"),
+            metadata: { title: `sessions: ${ids.length}` },
+          };
+        },
+      });
+
       editor.add({
         name: "squad_compact",
         description: TOOL_DESCRIPTIONS.squad_compact,
@@ -253,8 +277,8 @@ export default {
                 "decides what to do about it.",
             };
           }
-          const taskId = String(input?.task_id ?? "").trim();
-          if (!taskId) return { content: "squad_compact: task_id is required." };
+          const taskId = String(input?.sessionID ?? "").trim();
+          if (!taskId) return { content: "squad_compact: sessionID is required." };
 
           let agentName;
           try {

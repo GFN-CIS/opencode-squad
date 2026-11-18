@@ -122,11 +122,13 @@ paying full price to re-establish that context cold in a grunt — even though
 each path, not just "which one gets it off my plate."
 
 **Reusing a subagent session (`sessionID`) — it is not free, and it compounds.**
-When a `subagent` call finishes, its result carries a `[CACHE STATUS]` line with two
-facts: how long ago that session last hit its provider (vs the provider's cache
-TTL), and how big its context has grown. Use both.
-The note calls the session id `task_id`; pass that value as `sessionID` to
-`subagent`, or as `task_id` to `squad_compact`.
+Before you pass a `sessionID` back to `subagent` (or to `squad_compact`), call
+`squad_session({sessionIDs: [...]})` with every session you are weighing, in one
+call. It answers from the session as it is right now:
+whether its provider cache is still warm and for how many more seconds (or how
+long ago it went cold), how big its context has grown, whether it still seems to
+be running, and why its last result is empty or cut off if it is. Use all of it.
+The `sessionID` is in the `subagent` reply and in its `<subagent>` message.
 
 - Reuse is the *right* default for a genuine continuation — the same
   investigation, the next step of the same fix — inside the cache TTL. The
@@ -147,7 +149,7 @@ The note calls the session id `task_id`; pass that value as `sessionID` to
 - **TTLs differ enormously between providers, so do not carry one habit across
   them.** In the same chain a z.ai session was still warm after a 34-minute gap,
   while Anthropic's published default expires at five minutes. The
-  `[CACHE STATUS]` line names the TTL it is judging against and where that
+  `squad_session` report names the TTL it judged against and where that
   number came from; use it instead of a general sense of how long is too long.
 - Watch the size, not just the temperature. A reuse chain that keeps growing
   gets more expensive every step while delivering the same amount of work, and
@@ -155,7 +157,7 @@ The note calls the session id `task_id`; pass that value as `sessionID` to
   question that separates them is what the NEW task needs from the old history:
 
   - **nothing** → fresh session. Cheapest; the brief carries what matters.
-  - **some of it, and there is a lot of it** → `squad_compact(task_id)`, then
+  - **some of it, and there is a lot of it** → `squad_compact(sessionID)`, then
     dispatch into the same session. It replaces the transcript with a summary,
     so the next dispatch reads a small context instead of the whole thing.
   - **all of it, and it is still small** → reuse as is; compacting a small
@@ -204,8 +206,8 @@ though: capability and risk (§1a) still gate the choice; billing only breaks
 ties between comparably-fit candidates, or nudges you to route more volume to
 the flat-rate option when both would do.
 
-**Context pressure is not a panic button.** The live `<ORCHESTRATE_CONTEXT>`
-line exists so you weigh genuinely heavy work — something that would ingest or
+**Context pressure is not a panic button.** Your context size (from
+`squad_session` with no arguments) exists so you weigh genuinely heavy work — something that would ingest or
 generate a lot of raw material — against offloading it. It is not a trigger to
 delegate every minor task the moment usage looks high. opencode compacts your
 context automatically; for a small, quick task the overhead of writing a task
@@ -362,26 +364,16 @@ whenever there IS a session you could pass `sessionID` to, the decision must be
 visible, with the numbers it rests on:
 
 ```
-Reuse check — ses_fbd96c79: ~945k / 1M (94%), last hit 2026-08-27 13:25:16,
-now 2026-08-27 13:46:02 → 21m gap vs ~5m TTL, cold. Fresh session.
+Reuse check — ses_fbd96c79: ~945k / 1M (94%), cache COLD for 960 s. Fresh session.
 ```
 
-The four facts and the verdict:
+The facts and the verdict:
 
-- **size** — from that session's `[CACHE STATUS]` line (§1b);
-- **last hit** — the absolute timestamp in the same line. That is when the
-  session last *started* a provider request, not when your task finished;
-- **now** — a LOWER BOUND on the current time, and you must take the latest
-  stamp you actually hold. Your bootstrap clock is stamped at the START of your
-  turn and does not advance while you work, so several tool calls in it can
-  understate the elapsed time badly. The `[CACHE STATUS]` line of any task that
-  has finished since carries a `read at` stamp; when it is newer than the
-  bootstrap clock, that is your bound. Because every stamp can only lag, the
-  gap you compute is a MINIMUM — the real one is at least that, never less. So
-  round against reuse: a gap anywhere near the TTL is cold. And if no
-  `[CACHE STATUS]` line is present at all — the hook omits it when the model or
-  the session's last-hit time is unknown — you have no tight bound and no
-  evidence of warmth, so treat the session as cold;
+- **size** and **cache** — from `squad_session({sessionIDs: [...]})`, called right
+  before this decision (§1b). Do not reuse numbers from an earlier call: the
+  cache clock keeps running. If the report says the session is still running,
+  you are not choosing reuse, you are redirecting it. If you could not get a
+  report, treat the session as cold;
 - **verdict** — which way you went AND why, naming the numbers that decided it
   ("cold + 94% → fresh", "warm, 60k, same investigation → reuse"). A restatement
   of the figures with no commitment is worse than nothing: reasoning purely
