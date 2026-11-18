@@ -1,11 +1,6 @@
-// Pure formatting for the [CACHE STATUS] note appended to a completed task's
-// result (see the `execute.after` hook on "subagent" in the plugin).
-//
-// Goal: when a `subagent` tool call finishes, tell the orchestrator how long ago
-// that subagent session last actually hit its provider, and whether that's
-// still inside the provider's prompt-cache TTL — so it can decide whether
-// passing this session's task_id back in (to reuse the cache) is still worth
-// it, or whether the cache has gone cold and a fresh session is no better.
+// Prompt-cache TTL per provider, for the squad_session report
+// (src/session-status.js): whether a subagent session's cache is still warm
+// decides whether reusing that session is worth it.
 //
 // TTL numbers come from the hand-editable `cache_ttl_seconds` field in
 // model_data.json (same file/pattern as `info` and `billing` — see
@@ -14,8 +9,8 @@
 // all.
 //
 // When that field is absent, `resolveCacheTtl()` below supplies a number
-// anyway. That fallback lives here (read on every completed `subagent` call)
-// rather than in scripts/squad-file-performance.mjs, which is manual-only by
+// anyway. That fallback lives here (read on every squad_session call) rather
+// than in scripts/squad-file-performance.mjs, which is manual-only by
 // design and so would leave the field unset exactly as it was before.
 //
 // Every provider gets a TTL, because the previous behaviour — "TTL isn't
@@ -24,14 +19,6 @@
 // What stays honest is the LABEL: a published TTL is reported as published, an
 // assumed one says so and names the floor, so the orchestrator can tell a fact
 // from a default.
-
-function humanizeSeconds(seconds) {
-  const s = Math.max(0, Math.round(seconds));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
-}
 
 // Published prompt-cache TTLs, keyed by opencode providerID. Consulted only
 // when model_data.json carries no `cache_ttl_seconds` for the model.
@@ -102,91 +89,4 @@ export function resolveCacheTtl(providerID) {
   const measured = at(MEASURED_CACHE_TTL_SECONDS);
   if (typeof measured === "number") return { seconds: measured, source: "measured" };
   return { seconds: ASSUMED_CACHE_TTL_SECONDS, source: "assumed" };
-}
-
-const k = (n) => `${Math.round(n / 1000)}k`;
-
-/**
- * Render the size clause: how big the session being offered for reuse actually
- * is. Reuse re-reads all of it on every single step, which is the cost the
- * orchestrator was previously blind to — it only ever saw warm/cold.
- *
- * Carries `estimateContextTokens`'s caveat: the figure is the last COMPLETED
- * turn, so immediately after a compaction it still reads high for one turn.
- * Saying so matters most in exactly the compact-then-continue flow this
- * number exists to enable.
- *
- * @param {number} [contextTokens]
- * @param {number} [contextLimit]
- * @returns {string}  "" when there's nothing trustworthy to report
- */
-function formatSizeClause(contextTokens, contextLimit) {
-  if (typeof contextTokens !== "number" || contextTokens <= 0) return "";
-  const pct =
-    typeof contextLimit === "number" && contextLimit > 0
-      ? ` / ${k(contextLimit)} (${Math.round((contextTokens / contextLimit) * 100)}%)`
-      : "";
-  return (
-    ` Its context is ~${k(contextTokens)}${pct} as of its last completed turn ` +
-    `(so right after a compaction this still reads high for one turn). ` +
-    `Reusing it re-reads all of that on every step; a fresh session starts from the brief.`
-  );
-}
-
-/**
- * @param {{
- *   taskId: string,
- *   providerModelId: string,
- *   lastHitMs: number,
- *   lastHitAtText?: string,
- *   nowAtText?: string,
- *   ttlSeconds?: number,
- *   ttlSource?: "published"|"measured"|"assumed",
- *   contextTokens?: number,
- *   contextLimit?: number,
- *   now: number,
- * }} info
- * @returns {string}
- */
-export function formatCacheStatus(info) {
-  const ageSeconds = Math.max(0, (info.now - info.lastHitMs) / 1000);
-  // Both forms on purpose: the relative age is what reads at the moment the
-  // task finishes, the absolute wall-clock is what's still usable a turn later
-  // — the orchestrator has to recompute the gap against its own bootstrap
-  // "now" when it decides whether to reuse this session, and "~17m ago" is
-  // meaningless by then. Same format/zone as the bootstrap's clock so the two
-  // are directly comparable. Degrades to relative-only if unformattable.
-  const ageStr = info.lastHitAtText
-    ? `~${humanizeSeconds(ageSeconds)} ago (${info.lastHitAtText})`
-    : `~${humanizeSeconds(ageSeconds)} ago`;
-
-  const ttl =
-    typeof info.ttlSeconds === "number"
-      ? { seconds: info.ttlSeconds, source: info.ttlSource ?? "published" }
-      : resolveCacheTtl(info.providerModelId?.split("/")[0]);
-
-  const verdict = ageSeconds < ttl.seconds ? "likely still warm" : "likely cold by now";
-  const ttlLine = {
-    published: () => `published cache TTL ~${humanizeSeconds(ttl.seconds)} — ${verdict}`,
-    measured: () =>
-      `this provider publishes no TTL; ~${humanizeSeconds(ttl.seconds)} measured from ` +
-      `our own history — ${verdict}`,
-    assumed: () =>
-      `no cache TTL published for this provider, assuming a conservative ` +
-      `~${humanizeSeconds(ttl.seconds)} floor — ${verdict}`,
-  }[ttl.source]();
-
-  // The absolute read-time matters as much as the last-hit time. The
-  // orchestrator's bootstrap clock is frozen at the start of its turn, so when
-  // it decides on reuse several tool calls later that clock understates the
-  // elapsed gap — which biases toward "still warm", the one direction that
-  // costs money. This stamp is the tighter lower bound on now, and it is the
-  // pair (last hit, read at) that makes the gap computable from one line.
-  const readAt = info.nowAtText ? `, read at ${info.nowAtText}` : "";
-
-  return (
-    `[CACHE STATUS] task_id=${info.taskId} — last provider hit ${ageStr}${readAt}, model ${info.providerModelId}. ` +
-    `${ttlLine}.${formatSizeClause(info.contextTokens, info.contextLimit)} ` +
-    `Pass task_id to continue this same session if you want to reuse it.`
-  );
 }

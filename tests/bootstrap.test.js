@@ -62,13 +62,13 @@ test("tells the orchestrator not to reload a skill already in context", () => {
   expect(out).toContain("don't reload it every turn");
 });
 
-test("embeds live session facts (time + current model) when provided", () => {
+test("embeds the current model when provided, and no clock", () => {
   const out = buildBootstrap("(no subagents available)", {
-    nowText: "2026-06-19 11:49:52 (Europe/Moscow)",
     modelText: "anthropic/claude-opus-4-7",
   });
   expect(out.startsWith(BOOTSTRAP_MARKER)).toBe(true);
-  expect(out).toContain("2026-06-19 11:49:52 (Europe/Moscow)");
+  // A clock here changes every turn; squad_session returns the time instead.
+  expect(out).not.toMatch(/local time/i);
   expect(out).toContain("anthropic/claude-opus-4-7");
   expect(out.toLowerCase()).toContain("trust this over any assumption");
 });

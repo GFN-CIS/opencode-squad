@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTurnMemo } from "../../src/message-transform.js";
 import { billingFor, ownerRules } from "../../src/metrics.js";
 import { metricsDir, readMetrics, refreshMetrics } from "../../src/metrics-cache.js";
 import { buildModelData, modelsChanged, readModelData } from "../../src/model-data.js";
@@ -17,14 +16,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "../..");
 export const SKILLS_DIR = path.join(PACKAGE_ROOT, "skills");
 
-// The primary agent that acts as the orchestrator. Injection targets only this
-// agent's sessions (the context hook carries its agent id).
+// The primary agent that acts as the orchestrator. The bootstrap goes into this
+// agent's system prompt only (the context hook carries its agent id).
 export const ORCHESTRATOR_AGENT = "build";
-
-// Holds the rendered injection block for the turn in flight, so every model
-// call within one turn sends byte-identical text and the provider's prompt
-// cache survives. See createTurnMemo for the measurements behind it.
-export const turnMemo = createTurnMemo();
 
 // Serves the CURRENT bundled role prompt to every generated grunt/drill agent,
 // overriding the copy frozen into its file when the squad was drafted. Cached

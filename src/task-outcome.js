@@ -1,5 +1,5 @@
-// Pure formatting for the [TASK OUTCOME] note appended to a finished task's
-// result (see the `execute.after` hook on "subagent" in the plugin).
+// Pure formatting for the [TASK OUTCOME] part of the squad_session report
+// (see src/session-status.js).
 //
 // Goal: explain an empty or truncated `<task_result>`.
 //
@@ -60,7 +60,7 @@ export function formatTaskOutcome(info) {
   // Nothing to explain: a normal finish that produced a result.
   if (!truncated && !info.resultEmpty) return "";
 
-  const head = `[TASK OUTCOME] task_id=${info.taskId}`;
+  const head = `[TASK OUTCOME] sessionID=${info.taskId}`;
 
   // "We could not read the session" must never be dressed up as "the subagent
   // stopped on its own". A missing finish reason because the fetch failed and a
@@ -111,7 +111,7 @@ export function formatTaskOutcome(info) {
 
     // Truncation with partial output: the answer that is there is unfinished.
     return (
-      `${head}${model} hit max_tokens${detail("finish=length")} — the result below is CUT OFF ` +
+      `${head}${model} hit max_tokens${detail("finish=length")} — its last result is CUT OFF ` +
       `mid-answer, not a finished deliverable. Treat it as partial: verify what actually landed ` +
       `on disk rather than trusting the summary.`
     );
@@ -126,21 +126,4 @@ export function formatTaskOutcome(info) {
     `The turn ended without a final message — the subagent stopped rather than ` +
     `being cut off. Check whether it wrote any files before assuming the brief failed.`
   );
-}
-
-/**
- * Tells an empty subagent deliverable from a present one. A result string may
- * wrap the subagent's final text in a `<task_result>` element, in which case
- * only that element counts; otherwise the whole string does. Anything the plugin has already appended (the
- * [CACHE STATUS] line) lives outside it, so matching the element rather than
- * trimming the whole string keeps this honest.
- *
- * @param {unknown} toolOutput
- * @returns {boolean}  true when there is no task_result, or it is blank
- */
-export function isTaskResultEmpty(toolOutput) {
-  if (typeof toolOutput !== "string") return true;
-  const match = toolOutput.match(/<task_result>([\s\S]*?)<\/task_result>/);
-  if (!match) return toolOutput.trim().length === 0;
-  return match[1].trim().length === 0;
 }

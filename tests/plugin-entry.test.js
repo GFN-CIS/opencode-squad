@@ -80,7 +80,13 @@ test("package exposes only setup and squad_patch generates native agents", async
     dispose();
   }
   expect([...tools.keys()]).toEqual(
-    expect.arrayContaining(["squad_compact", "squad_dump", "squad_metrics", "squad_patch"]),
+    expect.arrayContaining([
+      "squad_compact",
+      "squad_dump",
+      "squad_metrics",
+      "squad_patch",
+      "squad_session",
+    ]),
   );
   expect(wrapped).toContain("Refused: pass `grunts` and/or `drills` at the TOP level");
   expect(wrapped).toContain("`roster`");
@@ -168,5 +174,68 @@ test("squad_metrics renders the asked models, squad roles and full detail", asyn
   } finally {
     dispose();
     vi.unstubAllGlobals();
+  }
+});
+
+test("squad_session reports a child's cache verdict and the caller's own clock", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const lastHit = Date.now() - 60_000;
+  const sessions = {
+    ses_child: [
+      { type: "user", time: { created: lastHit } },
+      {
+        type: "assistant",
+        agent: "grunt-anthropic-claude-sonnet-5-5",
+        model: { providerID: "anthropic", id: "claude-sonnet-5-5" },
+        time: { created: lastHit, completed: lastHit + 1000 },
+        finish: "stop",
+        tokens: { input: 1, output: 10, reasoning: 0, cache: { read: 40_000, write: 0 } },
+        content: [{ type: "text", text: "ok" }],
+      },
+    ],
+  };
+  const tools = new Map();
+  const dispose = await plugin.setup({
+    location: { directory },
+    options: { rate_limit_guard: { enabled: false } },
+    skill: { transform: async () => {} },
+    session: {
+      hook: async () => {},
+      context: async ({ sessionID }) => {
+        // The host rejects an unknown id with an error object that has no message.
+        if (sessionID === "ses_bogus") throw { _tag: "NotFoundError" };
+        return { data: sessions[sessionID] ?? [] };
+      },
+    },
+    model: { list: async () => [] },
+    tool: {
+      hook: async () => {},
+      transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
+    },
+  });
+  try {
+    const session = tools.get("squad_session");
+    const both = (
+      await session.execute({ sessionIDs: ["ses_child", "ses_gone"] }, { agent: "build" })
+    ).content;
+    expect(both).toMatch(/^now: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    expect(both).toMatch(/cache: WARM — expires in 2[34]\d s/);
+    expect(both).toContain("context: ~40k");
+    expect(both).toContain("session ses_gone\nNo provider request found");
+    expect(both.match(/^now: /gm)).toHaveLength(1);
+    const bogus = (await session.execute({ sessionIDs: ["ses_bogus"] }, { agent: "build" }))
+      .content;
+    expect(bogus).toContain(
+      "session ses_bogus: could not be read (NotFoundError). Treat it as cold.",
+    );
+    // One bare id instead of an array still works.
+    const one = (await session.execute({ sessionIDs: "ses_child" }, { agent: "build" })).content;
+    expect(one).toContain("session ses_child (grunt-anthropic-claude-sonnet-5-5");
+    const own = (await session.execute({}, { agent: "build", sessionID: "ses_none" })).content;
+    expect(own).toMatch(/^now: /);
+    expect(own).not.toContain("your context");
+  } finally {
+    dispose();
   }
 });
