@@ -64,15 +64,15 @@ export function readMetrics(dir) {
 }
 
 /**
- * Whether any source is missing or older than TTL_MS.
+ * The one freshness rule for every cached entry (a metrics source or a
+ * per-model detail): fetched less than TTL_MS ago. At exactly TTL_MS it has
+ * expired.
  *
- * @param {any} data  readMetrics result
+ * @param {{fetchedAt?: unknown} | null | undefined} entry
  * @param {number} now
  */
-export function isStale(data, now) {
-  const at = (s) => (typeof s?.fetchedAt === "number" ? s.fetchedAt : -Infinity);
-  const oldest = Math.min(at(data?.superindex), at(data?.scores), at(data?.ids));
-  return now - oldest >= TTL_MS;
+function isFresh(entry, now) {
+  return typeof entry?.fetchedAt === "number" && now - entry.fetchedAt < TTL_MS;
 }
 
 /**
@@ -101,7 +101,7 @@ async function getJson(fetch, url, timeoutMs) {
  */
 export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOUT_MS, force }) {
   const prev = readMetrics(dir) ?? {};
-  const due = (s) => force || !(typeof s?.fetchedAt === "number" && now - s.fetchedAt < TTL_MS);
+  const due = (s) => force || !isFresh(s, now);
   const next = { ...prev };
   const report = { superindex: "fresh", scores: "fresh", ids: "fresh" };
 
@@ -189,7 +189,7 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
 export async function fetchDetail({ fetch, dir, now, llmbId, timeoutMs = FETCH_TIMEOUT_MS }) {
   const file = path.join(dir, "detail", `${llmbId.replace(/[^a-zA-Z0-9._-]+/g, "_")}.json`);
   const cached = readJson(file);
-  if (cached && typeof cached.fetchedAt === "number" && now - cached.fetchedAt < TTL_MS) {
+  if (isFresh(cached, now)) {
     return cached.body;
   }
   try {
