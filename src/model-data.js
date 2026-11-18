@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
+import { GENERATED_MARKER_DETECT } from "./workers.js";
 
 /**
  * Pull the model id out of an agent markdown file's frontmatter, without its
@@ -28,40 +29,68 @@ import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
  * @returns {string|null}
  */
 export function extractModelId(content) {
-  const fm = readFrontmatter(content);
-  const model =
-    fm.state === "ok"
-      ? fm.fields.model
-      : fm.state === "invalid"
-        ? legacyHeaderFields(fm.header).model
-        : undefined;
-  if (typeof model !== "string") return null;
-  return model.split("#")[0].trim() || null;
+  return readModel(content).id;
 }
 
 /**
- * Scan an agent dir for grunt-/drill- files and collect the unique set of
- * `provider/model` ids they target (a grunt and a drill of the same model
- * collapse to one entry). Hand-authored grunt-/drill- agents count too.
+ * The model id plus whether a missing one is really absent. A header that is
+ * cut off (`incomplete`) or unparseable (`invalid`, with no model line the
+ * legacy reader recognises) leaves the model UNKNOWN: the file may well name
+ * one that the damage hides. An incomplete header is not read line by line —
+ * the cut may run through the model line itself and yield a wrong id.
  *
- * `unreadable` lists files that could not be read at all: their model is
- * unknown, not absent, so a caller that would DROP models missing from `ids`
- * must not act on this scan.
+ * @param {string} content
+ * @returns {{id: string|null, known: boolean}}
+ */
+function readModel(content) {
+  const fm = readFrontmatter(content);
+  /** @type {unknown} */
+  let model;
+  switch (fm.state) {
+    case "ok":
+      model = fm.fields.model;
+      break;
+    case "invalid":
+      model = legacyHeaderFields(fm.header).model;
+      break;
+    case "incomplete":
+      return { id: null, known: false };
+    case "none":
+      return { id: null, known: true };
+  }
+  const id = typeof model === "string" ? model.split("#")[0].trim() || null : null;
+  return { id, known: id !== null || fm.state === "ok" };
+}
+
+/**
+ * Scan an agent dir for squad files and collect the unique set of
+ * `provider/model` ids they target (a grunt and a drill of the same model
+ * collapse to one entry). Hand-authored grunt-/drill- agents count too, and so
+ * do generated legacy `worker-` files: squad_dump still lists those agents
+ * (src/squad-apply.js readSquad), so their models are still in the squad.
+ *
+ * Two lists name files whose model is unknown, not absent, so a caller that
+ * would DROP models missing from `ids` must not act on this scan:
+ *   unreadable   — the file could not be read at all;
+ *   undetermined — a generated file, or one with a cut-off or unparseable
+ *                  header, from which no model could be read.
  *
  * @param {string} dir  agent directory (e.g. ~/.config/opencode/agent)
- * @returns {{ids: string[], unreadable: string[]}}  ids sorted and deduped
+ * @returns {{ids: string[], unreadable: string[], undetermined: string[]}}  ids sorted and deduped
  */
 export function scanSquadModels(dir) {
   let files;
   try {
     files = fs.readdirSync(dir);
   } catch {
-    return { ids: [], unreadable: [] };
+    return { ids: [], unreadable: [], undetermined: [] };
   }
   const ids = new Set();
   const unreadable = [];
+  const undetermined = [];
   for (const f of files.sort()) {
-    if (!/^(?:grunt|drill)-.*\.md$/.test(f)) continue;
+    const m = /^(grunt|drill|worker)-.*\.md$/.exec(f);
+    if (!m) continue;
     let txt;
     try {
       txt = fs.readFileSync(path.join(dir, f), "utf8");
@@ -69,10 +98,14 @@ export function scanSquadModels(dir) {
       unreadable.push(f);
       continue;
     }
-    const id = extractModelId(txt);
+    const generated = txt.includes(GENERATED_MARKER_DETECT);
+    // A hand-authored worker-* agent was never part of the squad.
+    if (m[1] === "worker" && !generated) continue;
+    const { id, known } = readModel(txt);
     if (id) ids.add(id);
+    else if (generated || !known) undetermined.push(f);
   }
-  return { ids: [...ids].sort(), unreadable };
+  return { ids: [...ids].sort(), unreadable, undetermined };
 }
 
 /**
@@ -122,13 +155,15 @@ export function mergeModelData(modelIds, existing = {}) {
 /**
  * Assemble the full model_data.json snapshot object.
  *
- * @param {string} dir  agent directory to scan
+ * Takes the ids of a scan the caller has already checked (scanSquadModels):
+ * scanning again here could see a different directory than the one checked.
+ *
+ * @param {string[]} ids  model ids of the squad
  * @param {{models?:Record<string, any>, _meta?: object, [key: string]: unknown}} [existing]  prior model_data.json
  * @param {string} [generated]  ISO date string (passed in; no Date here)
  * @returns {{_meta:object, models:Record<string, any>}}
  */
-export function buildModelData(dir, existing, generated) {
-  const ids = discoverSquadModels(dir);
+export function buildModelData(ids, existing, generated) {
   const models = mergeModelData(ids, existing);
   const { _meta: _old, models: _oldModels, ...handKeys } = existing ?? {};
   return {

@@ -47,13 +47,22 @@ export function readSquad(dir) {
     // No agent dir yet is an empty squad, not an error — also the first-run path.
     return { roster: buildRoster([]).roster, conflicts: [], filesByAgent };
   }
+  /** @type {string[]} */
+  const unreadable = [];
   for (const name of names) {
     const m = GENERATED_FILE_RE.exec(name);
     if (!m) continue;
-    const txt = readText(path.join(dir, name));
-    if (txt === null || !isGenerated(txt)) continue;
-    const { modelId, entry } = parseAgentFile(txt);
-    if (!modelId) continue;
+    const read = readText(path.join(dir, name));
+    if (read.state === "error") {
+      unreadable.push(`${name}: cannot read (${read.code})`);
+      continue;
+    }
+    if (read.state === "missing" || !isGenerated(read.text)) continue;
+    const { modelId, entry } = parseAgentFile(read.text);
+    if (!modelId) {
+      unreadable.push(`${name}: generated file with no readable model; left as is`);
+      continue;
+    }
     // Legacy `worker-` files predate the grunt/drill split; treat them as the
     // executor so an old squad still round-trips instead of vanishing.
     const role = m[1] === "worker" ? "grunt" : m[1];
@@ -62,15 +71,23 @@ export function readSquad(dir) {
     filesByAgent.set(agent, [...(filesByAgent.get(agent) ?? []), name]);
   }
   const { roster, conflicts } = buildRoster(files);
-  return { roster, conflicts, filesByAgent };
+  return { roster, conflicts: [...conflicts, ...unreadable], filesByAgent };
 }
 
-/** @param {string} file */
+/**
+ * A missing file and one that cannot be read are different answers: only the
+ * first means there is nothing to protect.
+ *
+ * @param {string} file
+ * @returns {{state: "ok", text: string} | {state: "missing"} | {state: "error", code: string}}
+ */
 function readText(file) {
   try {
-    return fs.readFileSync(file, "utf8");
-  } catch {
-    return null;
+    return { state: "ok", text: fs.readFileSync(file, "utf8") };
+  } catch (e) {
+    const err = /** @type {NodeJS.ErrnoException} */ (e);
+    if (err?.code === "ENOENT") return { state: "missing" };
+    return { state: "error", code: err?.code ?? err?.name ?? "error" };
   }
 }
 
@@ -81,7 +98,7 @@ const isGenerated = (text) => text.includes(GENERATED_MARKER_DETECT);
  * @typedef {{role: string, id: string, variant?: string, filename: string, unchanged?: boolean}} WrittenAgent
  * @typedef {{ok: true, diff: ReturnType<typeof diffRoster>, written: WrittenAgent[], pruned: string[],
  *   migrated: string[], refreshed: string[], conflicts: string[], dir: string}} ApplyDone
- * @typedef {{ok: false, refusal: "remove" | "collision", problems: string[],
+ * @typedef {{ok: false, refusal: "remove" | "collision" | "unreadable", problems: string[],
  *   diff: ReturnType<typeof diffRoster>, written: [], pruned: [], conflicts: string[], dir: string}} ApplyRefused
  */
 
@@ -91,12 +108,14 @@ const isGenerated = (text) => text.includes(GENERATED_MARKER_DETECT);
  * Returns `{ok: false, ...}` rather than throwing when the apply is refused —
  * the refusal is an ordinary outcome the caller reports, not an exception —
  * and every check runs before the first write, so a refused apply leaves the
- * squad exactly as it was. Two refusals:
+ * squad exactly as it was. Three refusals:
  *
- *   remove    — the apply would delete agents and `allowRemove` is not set;
- *   collision — two roster agents map to one filename (`p/model-1` and
- *               `p/model.1` both slug to `grunt-p-model-1.md`), or the target
- *               file exists and is not ours (hand-authored).
+ *   remove     — the apply would delete agents and `allowRemove` is not set;
+ *   collision  — two roster agents map to one filename (`p/model-1` and
+ *                `p/model.1` both slug to `grunt-p-model-1.md`), or the target
+ *                file exists and is not ours (hand-authored);
+ *   unreadable — a target file exists but cannot be read, so whether it is
+ *                ours cannot be established.
  *
  * Another generated file still claiming a kept agent is handled by name. A
  * legacy `worker-` file is migrated: deleted once the agent's `grunt-` file is
@@ -119,7 +138,7 @@ const isGenerated = (text) => text.includes(GENERATED_MARKER_DETECT);
 export function applySquad({ roster, dir, allowRemove = false, describe }) {
   const { roster: current, conflicts, filesByAgent } = readSquad(dir);
   const diff = diffRoster(current, roster);
-  /** @param {"remove"|"collision"} refusal @param {string[]} problems @returns {ApplyRefused} */
+  /** @param {ApplyRefused["refusal"]} refusal @param {string[]} problems @returns {ApplyRefused} */
   const refuse = (refusal, problems) => ({
     ok: false,
     refusal,
@@ -139,6 +158,8 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
   /** @type {Map<string, string>} filename -> the agent it is planned for */
   const byFile = new Map();
   const problems = [];
+  /** @type {string[]} */
+  const unreadable = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
     for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
       const { filename, content } = agentMarkdown(role, modelId, {
@@ -152,7 +173,12 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
         continue;
       }
       byFile.set(filename, agent);
-      const existing = readText(path.join(dir, filename));
+      const read = readText(path.join(dir, filename));
+      if (read.state === "error") {
+        unreadable.push(`${path.join(dir, filename)}: ${read.code} (${agent} targets it)`);
+        continue;
+      }
+      const existing = read.state === "ok" ? read.text : null;
       if (existing !== null && !isGenerated(existing)) {
         problems.push(
           `${filename} exists and was not generated by this plugin (${agent} targets it)`,
@@ -162,6 +188,7 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
       plan.push({ role, modelId, entry, filename, content, existing });
     }
   }
+  if (unreadable.length) return refuse("unreadable", unreadable);
   if (problems.length) return refuse("collision", problems);
 
   /** @type {string[]} */
@@ -287,6 +314,18 @@ export function formatApplyReport(result) {
   const lines = [`Agent dir: ${result.dir}`];
   for (const c of result.conflicts) lines.push(`  note   ${c}`);
 
+  if (!result.ok && result.refusal === "unreadable") {
+    lines.push(
+      "",
+      "REFUSED: an agent file this roster would replace cannot be read, so it is",
+      "unknown whether this plugin wrote it:",
+      ...result.problems.map((p) => `  - ${p}`),
+      "",
+      "Nothing was written. The file may be the user's own agent: tell the user and",
+      "let them fix its permissions or move it. Do not retry until they have.",
+    );
+    return lines.join("\n");
+  }
   if (!result.ok && result.refusal === "collision") {
     lines.push(
       "",
