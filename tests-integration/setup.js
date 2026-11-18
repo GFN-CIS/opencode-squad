@@ -29,7 +29,7 @@ export const blockedFetches = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (url.startsWith("http://opencode.local")) return realFetch(input, init);
+  if (new URL(url).host === "opencode.local") return realFetch(input, init);
   blockedFetches.push(url);
   throw new Error(`network blocked in integration tests: ${url}`);
 };
