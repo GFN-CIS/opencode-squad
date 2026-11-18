@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
+import { GENERATED_MARKER_DETECT } from "./workers.js";
 
 /**
  * Pull the model id out of an agent markdown file's frontmatter, without its
@@ -29,6 +30,8 @@ import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
  */
 export function extractModelId(content) {
   const fm = readFrontmatter(content);
+  // A cut-off header is not read line by line: the cut may run through the
+  // model line itself and yield a wrong id.
   const model =
     fm.state === "ok"
       ? fm.fields.model
@@ -40,28 +43,37 @@ export function extractModelId(content) {
 }
 
 /**
- * Scan an agent dir for grunt-/drill- files and collect the unique set of
+ * Scan an agent dir for squad files and collect the unique set of
  * `provider/model` ids they target (a grunt and a drill of the same model
- * collapse to one entry). Hand-authored grunt-/drill- agents count too.
+ * collapse to one entry). Hand-authored grunt-/drill- agents count too, and so
+ * do generated legacy `worker-` files: squad_dump still lists those agents
+ * (src/squad-apply.js readSquad), so their models are still in the squad.
  *
- * `unreadable` lists files that could not be read at all: their model is
- * unknown, not absent, so a caller that would DROP models missing from `ids`
- * must not act on this scan.
+ * Two lists name files whose model is unknown, not absent, so a caller that
+ * would DROP models missing from `ids` must not act on this scan:
+ *   unreadable   — the file could not be read at all;
+ *   undetermined — a generated file from which no model could be read (a
+ *                  cut-off or broken header): every generated agent has one.
+ * A hand-authored file without a model owns no model_data entry, so it is
+ * simply not counted — blocking on it would freeze the refresh for good over
+ * a file that is not the squad's.
  *
  * @param {string} dir  agent directory (e.g. ~/.config/opencode/agent)
- * @returns {{ids: string[], unreadable: string[]}}  ids sorted and deduped
+ * @returns {{ids: string[], unreadable: string[], undetermined: string[]}}  ids sorted and deduped
  */
 export function scanSquadModels(dir) {
   let files;
   try {
     files = fs.readdirSync(dir);
   } catch {
-    return { ids: [], unreadable: [] };
+    return { ids: [], unreadable: [], undetermined: [] };
   }
   const ids = new Set();
   const unreadable = [];
+  const undetermined = [];
   for (const f of files.sort()) {
-    if (!/^(?:grunt|drill)-.*\.md$/.test(f)) continue;
+    const m = /^(grunt|drill|worker)-.*\.md$/.exec(f);
+    if (!m) continue;
     let txt;
     try {
       txt = fs.readFileSync(path.join(dir, f), "utf8");
@@ -69,10 +81,14 @@ export function scanSquadModels(dir) {
       unreadable.push(f);
       continue;
     }
+    const generated = txt.includes(GENERATED_MARKER_DETECT);
+    // A hand-authored worker-* agent was never part of the squad.
+    if (m[1] === "worker" && !generated) continue;
     const id = extractModelId(txt);
     if (id) ids.add(id);
+    else if (generated) undetermined.push(f);
   }
-  return { ids: [...ids].sort(), unreadable };
+  return { ids: [...ids].sort(), unreadable, undetermined };
 }
 
 /**
@@ -122,13 +138,15 @@ export function mergeModelData(modelIds, existing = {}) {
 /**
  * Assemble the full model_data.json snapshot object.
  *
- * @param {string} dir  agent directory to scan
+ * Takes the ids of a scan the caller has already checked (scanSquadModels):
+ * scanning again here could see a different directory than the one checked.
+ *
+ * @param {string[]} ids  model ids of the squad
  * @param {{models?:Record<string, any>, _meta?: object, [key: string]: unknown}} [existing]  prior model_data.json
  * @param {string} [generated]  ISO date string (passed in; no Date here)
  * @returns {{_meta:object, models:Record<string, any>}}
  */
-export function buildModelData(dir, existing, generated) {
-  const ids = discoverSquadModels(dir);
+export function buildModelData(ids, existing, generated) {
   const models = mergeModelData(ids, existing);
   const { _meta: _old, models: _oldModels, ...handKeys } = existing ?? {};
   return {
