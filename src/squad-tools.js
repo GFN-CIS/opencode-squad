@@ -7,13 +7,21 @@ export const TOOL_DESCRIPTIONS = {
     "Compact a subagent session BEFORE reusing it for a new, unrelated task: replaces its " +
     "history with a summary, so the next dispatch re-reads a small context instead of the " +
     "whole transcript. Use when you are about to send a LONG task down a session whose " +
-    "context is already large and mostly irrelevant to it — the size is in that session's " +
-    "last [CACHE STATUS] line. Not free: one full pass of the summarising model over the " +
+    "context is already large and mostly irrelevant to it — squad_session gives the size. " +
+    "Not free: one full pass of the summarising model over the " +
     "history, and the session's provider cache goes cold afterwards, so it pays off only " +
     "when several turns follow. If the old history is worthless to the new task, a FRESH " +
     "session is cheaper than compacting. opencode's own auto-compaction fires only at the " +
     "context limit, which is far later than the moment this is for. The summarising " +
     "model is chosen by OpenCode 2's compaction settings — this tool cannot pick one.",
+  squad_session:
+    "Status of a subagent session you might reuse, computed now: whether its provider " +
+    "cache is still warm and for how many seconds (or how long ago it went cold), how " +
+    "big its context is, whether it still seems to be running, and why its last result " +
+    "is empty or cut off if it is. Call it BEFORE passing a sessionID back to `subagent` " +
+    "or to squad_compact; the sessionID is in the `subagent` reply and in its " +
+    "<subagent> message. Without sessionID: the current date and time and your own " +
+    "context size.",
   squad_dump:
     "Read the current squad roster: every generated agent, grouped as `grunts` and " +
     "`drills` and keyed by model id, with its per-agent settings. ALWAYS call this " +
@@ -52,7 +60,9 @@ export const ARG_DESCRIPTIONS = {
   "agent.disable":
     "Park this agent without deleting it: it stops being dispatchable but its settings " +
     "survive. Prefer this over deleting an agent you may want back.",
-  "compact.task_id": "The subagent session to compact — the task_id from its [CACHE STATUS] line.",
+  "compact.sessionID": "The subagent session to compact (its sessionID).",
+  "session.sessionID":
+    "The subagent session to check. Omit for the current time and your own context.",
   "dump.directory":
     "Agent directory to read. Defaults to the global ~/.config/opencode/agent " +
     "(or $XDG_CONFIG_HOME/opencode/agent). " +

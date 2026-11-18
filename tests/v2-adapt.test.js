@@ -6,16 +6,13 @@ import { createTurnMemo } from "../src/message-transform.js";
 import { PROMPT_CLOSE, promptOpen } from "../src/prompt-inject.js";
 import { evaluateRetry, initGuardState, normalizeGuardConfig } from "../src/rate-limit-guard.js";
 import {
-  appendToResult,
   applyOrchestratorTransformV2,
   applySystemPartsTransform,
   findV2InjectionTarget,
-  lastAssistantModel,
   normalizeAgents,
   normalizeProviders,
   normalizeUsageMessages,
   retryToStatus,
-  subagentOutcome,
 } from "../src/v2/adapt.js";
 
 // Payload shapes trimmed from OpenCode 2.1.3 captures.
@@ -101,32 +98,6 @@ describe("messages", () => {
       providerID: "zai",
     });
     expect(normalizeUsageMessages("nope")).toEqual([]);
-  });
-
-  test("lastAssistantModel reads the newest assistant message", () => {
-    expect(lastAssistantModel(childContext)).toEqual({ providerID: "zai", modelID: "glm-5.3" });
-    expect(lastAssistantModel([])).toBeNull();
-    expect(lastAssistantModel(undefined)).toBeNull();
-  });
-});
-
-describe("subagent results", () => {
-  const result = {
-    output: { sessionID: "ses_child", status: "completed", output: "PONG" },
-    content: [{ type: "text", text: '<subagent sessionID="ses_child">\nPONG\n</subagent>' }],
-    metadata: { sessionID: "ses_child", status: "completed" },
-  };
-
-  test("subagentOutcome reads the child session and final text", () => {
-    expect(subagentOutcome(result)).toEqual({ sessionID: "ses_child", output: "PONG" });
-    expect(subagentOutcome({})).toEqual({ sessionID: undefined, output: "" });
-  });
-
-  test("appendToResult adds a text part or a paragraph", () => {
-    expect(appendToResult(result, "NOTE").content.at(-1)).toEqual({ type: "text", text: "NOTE" });
-    expect(result.content).toHaveLength(1); // not mutated
-    expect(appendToResult({ content: "x" }, "NOTE").content).toBe("x\n\nNOTE");
-    expect(appendToResult({}, "NOTE").content).toBe("NOTE");
   });
 });
 
