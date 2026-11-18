@@ -202,7 +202,11 @@ test("squad_session reports a child's cache verdict and the caller's own clock",
     skill: { transform: async () => {} },
     session: {
       hook: async () => {},
-      context: async ({ sessionID }) => ({ data: sessions[sessionID] ?? [] }),
+      context: async ({ sessionID }) => {
+        // The host rejects an unknown id with an error object that has no message.
+        if (sessionID === "ses_bogus") throw { _tag: "NotFoundError" };
+        return { data: sessions[sessionID] ?? [] };
+      },
     },
     model: { list: async () => [] },
     tool: {
@@ -220,6 +224,11 @@ test("squad_session reports a child's cache verdict and the caller's own clock",
     expect(both).toContain("context: ~40k");
     expect(both).toContain("session ses_gone\nNo provider request found");
     expect(both.match(/^now: /gm)).toHaveLength(1);
+    const bogus = (await session.execute({ sessionIDs: ["ses_bogus"] }, { agent: "build" }))
+      .content;
+    expect(bogus).toContain(
+      "session ses_bogus: could not be read (NotFoundError). Treat it as cold.",
+    );
     // One bare id instead of an array still works.
     const one = (await session.execute({ sessionIDs: "ses_child" }, { agent: "build" })).content;
     expect(one).toContain("session ses_child (grunt-anthropic-claude-sonnet-5-5");

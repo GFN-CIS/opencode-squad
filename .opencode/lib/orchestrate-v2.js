@@ -243,10 +243,9 @@ export default {
               try {
                 facts = sessionFacts(await readContext(sessionID));
               } catch (e) {
-                return (
-                  `session ${sessionID}: could not be read — ` +
-                  `${e?.message ?? String(e)}. Treat it as cold.`
-                );
+                const why =
+                  e?.message || e?._tag || e?.name || JSON.stringify(e) || "unknown error";
+                return `session ${sessionID}: could not be read (${why}). Treat it as cold.`;
               }
               const ttl = facts.model ? modelData?.[facts.model]?.cache_ttl_seconds : undefined;
               return formatSessionStatus({
