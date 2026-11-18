@@ -55,7 +55,7 @@ test("native drill variants dedupe with grunts and preserve drill-only model dat
     fs.writeFileSync(path.join(dir, "drill-shared.md"), "---\nmodel: openai/gpt-5.5#high\n---\n");
     fs.writeFileSync(path.join(dir, "drill-only.md"), "---\nmodel: local/reviewer#high\n---\n");
     expect(discoverSquadModels(dir)).toEqual(["local/reviewer", "openai/gpt-5.5"]);
-    const snapshot = buildModelData(dir, {
+    const snapshot = buildModelData(discoverSquadModels(dir), {
       models: { "local/reviewer": { info: "keep this note" } },
     });
     expect(Object.keys(snapshot.models)).toEqual(["local/reviewer", "openai/gpt-5.5"]);
@@ -111,7 +111,7 @@ test("mergeModelData gives new models empty info and drops removed ones", () => 
 test("buildModelData scans a dir and stamps meta", () => {
   const dir = tmpdir();
   fs.writeFileSync(path.join(dir, "grunt-openai-gpt-5-5.md"), "---\nmodel: openai/gpt-5.5\n---\n");
-  const snap = buildModelData(dir, {}, "2026-06-30");
+  const snap = buildModelData(discoverSquadModels(dir), {}, "2026-06-30");
   expect(snap._meta.generated).toBe("2026-06-30");
   expect(snap._meta.model_count).toBe(1);
   expect(snap.models["openai/gpt-5.5"]).toEqual({ info: "" });
@@ -120,10 +120,10 @@ test("buildModelData scans a dir and stamps meta", () => {
 test("modelsChanged detects real model diffs and ignores rebuild churn", () => {
   const dir = tmpdir();
   fs.writeFileSync(path.join(dir, "grunt-openai-gpt-5-5.md"), "---\nmodel: openai/gpt-5.5\n---\n");
-  const first = buildModelData(dir, {}, "2026-06-30");
+  const first = buildModelData(discoverSquadModels(dir), {}, "2026-06-30");
   // rebuild on a later date over the prior output: same models -> no change,
   // so the startup auto-regen must NOT rewrite just because the date moved.
-  const second = buildModelData(dir, first, "2026-07-15");
+  const second = buildModelData(discoverSquadModels(dir), first, "2026-07-15");
   expect(modelsChanged(first, second)).toBe(false);
   // a hand-edited info IS a change worth persisting
   const edited = { models: { ...first.models } };
@@ -131,7 +131,7 @@ test("modelsChanged detects real model diffs and ignores rebuild churn", () => {
   expect(modelsChanged(first, edited)).toBe(true);
   // a new squad member is a change
   fs.writeFileSync(path.join(dir, "grunt-anthropic-x.md"), "---\nmodel: anthropic/x\n---\n");
-  const third = buildModelData(dir, second, "2026-07-15");
+  const third = buildModelData(discoverSquadModels(dir), second, "2026-07-15");
   expect(modelsChanged(second, third)).toBe(true);
 });
 
@@ -173,7 +173,7 @@ test("buildModelData keeps the hand-written providers section", () => {
   const dir = tmpdir();
   fs.writeFileSync(path.join(dir, "grunt-anthropic-x.md"), "---\nmodel: anthropic/x\n---\n");
   const snap = buildModelData(
-    dir,
+    discoverSquadModels(dir),
     { providers: { anthropic: "Max 5x" }, models: {} },
     "2026-11-12",
   );
