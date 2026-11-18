@@ -1,4 +1,4 @@
-// Suite: the package entry (index.js → .opencode/lib/orchestrate-v2.js) as an
+// Suite: the package entry (index.js → .opencode/lib/squad.js) as an
 // OpenCode 2 host sees it. Covers setup registering the squad_* tools,
 // squad_patch generating native V2 agent files, and squad_metrics rendering
 // host models + cached metrics, with the startup network refreshes stubbed at

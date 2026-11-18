@@ -113,7 +113,7 @@ const errorText = (error) =>
 
 /** @type {import("@opencode/plugin").Plugin.Plugin} */
 export default {
-  id: "orchestrate",
+  id: "squad",
   /** @param {PluginContext} ctx */
   async setup(ctx) {
     ensureGlobalModelDataFresh();
