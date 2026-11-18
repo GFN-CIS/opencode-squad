@@ -33,7 +33,11 @@ export const SQUAD_COMPACT_INPUT = {
 export const SQUAD_SESSION_INPUT = {
   type: "object",
   properties: {
-    sessionID: { type: "string", description: ARG_DESCRIPTIONS["session.sessionID"] },
+    sessionIDs: {
+      type: "array",
+      items: { type: "string" },
+      description: ARG_DESCRIPTIONS["session.sessionIDs"],
+    },
   },
   additionalProperties: false,
 };

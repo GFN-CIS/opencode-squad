@@ -123,7 +123,8 @@ each path, not just "which one gets it off my plate."
 
 **Reusing a subagent session (`sessionID`) — it is not free, and it compounds.**
 Before you pass a `sessionID` back to `subagent` (or to `squad_compact`), call
-`squad_session({sessionID})`. It answers from the session as it is right now:
+`squad_session({sessionIDs: [...]})` with every session you are weighing, in one
+call. It answers from the session as it is right now:
 whether its provider cache is still warm and for how many more seconds (or how
 long ago it went cold), how big its context has grown, whether it still seems to
 be running, and why its last result is empty or cut off if it is. Use all of it.
@@ -368,7 +369,7 @@ Reuse check — ses_fbd96c79: ~945k / 1M (94%), cache COLD for 960 s. Fresh sess
 
 The facts and the verdict:
 
-- **size** and **cache** — from `squad_session({sessionID})`, called right
+- **size** and **cache** — from `squad_session({sessionIDs: [...]})`, called right
   before this decision (§1b). Do not reuse numbers from an earlier call: the
   cache clock keeps running. If the report says the session is still running,
   you are not choosing reuse, you are redirecting it. If you could not get a

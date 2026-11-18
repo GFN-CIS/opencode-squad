@@ -19,9 +19,9 @@ export const TOOL_DESCRIPTIONS = {
     "cache is still warm and for how many seconds (or how long ago it went cold), how " +
     "big its context is, whether it still seems to be running, and why its last result " +
     "is empty or cut off if it is. Call it BEFORE passing a sessionID back to `subagent` " +
-    "or to squad_compact; the sessionID is in the `subagent` reply and in its " +
-    "<subagent> message. Without sessionID: the current date and time and your own " +
-    "context size.",
+    "or to squad_compact, with every candidate session in one call; the sessionID is " +
+    "in the `subagent` reply and in its <subagent> message. Without sessionIDs: the " +
+    "current date and time and your own context size.",
   squad_dump:
     "Read the current squad roster: every generated agent, grouped as `grunts` and " +
     "`drills` and keyed by model id, with its per-agent settings. ALWAYS call this " +
@@ -61,8 +61,9 @@ export const ARG_DESCRIPTIONS = {
     "Park this agent without deleting it: it stops being dispatchable but its settings " +
     "survive. Prefer this over deleting an agent you may want back.",
   "compact.sessionID": "The subagent session to compact (its sessionID).",
-  "session.sessionID":
-    "The subagent session to check. Omit for the current time and your own context.",
+  "session.sessionIDs":
+    "The subagent sessions to check — every session you are weighing for reuse, in " +
+    "one call. Omit for the current time and your own context.",
   "dump.directory":
     "Agent directory to read. Defaults to the global ~/.config/opencode/agent " +
     "(or $XDG_CONFIG_HOME/opencode/agent). " +

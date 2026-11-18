@@ -80,7 +80,34 @@ function sizeText(tokens, limit) {
 }
 
 /**
- * The report for a subagent session the orchestrator may reuse.
+ * The session ids a squad_session call asks about. The schema declares an
+ * array (a string-or-array union is not something every provider's tool
+ * schema accepts), but a model that passes one bare id still gets its answer.
+ * Deduplicated, blanks dropped.
+ *
+ * @param {any} input
+ * @returns {string[]}
+ */
+export function requestedSessions(input) {
+  const raw = input?.sessionIDs ?? input?.sessionID;
+  const list = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+  return [...new Set(list.map((v) => String(v ?? "").trim()).filter(Boolean))];
+}
+
+/**
+ * The wall clock line every squad_session report starts with.
+ *
+ * @param {number} now
+ * @param {string} [timeZone]
+ */
+export function formatNow(now, timeZone) {
+  const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return `now: ${formatLocalDateTime(new Date(now), zone) ?? new Date(now).toISOString()}`;
+}
+
+/**
+ * The report for one subagent session the orchestrator may reuse (without the
+ * clock line: one squad_session call may cover several sessions).
  *
  * @param {{
  *   sessionID: string,
@@ -88,15 +115,12 @@ function sizeText(tokens, limit) {
  *   ttlSeconds?: number,
  *   contextLimit?: number,
  *   now: number,
- *   timeZone?: string,
  * }} p
  * @returns {string}
  */
-export function formatSessionStatus({ sessionID, facts, ttlSeconds, contextLimit, now, timeZone }) {
-  const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const lines = [`now: ${formatLocalDateTime(new Date(now), zone) ?? new Date(now).toISOString()}`];
+export function formatSessionStatus({ sessionID, facts, ttlSeconds, contextLimit, now }) {
   const who = [facts.agent, facts.model].filter(Boolean).join(", ");
-  lines.push(`session ${sessionID}${who ? ` (${who})` : ""}`);
+  const lines = [`session ${sessionID}${who ? ` (${who})` : ""}`];
 
   if (facts.lastHitMs === null) {
     lines.push(
@@ -110,10 +134,7 @@ export function formatSessionStatus({ sessionID, facts, ttlSeconds, contextLimit
   const ttl =
     typeof ttlSeconds === "number"
       ? { seconds: ttlSeconds, source: "set in model_data.json" }
-      : (({ seconds, source }) => ({
-          seconds,
-          source: { published: "published", measured: "measured", assumed: "assumed" }[source],
-        }))(resolveCacheTtl(facts.providerID ?? undefined));
+      : resolveCacheTtl(facts.providerID ?? undefined);
   const size = sizeText(facts.contextTokens, contextLimit);
 
   if (facts.running) {
@@ -160,10 +181,9 @@ export function formatSessionStatus({ sessionID, facts, ttlSeconds, contextLimit
  * @returns {string}
  */
 export function formatOwnStatus({ contextTokens, contextLimit, now, timeZone }) {
-  const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const lines = [`now: ${formatLocalDateTime(new Date(now), zone) ?? new Date(now).toISOString()}`];
+  const lines = [formatNow(now, timeZone)];
   const size = sizeText(contextTokens, contextLimit);
   if (size) lines.push(`your context: ${size} as of your last finished step.`);
-  lines.push("Pass a subagent's sessionID to check whether reusing it is worth it.");
+  lines.push("Pass subagent sessionIDs to check whether reusing them is worth it.");
   return lines.join("\n");
 }

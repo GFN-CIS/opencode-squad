@@ -37,7 +37,13 @@ import {
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
 import { validateRoster } from "../../src/roster.js";
-import { formatOwnStatus, formatSessionStatus, sessionFacts } from "../../src/session-status.js";
+import {
+  formatNow,
+  formatOwnStatus,
+  formatSessionStatus,
+  requestedSessions,
+  sessionFacts,
+} from "../../src/session-status.js";
 import {
   applySquad,
   defaultAgentDir,
@@ -216,8 +222,8 @@ export default {
           const limits = await getLimitMap();
           const limitOf = (model) =>
             model ? (limits[model] ?? limits[model.split("/").slice(1).join("/")]) : undefined;
-          const sessionID = String(input?.sessionID ?? "").trim();
-          if (!sessionID) {
+          const ids = requestedSessions(input);
+          if (!ids.length) {
             const own = context?.sessionID;
             let facts = null;
             try {
@@ -233,28 +239,31 @@ export default {
               }),
             };
           }
-          let facts;
-          try {
-            facts = sessionFacts(await readContext(sessionID));
-          } catch (e) {
-            return {
-              content:
-                `squad_session: could not read session ${sessionID} — ` +
-                `${e?.message ?? String(e)}. Treat it as cold.`,
-            };
-          }
-          const ttl = facts.model
-            ? loadModelData(directory)?.[facts.model]?.cache_ttl_seconds
-            : undefined;
-          return {
-            content: formatSessionStatus({
-              sessionID,
-              facts,
-              ttlSeconds: typeof ttl === "number" ? ttl : undefined,
-              contextLimit: limitOf(facts.model),
-              now,
+          const modelData = loadModelData(directory);
+          const reports = await Promise.all(
+            ids.map(async (sessionID) => {
+              let facts;
+              try {
+                facts = sessionFacts(await readContext(sessionID));
+              } catch (e) {
+                return (
+                  `session ${sessionID}: could not be read — ` +
+                  `${e?.message ?? String(e)}. Treat it as cold.`
+                );
+              }
+              const ttl = facts.model ? modelData?.[facts.model]?.cache_ttl_seconds : undefined;
+              return formatSessionStatus({
+                sessionID,
+                facts,
+                ttlSeconds: typeof ttl === "number" ? ttl : undefined,
+                contextLimit: limitOf(facts.model),
+                now,
+              });
             }),
-            metadata: { title: `session ${sessionID}` },
+          );
+          return {
+            content: [formatNow(now), ...reports].join("\n\n"),
+            metadata: { title: `sessions: ${ids.length}` },
           };
         },
       });

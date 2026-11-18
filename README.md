@@ -191,7 +191,7 @@ Verified live end-to-end against a genuinely quota-exhausted model, on two separ
 
 The `subagent` tool supports resuming a prior child by passing its `sessionID`, so the orchestrator can continue an existing grunt/drill session (reusing its history and, if timed right, the provider cache) or start fresh. Knowing which is worth it requires knowing the time since the last provider hit, the cache TTL, and the accumulated context size.
 
-The orchestrator asks for these with `squad_session({sessionID})` at the moment it decides, and gets them computed at that moment, with the arithmetic done:
+The orchestrator asks for these with `squad_session({sessionIDs: [...]})` — every candidate session in one call — at the moment it decides, and gets them computed at that moment, with the arithmetic done:
 
 ```
 now: 2026-11-18 12:23:41 (Europe/Moscow)
@@ -204,7 +204,7 @@ A pulled tool rather than a note appended to the `subagent` result, for two reas
 - Since OpenCode 2.3 every `subagent` call runs in the background. The tool result is a stub, and the real result arrives later as a synthetic `<subagent>` message that no tool hook sees. A note on the stub described the session as it was *before* the dispatch.
 - A note is a snapshot: "45 s ago" is wrong a turn later, and leaving the orchestrator to redo the arithmetic against a clock was a source of errors of its own.
 
-Without `sessionID` the tool returns the current date and time and the caller's own context size. The bootstrap no longer carries a clock: a timestamp that changes every turn has no business in text the prompt cache has to match.
+`sessionIDs` is declared as an array: a string-or-array union is not a schema every provider's tool calling accepts, so the union lives in the code instead — a bare id is accepted too. Without `sessionIDs` the tool returns the current date and time and the caller's own context size. The bootstrap no longer carries a clock: a timestamp that changes every turn has no business in text the prompt cache has to match.
 
 The last-hit time is when that session last *started* a provider request, not when the task finished. The size is the last *finished* step's usage, so it still reads high for one step right after a compaction. If the newest step has no finish reason, the report says the session is probably still running (an aborted step looks the same) and gives no cache verdict.
 
@@ -322,7 +322,7 @@ A third tool covers the other half of reuse:
 
 | tool | what it does |
 | --- | --- |
-| `squad_session` | a subagent session's cache verdict (warm for N s / cold for N s), context size, running state and empty-result diagnosis; without `sessionID`, the current time and the caller's own context — see [Session status](#session-status-squad_session) |
+| `squad_session` | a subagent session's cache verdict (warm for N s / cold for N s), context size, running state and empty-result diagnosis, for one or several sessions per call; without `sessionIDs`, the current time and the caller's own context — see [Session status](#session-status-squad_session) |
 | `squad_compact` | compacts a subagent session before it is reused for a new task — `sessionID` only; the compaction model comes from OpenCode 2's own settings |
 
 Reuse used to be all-or-nothing: pass the `sessionID` and re-read the whole
