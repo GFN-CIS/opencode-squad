@@ -62,7 +62,9 @@ function modelKey(id) {
  * @returns {string[]}
  */
 export function keyCandidates(id) {
+  /** @type {string[]} */
   const out = [];
+  /** @param {string} k */
   const add = (k) => {
     if (k && !out.includes(k)) out.push(k);
   };
@@ -103,6 +105,7 @@ export function lookup(id, index) {
   return null;
 }
 
+/** @param {unknown} v */
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /**
@@ -114,6 +117,7 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
  *   priceOut: number|null, context: number|null}>}
  */
 export function indexSuperIndex(json) {
+  /** @type {ReturnType<typeof indexSuperIndex>} */
   const out = {};
   for (const m of Array.isArray(json?.models) ? json.models : []) {
     if (typeof m?.id !== "string") continue;
@@ -142,6 +146,7 @@ export function indexSuperIndex(json) {
  * @returns {Record<string, {id: string, values: Array<{value: number, setting: string|null}>}>}
  */
 export function indexScoreRows(rows) {
+  /** @type {ReturnType<typeof indexScoreRows>} */
   const out = {};
   for (const r of Array.isArray(rows) ? rows : []) {
     const value = num(r?.value);
@@ -161,6 +166,7 @@ export function indexScoreRows(rows) {
  * @returns {Record<string, string>}
  */
 export function indexModelIds(list) {
+  /** @type {Record<string, string>} */
   const out = {};
   for (const m of Array.isArray(list) ? list : []) {
     if (typeof m?.id !== "string") continue;
@@ -170,6 +176,7 @@ export function indexModelIds(list) {
   return out;
 }
 
+/** @param {unknown} v */
 const named = (v) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ") : null);
 
 /**
@@ -220,6 +227,7 @@ export function ownerRules(id, { note, providers } = {}) {
  */
 export function billingFor(id, { note, plans, authTypes } = {}) {
   const provider = String(id).split("/")[0];
+  /** @param {string} v @returns {{api: true} | {api: false, plan: string}} */
   const asPlan = (v) => (v.toLowerCase() === "api" ? { api: true } : { api: false, plan: v });
   const own = named(note?.billing);
   if (own) return own === "subscription" ? { api: false, plan: null } : asPlan(own);
@@ -230,9 +238,10 @@ export function billingFor(id, { note, plans, authTypes } = {}) {
   return { api: true };
 }
 
+/** @param {number} v */
 const fmtVal = (v) => (Math.abs(v) >= 100 ? String(Math.round(v)) : String(Number(v.toFixed(3))));
 
-/** @param {number|null|undefined} at  epoch ms */
+/** @param {number|null|undefined} at  epoch ms @param {number} now */
 function fmtAge(at, now) {
   if (typeof at !== "number") return "never";
   const h = Math.max(0, Math.round((now - at) / 3600_000));
@@ -306,7 +315,7 @@ export function formatSummary({
   const firstBySignature = new Map();
   for (const m of [...models].sort((a, b) => a.id.localeCompare(b.id))) {
     const note = notes?.[m.id];
-    const s = lookup(m.id, si);
+    const s = lookup(m.id, si ?? {});
     const hits = KEY_METRICS.map(({ metric }) => lookup(m.id, byMetric[metric]));
     const rules = ownerRules(m.id, { note, providers: plans });
     const info = rules.length ? rules.join(" / ") : null;

@@ -109,6 +109,7 @@ export const LEGACY_PERF_KEYS = [
  */
 export function mergeModelData(modelIds, existing = {}) {
   const prev = existing?.models || {};
+  /** @type {Record<string, any>} */
   const out = {};
   for (const id of [...modelIds].sort()) {
     const entry = { info: "", ...(prev[id] || {}) };
@@ -122,7 +123,7 @@ export function mergeModelData(modelIds, existing = {}) {
  * Assemble the full model_data.json snapshot object.
  *
  * @param {string} dir  agent directory to scan
- * @param {{models?:Record<string, any>}} [existing]  prior model_data.json
+ * @param {{models?:Record<string, any>, _meta?: object, [key: string]: unknown}} [existing]  prior model_data.json
  * @param {string} [generated]  ISO date string (passed in; no Date here)
  * @returns {{_meta:object, models:Record<string, any>}}
  */
@@ -185,8 +186,9 @@ export function readModelDataFile(file) {
   try {
     text = fs.readFileSync(file, "utf8");
   } catch (e) {
-    if (e?.code === "ENOENT") return { state: "missing" };
-    return { state: "invalid", reason: `unreadable (${e?.code ?? e?.name ?? "error"})` };
+    const err = /** @type {NodeJS.ErrnoException} */ (e);
+    if (err?.code === "ENOENT") return { state: "missing" };
+    return { state: "invalid", reason: `unreadable (${err?.code ?? err?.name ?? "error"})` };
   }
   let parsed;
   try {
@@ -194,6 +196,7 @@ export function readModelDataFile(file) {
   } catch (e) {
     return { state: "invalid", reason: jsonErrorWhere(e) };
   }
+  /** @param {unknown} v @returns {v is Record<string, unknown>} */
   const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
   if (!isObject(parsed)) return { state: "invalid", reason: "not a JSON object" };
   for (const key of ["models", "providers"]) {

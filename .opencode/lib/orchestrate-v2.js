@@ -107,8 +107,14 @@ const unwrap = (res) => (res && typeof res === "object" && "data" in res ? res.d
 const errorText = (error) =>
   [error?.type, error?.message].filter((v) => typeof v === "string" && v).join(": ");
 
+/** @typedef {import("@opencode/plugin").Plugin.Context} PluginContext */
+/** @typedef {import("@opencode/plugin").Skill.Info} SkillInfo */
+/** @typedef {import("../../src/roster-schema.js").SquadPatchInput} SquadPatchInput */
+
+/** @type {import("@opencode/plugin").Plugin.Plugin} */
 export default {
   id: "orchestrate",
+  /** @param {PluginContext} ctx */
   async setup(ctx) {
     ensureGlobalModelDataFresh();
     // After the regen, which may rewrite model_data.json. opencode reloads
@@ -164,7 +170,9 @@ export default {
     // null means "could not ask", reported as unknown rather than as "none".
     const getVariantMap = async () => (await getCatalog())?.variants ?? null;
 
+    /** @type {string | undefined} */
     let inventory;
+    /** @type {Awaited<ReturnType<typeof getAgents>> | undefined} */
     let inventoryFrom; // the agents list `inventory` was rendered from
     let squadDrafted = false;
     const getInventory = async () => {
@@ -178,6 +186,7 @@ export default {
       return inventory;
     };
 
+    /** @param {string | null | undefined} agentName */
     const getAgentModel = async (agentName) => {
       if (!agentName) return null;
       return (await getAgents())?.find((a) => a.name === agentName)?.model ?? null;
@@ -191,7 +200,10 @@ export default {
     const skills = loadSkills([SKILLS_DIR]);
     await ctx.skill.transform((editor) => {
       for (const skill of skills) {
-        if (!editor.get(skill.id)) editor.add(skill);
+        // The host brands its ids and paths; ours come from SKILL.md files on
+        // disk in exactly the shape OpenCode builds for a discovered skill.
+        if (!editor.get(skill.id))
+          editor.add(/** @type {SkillInfo} */ (/** @type {unknown} */ (skill)));
       }
     });
 
@@ -224,6 +236,7 @@ export default {
         execute: async (input, context) => {
           const now = Date.now();
           const limits = await getLimitMap();
+          /** @param {string | null | undefined} model */
           const limitOf = (model) =>
             model ? (limits[model] ?? limits[model.split("/").slice(1).join("/")]) : undefined;
           const ids = requestedSessions(input);
@@ -250,8 +263,10 @@ export default {
               try {
                 facts = sessionFacts(await readContext(sessionID));
               } catch (e) {
+                const err =
+                  /** @type {{message?: string, _tag?: string, name?: string} | undefined} */ (e);
                 const why =
-                  e?.message || e?._tag || e?.name || JSON.stringify(e) || "unknown error";
+                  err?.message || err?._tag || err?.name || JSON.stringify(e) || "unknown error";
                 return `session ${sessionID}: could not be read (${why}). Treat it as cold.`;
               }
               const ttl = facts.model ? modelData[facts.model]?.cache_ttl_seconds : undefined;
@@ -284,7 +299,9 @@ export default {
                 "decides what to do about it.",
             };
           }
-          const taskId = String(input?.sessionID ?? "").trim();
+          const taskId = String(
+            /** @type {{sessionID?: unknown}} */ (input)?.sessionID ?? "",
+          ).trim();
           if (!taskId) return { content: "squad_compact: sessionID is required." };
 
           let agentName;
@@ -316,7 +333,7 @@ export default {
             ]);
           } catch (e) {
             return {
-              content: `squad_compact: the compaction call failed — ${e?.message ?? String(e)}`,
+              content: `squad_compact: the compaction call failed — ${e instanceof Error ? e.message : String(e)}`,
             };
           }
           // The size estimate reads the last completed turn, which a fresh
@@ -345,7 +362,8 @@ export default {
         description: TOOL_DESCRIPTIONS.squad_dump,
         input: SQUAD_DUMP_INPUT,
         execute: async (input) => {
-          const dir = input?.directory || defaultAgentDir();
+          const { directory: asked } = /** @type {{directory?: unknown}} */ (input ?? {});
+          const dir = typeof asked === "string" && asked ? asked : defaultAgentDir();
           const { roster, conflicts: readConflicts } = readSquad(dir);
           const conflicts = readConflicts;
           const count =
@@ -369,10 +387,13 @@ export default {
         description: TOOL_DESCRIPTIONS.squad_metrics,
         input: SQUAD_METRICS_INPUT,
         execute: async (input) => {
+          const { models: asked, full } = /** @type {{models?: unknown, full?: unknown}} */ (
+            input ?? {}
+          );
           const wanted = [
             ...new Set(
-              (Array.isArray(input?.models) ? input.models : [])
-                .map((m) => String(m).trim())
+              (Array.isArray(asked) ? asked : [])
+                .map((/** @type {unknown} */ m) => String(m).trim())
                 .filter(Boolean),
             ),
           ];
@@ -385,7 +406,7 @@ export default {
           }
           const data = await getMetrics();
           const now = Date.now();
-          if (input?.full === true) {
+          if (full === true) {
             const parts = await Promise.all(
               wanted.slice(0, MAX_FULL_MODELS).map(async (id) => {
                 const llmbId =
@@ -448,8 +469,10 @@ export default {
                 "sarge decide.",
             };
           }
-          const dir = input?.directory || defaultAgentDir();
-          const { allow_remove: _allow, directory: _dir, ...doc } = input ?? {};
+          // Untyped until validated: Code Mode can send anything.
+          const raw = /** @type {Record<string, unknown>} */ (input ?? {});
+          const { allow_remove: allowRemove, directory: asked, ...doc } = raw;
+          const dir = typeof asked === "string" && asked ? asked : defaultAgentDir();
           // Code Mode does not enforce the schema's additionalProperties, and
           // a roster wrapped as {roster: {...}} used to read as "no agents" —
           // a 14-agent deletion the guard caught twice in one afternoon.
@@ -462,11 +485,17 @@ export default {
                 ". Nothing was written.",
             };
           }
-          const roster = { grunts: doc.grunts ?? {}, drills: doc.drills ?? {} };
-          const errors = validatePatchInput(input ?? {});
-          errors.push(...validateVariants(roster, await getVariantMap()));
+          const errors = validatePatchInput(raw);
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
+          }
+          const valid = /** @type {SquadPatchInput} */ (raw);
+          const roster = { grunts: valid.grunts ?? {}, drills: valid.drills ?? {} };
+          const variantErrors = validateVariants(roster, await getVariantMap());
+          if (variantErrors.length) {
+            return {
+              content: `Roster is invalid:\n${variantErrors.map((e) => `  - ${e}`).join("\n")}`,
+            };
           }
           // Descriptions carry the owner's routing rules from model_data.json;
           // writing from an unreadable file would strip them from every agent.
@@ -482,7 +511,7 @@ export default {
           const result = applySquad({
             roster,
             dir,
-            allowRemove: input?.allow_remove === true,
+            allowRemove: allowRemove === true,
             describe: squadDescriber(dir, directory),
           });
           if (result.ok) {
@@ -499,14 +528,23 @@ export default {
 
     // --- rate-limit guard ---
 
-    const guardStates = new Map(); // sessionID -> GuardState
-    const sessionInfo = new Map(); // sessionID -> {parentID, agent} | null
-    const lastActivity = new Map(); // sessionID -> epoch ms
-    const pollTimers = new Map(); // sessionID -> interval handle
-    const activeExecutions = new Set(); // children with an execution in flight
+    /** @typedef {{parentID: string, agent: string | null}} ChildInfo */
+    /** @type {Map<string, ReturnType<typeof initGuardState>>} */
+    const guardStates = new Map();
+    /** @type {Map<string, ChildInfo | null>} null: not a subagent */
+    const sessionInfo = new Map();
+    /** @type {Map<string, number>} epoch ms */
+    const lastActivity = new Map();
+    /** @type {Map<string, ReturnType<typeof setInterval>>} */
+    const pollTimers = new Map();
+    /** @type {Set<string>} children with an execution in flight */
+    const activeExecutions = new Set();
 
+    /** @param {string} sessionID @returns {Promise<ChildInfo | null>} */
     const getSessionInfo = async (sessionID) => {
-      if (sessionInfo.has(sessionID)) return sessionInfo.get(sessionID);
+      const known = sessionInfo.get(sessionID);
+      if (known !== undefined) return known;
+      /** @type {ChildInfo | null} */
       let info = null;
       try {
         const s = unwrap(await ctx.session.get({ sessionID }));
@@ -518,6 +556,7 @@ export default {
       return info;
     };
 
+    /** @param {string} sessionID */
     const stopSilenceWatch = (sessionID) => {
       const timer = pollTimers.get(sessionID);
       if (timer) clearInterval(timer);
@@ -527,6 +566,11 @@ export default {
     // Explain to the orchestrator why its subagent failed and that it should
     // reroute. Steered into the parent's running turn, so it lands right after
     // the failed subagent call; `resume` starts a turn if the parent is idle.
+    /**
+     * @param {string} parentID
+     * @param {string | null} agentName
+     * @param {Omit<Parameters<typeof formatGuardNote>[0], "model" | "provider">} result
+     */
     const sendGuardNote = async (parentID, agentName, result) => {
       const model = await getAgentModel(agentName);
       const text = formatGuardNote({
@@ -576,6 +620,7 @@ export default {
       });
     }
 
+    /** @param {string} sessionID */
     const startSilenceWatch = (sessionID) => {
       if (pollTimers.has(sessionID) || !guardConfig.enabled) return;
       const timer = setInterval(async () => {
@@ -609,6 +654,10 @@ export default {
       pollTimers.set(sessionID, timer);
     };
 
+    /**
+     * @param {string} sessionID
+     * @param {{type?: unknown, message?: unknown, status?: unknown} | undefined} error
+     */
     const handleTerminalError = async (sessionID, error) => {
       if (!guardConfig.enabled) return;
       const state = guardStates.get(sessionID);
@@ -616,7 +665,14 @@ export default {
       const info = await getSessionInfo(sessionID);
       if (!info) return;
       const text = errorText(error);
-      if (!isGuardedTerminalError(text, guardConfig, error?.status)) return;
+      if (
+        !isGuardedTerminalError(
+          text,
+          guardConfig,
+          typeof error?.status === "number" ? error.status : undefined,
+        )
+      )
+        return;
       guardStates.set(sessionID, { ...(state ?? initGuardState()), guarded: true });
       await sendGuardNote(info.parentID, info.agent, { reason: "terminal_error", errorText: text });
     };
@@ -626,6 +682,7 @@ export default {
     // starts with clean retry state — a `guarded` flag left by the previous
     // execution would otherwise stop the new watcher on its first tick and
     // make handleTerminalError skip a real failure.
+    /** @param {string} sessionID */
     const armExecution = async (sessionID) => {
       activeExecutions.add(sessionID);
       const info = await getSessionInfo(sessionID);
@@ -637,6 +694,7 @@ export default {
       startSilenceWatch(sessionID);
     };
 
+    /** @param {string} sessionID */
     const forget = (sessionID) => {
       activeExecutions.delete(sessionID);
       guardStates.delete(sessionID);
@@ -649,19 +707,21 @@ export default {
     if (guardConfig.enabled) {
       void (async () => {
         for await (const event of ctx.event.subscribe({ signal: events.signal })) {
-          const data = event?.data;
+          const data = /** @type {Record<string, unknown> | undefined} */ (event?.data);
           const sessionID = data?.sessionID;
           if (typeof sessionID !== "string") continue;
           // Any event naming a watched session is proof of life.
           if (pollTimers.has(sessionID)) lastActivity.set(sessionID, Date.now());
           switch (event.type) {
-            case "session.created":
-              if (data.parentID) {
-                sessionInfo.set(sessionID, { parentID: data.parentID, agent: data.agent ?? null });
+            case "session.created": {
+              const { parentID, agent } = event.data;
+              if (parentID) {
+                sessionInfo.set(sessionID, { parentID, agent: agent ?? null });
                 lastActivity.set(sessionID, Date.now());
                 startSilenceWatch(sessionID);
               }
               break;
+            }
             case "session.execution.started":
               void armExecution(sessionID);
               break;
@@ -676,7 +736,7 @@ export default {
             case "session.execution.failed":
               activeExecutions.delete(sessionID);
               stopSilenceWatch(sessionID);
-              void handleTerminalError(sessionID, data.error);
+              void handleTerminalError(sessionID, event.data.error);
               break;
           }
         }

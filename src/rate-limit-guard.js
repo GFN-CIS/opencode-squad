@@ -82,6 +82,7 @@ export function normalizeGuardConfig(raw) {
  * fallback as @renjfk/opencode-model-fallback, so a bad user-supplied pattern
  * degrades to a plain substring check instead of throwing.
  */
+/** @param {string|undefined} text @param {string[]} patterns */
 function matchesPattern(text, patterns) {
   if (!text) return false;
   const lower = text.toLowerCase();
@@ -206,6 +207,7 @@ export function evaluateRetry(state, status, config, lastStatusCode, now) {
   return { trigger: false };
 }
 
+/** @param {number} seconds */
 function humanizeSeconds(seconds) {
   const s = Math.max(0, Math.round(seconds));
   const days = Math.floor(s / 86_400);

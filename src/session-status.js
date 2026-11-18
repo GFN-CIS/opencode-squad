@@ -49,9 +49,12 @@ export function sessionFacts(messages) {
     newest?.model?.providerID && newest?.model?.id
       ? `${newest.model.providerID}/${newest.model.id}`
       : null;
+  /** @param {any} m */
   const hasText = (m) =>
     Array.isArray(m?.content) &&
-    m.content.some((c) => c?.type === "text" && typeof c.text === "string" && c.text.trim());
+    m.content.some(
+      (/** @type {any} */ c) => c?.type === "text" && typeof c.text === "string" && c.text.trim(),
+    );
   return {
     agent: typeof newest?.agent === "string" ? newest.agent : null,
     model,
