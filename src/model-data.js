@@ -37,29 +37,47 @@ export function extractModelId(content) {
  * `provider/model` ids they target (a grunt and a drill of the same model
  * collapse to one entry). Hand-authored grunt-/drill- agents count too.
  *
+ * `unreadable` lists files whose frontmatter exists but does not parse: their
+ * model is unknown, not absent, so a caller that would DROP models missing
+ * from `ids` must not act on this scan.
+ *
  * @param {string} dir  agent directory (e.g. ~/.config/opencode/agent)
- * @returns {string[]}  sorted, deduped model ids
+ * @returns {{ids: string[], unreadable: string[]}}  ids sorted and deduped
  */
-export function discoverSquadModels(dir) {
+export function scanSquadModels(dir) {
   let files;
   try {
     files = fs.readdirSync(dir);
   } catch {
-    return [];
+    return { ids: [], unreadable: [] };
   }
   const ids = new Set();
-  for (const f of files) {
+  const unreadable = [];
+  for (const f of files.sort()) {
     if (!/^(?:grunt|drill)-.*\.md$/.test(f)) continue;
     let txt;
     try {
       txt = fs.readFileSync(path.join(dir, f), "utf8");
     } catch {
+      unreadable.push(f);
+      continue;
+    }
+    if (readFrontmatter(txt).state === "invalid") {
+      unreadable.push(f);
       continue;
     }
     const id = extractModelId(txt);
     if (id) ids.add(id);
   }
-  return [...ids].sort();
+  return { ids: [...ids].sort(), unreadable };
+}
+
+/**
+ * @param {string} dir  agent directory
+ * @returns {string[]}  sorted, deduped model ids (see scanSquadModels)
+ */
+export function discoverSquadModels(dir) {
+  return scanSquadModels(dir).ids;
 }
 
 // Fields earlier versions copied in from Artificial Analysis. They are stale

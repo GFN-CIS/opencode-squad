@@ -7,7 +7,12 @@ import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "../../src/fs-atomic.js";
 import { billingFor, ownerRules } from "../../src/metrics.js";
 import { metricsDir, readMetrics, refreshMetrics } from "../../src/metrics-cache.js";
-import { buildModelData, modelsChanged, readModelDataFile } from "../../src/model-data.js";
+import {
+  buildModelData,
+  modelsChanged,
+  readModelDataFile,
+  scanSquadModels,
+} from "../../src/model-data.js";
 import { opencodeConfigDir, opencodeDataDir } from "../../src/paths.js";
 import { createPromptLoader } from "../../src/prompt-inject.js";
 import { defaultAgentDir, syncDescriptions } from "../../src/squad-apply.js";
@@ -181,9 +186,18 @@ export function ensureGlobalModelDataFresh() {
       console.warn(`[opencode-squad] model_data.json left untouched — ${problem}`);
       return { wrote: false, problem };
     }
+    const agentDir = path.join(path.dirname(file), "agent");
+    // A squad file whose header does not parse has an unknown model; the
+    // merge would drop that model's entry and its owner rules with it.
+    const { unreadable } = scanSquadModels(agentDir);
+    if (unreadable.length) {
+      const problem = `${agentDir}: frontmatter does not parse in ${unreadable.join(", ")}`;
+      console.warn(`[opencode-squad] model_data.json left untouched — ${problem}`);
+      return { wrote: false, problem };
+    }
     const existing = read.state === "ok" ? read.data : {};
     const generated = new Date().toISOString().slice(0, 10);
-    const snapshot = buildModelData(path.join(path.dirname(file), "agent"), existing, generated);
+    const snapshot = buildModelData(agentDir, existing, generated);
     if (Object.keys(snapshot.models).length === 0) return { wrote: false }; // no squad
     if (!modelsChanged(existing, snapshot)) return { wrote: false }; // unchanged
     writeFileAtomic(file, `${JSON.stringify(snapshot, null, 2)}\n`);

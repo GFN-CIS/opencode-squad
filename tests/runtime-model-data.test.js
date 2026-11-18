@@ -73,6 +73,26 @@ test("a missing file is generated; a valid one keeps hand-edited fields on refre
   expect(ensureGlobalModelDataFresh()).toEqual({ wrote: false }); // unchanged -> no write
 });
 
+test("a squad file whose header does not parse keeps its model's entry", () => {
+  addGrunt("a/b");
+  addGrunt("c/d");
+  fs.writeFileSync(
+    globalFile,
+    JSON.stringify({ models: { "a/b": { info: "keep me" }, "c/d": { info: "" } } }),
+  );
+  const before = fs.readFileSync(globalFile, "utf8");
+  // A hand edit breaks the YAML: the model is unknown now, not gone.
+  const broken = path.join(configDir, "agent", "grunt-a-b.md");
+  fs.writeFileSync(
+    broken,
+    fs.readFileSync(broken, "utf8").replace("mode: subagent", "mode: [oops"),
+  );
+  const r = ensureGlobalModelDataFresh();
+  expect(r.wrote).toBe(false);
+  expect(r.problem).toContain("grunt-a-b.md");
+  expect(fs.readFileSync(globalFile, "utf8")).toBe(before);
+});
+
 test("description sync is skipped while the global file is unreadable", () => {
   addGrunt("a/b");
   fs.writeFileSync(globalFile, "{not json");
