@@ -11,6 +11,9 @@
  *   - squad_session / squad_compact / squad_dump / squad_patch / squad_metrics:
  *     ctx.tool.transform with JSON
  *     Schema inputs (src/v2/schemas.js);
+ *   - provider quota: the `http.response` session hook reads rate-limit
+ *     headers off a subagent's model responses and steers a [QUOTA] note
+ *     into its orchestrator on a band change (src/quota.js);
  *   - rate-limit guard: the `retry` session hook vetoes the retry outright
  *     while the event stream covers
  *     terminal errors and silent hangs.
@@ -29,6 +32,7 @@ import { estimateContextTokens, indexModelCatalog } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { formatDetail, formatSummary, lookup, squadRoles } from "../../src/metrics.js";
 import { fetchDetail } from "../../src/metrics-cache.js";
+import { createQuotaReporter } from "../../src/quota.js";
 import {
   evaluateRetry,
   formatGuardNote,
@@ -596,6 +600,47 @@ export default {
         // Worst case the orchestrator sees only the subagent's own failure.
       }
     };
+
+    // --- provider quota ---
+
+    // Read off every subagent model response. The response itself is left
+    // alone (headers only; the body is a live stream), and the hook returns at
+    // once: the session lookup and the note run beside the transport, never
+    // in front of it.
+    const reportQuota = createQuotaReporter();
+    await ctx.session.hook("http.response", (event) => {
+      const providerID = event.model?.providerID;
+      if (!providerID || event.kind !== "primary") return;
+      /** @type {Record<string, string>} */
+      const headers = {};
+      try {
+        event.response.headers.forEach((value, name) => {
+          headers[name.toLowerCase()] = value;
+        });
+      } catch {
+        return;
+      }
+      void (async () => {
+        const info = await getSessionInfo(event.sessionID);
+        if (!info) return; // the orchestrator's own calls: nobody to tell
+        const clause = reportQuota(
+          `${info.parentID}|${providerID}`,
+          providerID,
+          headers,
+          Date.now(),
+        );
+        if (!clause) return;
+        await ctx.session.synthetic({
+          sessionID: info.parentID,
+          text: clause,
+          description: "squad provider quota",
+          delivery: "steer",
+          resume: false,
+        });
+      })().catch(() => {
+        // Best-effort: a lost note costs a routing hint, nothing else.
+      });
+    });
 
     if (guardConfig.enabled) {
       await ctx.session.hook("retry", async (event) => {
