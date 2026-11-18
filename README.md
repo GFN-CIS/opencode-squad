@@ -182,7 +182,9 @@ Three independent signals feed the guard, so it also catches failures that never
 
 1. **Session `retry` hook** — once a threshold trips, the plugin vetoes the retry and steers an explanatory note into the parent turn (resuming it if idle). The note tells sarge to choose another model and includes an absolute `Rate limited till <ISO datetime>` deadline when known.
 2. **Terminal `session.execution.failed` events** — a provider limit that produces no retry still gets the same explanatory note when its error matches the guard patterns.
-3. **Silence polling backstop** — an independent timer watches each child session. If it has no activity past `max_silence_seconds`, the plugin interrupts it and sends the parent an explanation, even without a retry or terminal error event.
+3. **Silence polling backstop** — an independent timer watches each child execution: it arms on `session.created` and again on every `session.execution.started`, so a child resumed by its `sessionID` is watched too, and it stops when the execution ends. If an execution has no activity past `max_silence_seconds`, the plugin interrupts it and tells the parent what the interrupt actually did — stopped, already idle, or unconfirmed (the child may still be running, so check before redispatching).
+
+Every note also tells sarge that the subagent may already have changed files or run commands before it stopped, so work with side effects is checked before it is redispatched.
 
 Verified live end-to-end against a genuinely quota-exhausted model, on two separate occasions: the guard caught the limit, told the orchestrator, and the orchestrator switched to a different grunt on its own — then, when that one turned out to share the same exhausted account, switched again to a different provider entirely, all without being told which model to pick. The silence backstop specifically was confirmed against a live subagent that produced zero events for over 10 minutes.
 

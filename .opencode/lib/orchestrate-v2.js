@@ -25,7 +25,7 @@
  */
 
 import { formatCompactReport } from "../../src/compact.js";
-import { buildLimitMap, buildVariantMap, estimateContextTokens } from "../../src/context.js";
+import { estimateContextTokens, indexModelCatalog } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { formatDetail, formatSummary, lookup, squadRoles } from "../../src/metrics.js";
 import { fetchDetail } from "../../src/metrics-cache.js";
@@ -61,7 +61,6 @@ import {
   applyOrchestratorTransformV2,
   applySystemPartsTransform,
   normalizeAgents,
-  normalizeProviders,
   normalizeUsageMessages,
   retryToStatus,
 } from "../../src/v2/adapt.js";
@@ -141,21 +140,29 @@ export default {
       return agentsPromise;
     };
 
-    /** @type {Promise<ReturnType<typeof normalizeProviders> | null> | undefined} */
-    let providersPromise;
-    const getProviders = () => {
-      providersPromise ??= ctx.model
-        .list()
-        .then((r) => normalizeProviders(unwrap(r)))
-        .catch(() => null);
-      return providersPromise;
+    // The model catalog barely changes while the process lives, so a
+    // successful lookup is kept. Concurrent callers share one in-flight
+    // request; a FAILED one is dropped, so the next tool call asks again
+    // instead of running without variant checks until a restart.
+    /** @type {Promise<ReturnType<typeof indexModelCatalog> | null> | undefined} */
+    let catalogPromise;
+    const getCatalog = () => {
+      if (!catalogPromise) {
+        /** @type {Promise<ReturnType<typeof indexModelCatalog> | null>} */
+        const pending = Promise.resolve()
+          .then(() => ctx.model.list())
+          .then((r) => indexModelCatalog(unwrap(r)))
+          .catch(() => {
+            if (catalogPromise === pending) catalogPromise = undefined;
+            return null;
+          });
+        catalogPromise = pending;
+      }
+      return catalogPromise;
     };
-    const getLimitMap = async () => buildLimitMap((await getProviders()) ?? []);
+    const getLimitMap = async () => (await getCatalog())?.limits ?? {};
     // null means "could not ask", reported as unknown rather than as "none".
-    const getVariantMap = async () => {
-      const providers = await getProviders();
-      return providers === null ? null : buildVariantMap(providers);
-    };
+    const getVariantMap = async () => (await getCatalog())?.variants ?? null;
 
     let inventory;
     let inventoryFrom; // the agents list `inventory` was rendered from
@@ -512,6 +519,7 @@ export default {
         until: result.until,
         silentMs: result.silentMs,
         errorText: result.errorText,
+        interrupt: result.interrupt,
       });
       try {
         await ctx.session.synthetic({
@@ -560,14 +568,22 @@ export default {
         if (!info) return stopSilenceWatch(sessionID);
         guardStates.set(sessionID, { ...(state ?? initGuardState()), guarded: true });
         stopSilenceWatch(sessionID);
+        // The parent is told what actually happened: a failed interrupt leaves
+        // a child that may still be running, and redispatching it then puts
+        // two agents on one task.
+        /** @type {"confirmed" | "idle" | "unconfirmed"} */
+        let interrupt = "unconfirmed";
         try {
-          await ctx.session.interrupt({ sessionID, continue: false });
+          const res = unwrap(await ctx.session.interrupt({ sessionID, resume: false }));
+          if (res?.interrupted === true) interrupt = "confirmed";
+          else if (res?.interrupted === false) interrupt = "idle";
         } catch {
-          // No worse off than without the guard.
+          // Stays "unconfirmed".
         }
         await sendGuardNote(info.parentID, info.agent, {
           reason: "silent_hang",
           silentMs: Date.now() - last,
+          interrupt,
         });
       }, SILENCE_POLL_INTERVAL_MS);
       timer.unref?.();
@@ -584,6 +600,19 @@ export default {
       if (!isGuardedTerminalError(text, guardConfig, error?.status)) return;
       guardStates.set(sessionID, { ...(state ?? initGuardState()), guarded: true });
       await sendGuardNote(info.parentID, info.agent, { reason: "terminal_error", errorText: text });
+    };
+
+    // A child resumed by session id starts a new execution without a new
+    // session.created, so each execution arms its own silence window and
+    // starts with clean retry state — a `guarded` flag left by the previous
+    // execution would otherwise stop the new watcher on its first tick and
+    // make handleTerminalError skip a real failure.
+    const armExecution = async (sessionID) => {
+      const info = await getSessionInfo(sessionID);
+      if (!info) return; // top-level session — never guarded
+      guardStates.delete(sessionID);
+      lastActivity.set(sessionID, Date.now());
+      startSilenceWatch(sessionID);
     };
 
     const forget = (sessionID) => {
@@ -609,6 +638,9 @@ export default {
                 lastActivity.set(sessionID, Date.now());
                 startSilenceWatch(sessionID);
               }
+              break;
+            case "session.execution.started":
+              void armExecution(sessionID);
               break;
             case "session.deleted":
               forget(sessionID);

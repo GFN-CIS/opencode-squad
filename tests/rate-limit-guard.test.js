@@ -303,6 +303,7 @@ test("formatGuardNote: silent_hang reason explains a session that never produced
     reason: "silent_hang",
     silentMs: 10 * 60 * 1000,
     description: "List src/ files",
+    interrupt: "confirmed",
   });
   expect(text).toContain("RATE LIMIT GUARD");
   expect(text).toContain("alibaba-token-plan/qwen3.7-max");
@@ -310,4 +311,25 @@ test("formatGuardNote: silent_hang reason explains a session that never produced
   expect(text).toContain("no activity at all for ~10m");
   expect(text).toContain("Rate limited till unknown"); // no retry-after was ever observed
   expect(text).toContain("Pick a different grunt/drill");
+});
+
+test("formatGuardNote: silent_hang without a confirmed interrupt never claims the child stopped", () => {
+  const base = { model: "p/m", provider: "p", reason: "silent_hang", silentMs: 600_000 };
+  for (const interrupt of [undefined, "unconfirmed"]) {
+    const text = formatGuardNote({ ...base, interrupt });
+    expect(text).toContain("may STILL be running");
+    expect(text).toContain("before dispatching this task anywhere else");
+    expect(text).not.toContain("was interrupted");
+  }
+  const idle = formatGuardNote({ ...base, interrupt: "idle" });
+  expect(idle).toContain("no longer running");
+  expect(idle).toContain("squad_session");
+});
+
+test("formatGuardNote: no reason claims the subagent never ran", () => {
+  for (const reason of ["single_wait", "cumulative", "terminal_error", "silent_hang"]) {
+    const text = formatGuardNote({ model: "p/m", provider: "p", reason, interrupt: "confirmed" });
+    expect(text).not.toContain("never got a chance to run");
+    expect(text).toContain("may already have changed files or run commands");
+  }
 });
