@@ -15,21 +15,28 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { readFrontmatter } from "./frontmatter.js";
+import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
 
 /**
- * Pull the model id out of an agent markdown file's YAML frontmatter, without
- * its `#variant` suffix. Only the leading frontmatter block counts: a
- * `model:` line in the body (prompt text) is not the agent's model, and a file
- * with no block, or a block that is not valid YAML, has none.
+ * Pull the model id out of an agent markdown file's frontmatter, without its
+ * `#variant` suffix. Only the leading frontmatter block counts: a `model:`
+ * line in the body (prompt text) is not the agent's model, and a file with no
+ * block has none. A block that is not valid YAML is read line by line (see
+ * legacyHeaderFields), as the roster reader does.
  *
  * @param {string} content
  * @returns {string|null}
  */
 export function extractModelId(content) {
   const fm = readFrontmatter(content);
-  if (fm.state !== "ok" || typeof fm.fields.model !== "string") return null;
-  return fm.fields.model.split("#")[0].trim() || null;
+  const model =
+    fm.state === "ok"
+      ? fm.fields.model
+      : fm.state === "invalid"
+        ? legacyHeaderFields(fm.header).model
+        : undefined;
+  if (typeof model !== "string") return null;
+  return model.split("#")[0].trim() || null;
 }
 
 /**
@@ -37,9 +44,9 @@ export function extractModelId(content) {
  * `provider/model` ids they target (a grunt and a drill of the same model
  * collapse to one entry). Hand-authored grunt-/drill- agents count too.
  *
- * `unreadable` lists files whose frontmatter exists but does not parse: their
- * model is unknown, not absent, so a caller that would DROP models missing
- * from `ids` must not act on this scan.
+ * `unreadable` lists files that could not be read at all: their model is
+ * unknown, not absent, so a caller that would DROP models missing from `ids`
+ * must not act on this scan.
  *
  * @param {string} dir  agent directory (e.g. ~/.config/opencode/agent)
  * @returns {{ids: string[], unreadable: string[]}}  ids sorted and deduped
@@ -59,10 +66,6 @@ export function scanSquadModels(dir) {
     try {
       txt = fs.readFileSync(path.join(dir, f), "utf8");
     } catch {
-      unreadable.push(f);
-      continue;
-    }
-    if (readFrontmatter(txt).state === "invalid") {
       unreadable.push(f);
       continue;
     }

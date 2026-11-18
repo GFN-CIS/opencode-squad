@@ -37,7 +37,7 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
-import { validateRoster } from "../../src/roster-schema.js";
+import { validatePatchInput } from "../../src/roster-schema.js";
 import {
   formatNow,
   formatOwnStatus,
@@ -463,7 +463,7 @@ export default {
             };
           }
           const roster = { grunts: doc.grunts ?? {}, drills: doc.drills ?? {} };
-          const errors = validateRoster(doc);
+          const errors = validatePatchInput(input ?? {});
           errors.push(...validateVariants(roster, await getVariantMap()));
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
@@ -503,6 +503,7 @@ export default {
     const sessionInfo = new Map(); // sessionID -> {parentID, agent} | null
     const lastActivity = new Map(); // sessionID -> epoch ms
     const pollTimers = new Map(); // sessionID -> interval handle
+    const activeExecutions = new Set(); // children with an execution in flight
 
     const getSessionInfo = async (sessionID) => {
       if (sessionInfo.has(sessionID)) return sessionInfo.get(sessionID);
@@ -626,14 +627,18 @@ export default {
     // execution would otherwise stop the new watcher on its first tick and
     // make handleTerminalError skip a real failure.
     const armExecution = async (sessionID) => {
+      activeExecutions.add(sessionID);
       const info = await getSessionInfo(sessionID);
       if (!info) return; // top-level session — never guarded
+      // The execution may have ended while the session lookup was in flight.
+      if (!activeExecutions.has(sessionID)) return;
       guardStates.delete(sessionID);
       lastActivity.set(sessionID, Date.now());
       startSilenceWatch(sessionID);
     };
 
     const forget = (sessionID) => {
+      activeExecutions.delete(sessionID);
       guardStates.delete(sessionID);
       sessionInfo.delete(sessionID);
       lastActivity.delete(sessionID);
@@ -665,9 +670,11 @@ export default {
               break;
             case "session.execution.succeeded":
             case "session.execution.interrupted":
+              activeExecutions.delete(sessionID);
               stopSilenceWatch(sessionID);
               break;
             case "session.execution.failed":
+              activeExecutions.delete(sessionID);
               stopSilenceWatch(sessionID);
               void handleTerminalError(sessionID, data.error);
               break;

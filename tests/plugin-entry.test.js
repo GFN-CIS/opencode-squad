@@ -268,6 +268,11 @@ test("squad_patch validates its input with the same schema it advertises", async
       expect(bad).toContain('grunts["nope"]: "nope" is not a provider/model id');
       expect(fs.readdirSync(directory)).toEqual([]);
     }
+    // The call's own switches go through the same schema.
+    const switches = await run({ allow_remove: "true", grunts: { "a/b": {} } });
+    expect(switches).toContain("allow_remove must be a boolean when present");
+    expect(fs.readdirSync(directory)).toEqual([]);
+
     // Wrapped or missing roster: refused before validation, nothing written.
     expect(await run({ roster: { grunts: { "a/b": {} } } })).toContain("Refused: pass `grunts`");
     expect(await run({})).toContain("Refused: pass `grunts`");

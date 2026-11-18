@@ -49,11 +49,22 @@ test("parseAgentFile reads a quoted model and variant without the quotes, LF or 
   }
 });
 
-test("parseAgentFile treats a header that is not YAML as no agent", () => {
-  expect(parseAgentFile("---\nmodel: p/m\npermissions: [oops\n---\n")).toEqual({
-    modelId: undefined,
-    entry: {},
-  });
+test("parseAgentFile reads a pre-0.4.1 header (unquoted description, not YAML) line by line", () => {
+  const legacy = [
+    "---",
+    "# generated-by: opencode-squad squad-draft",
+    "description: Per-model grunt. Owner rule: no secrets.",
+    "mode: subagent",
+    "model: p/m#high",
+    "steps: 9",
+    "---",
+    "body",
+  ].join("\n");
+  expect(parseAgentFile(legacy)).toEqual({ modelId: "p/m", entry: { variant: "high", steps: 9 } });
+});
+
+test("parseAgentFile ignores a leading BOM", () => {
+  expect(parseAgentFile("\uFEFF---\nmodel: p/m\n---\n").modelId).toBe("p/m");
 });
 
 test("buildRoster groups by role, keyed and sorted by model id", () => {

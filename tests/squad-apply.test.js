@@ -328,3 +328,38 @@ test("formatApplyReport lists descriptions refreshed from model_data.json", () =
     ),
   ).not.toContain("refreshed");
 });
+
+test("a hand copy of a generated file is a separate agent: removing it needs allow_remove", () => {
+  apply({ grunts: { "p/m": {} } });
+  fs.copyFileSync(path.join(dir, "grunt-p-m.md"), path.join(dir, "grunt-p-m-copy.md"));
+  const refused = apply({ grunts: { "p/m": {} } });
+  expect(refused).toMatchObject({ ok: false, refusal: "remove" });
+  expect(refused.problems).toEqual(["grunt-p-m-copy.md (a second file for grunt p/m)"]);
+  expect(formatApplyReport(refused)).toContain("grunt-p-m-copy.md (a second file for grunt p/m)");
+  expect(ls()).toEqual(["grunt-p-m-copy.md", "grunt-p-m.md"]);
+
+  const allowed = apply({ grunts: { "p/m": {} } }, true);
+  expect(allowed).toMatchObject({ ok: true, pruned: ["grunt-p-m-copy.md"], migrated: [] });
+  expect(ls()).toEqual(["grunt-p-m.md"]);
+});
+
+test("a pre-0.4.1 file with an unquoted description is dumped and repaired by the sync", () => {
+  fs.writeFileSync(
+    path.join(dir, "grunt-a-b.md"),
+    [
+      "---",
+      "# generated-by: opencode-squad squad-draft",
+      "description: Per-model grunt. Owner rule: no secrets.",
+      "mode: subagent",
+      "model: a/b#high",
+      "---",
+      "",
+    ].join("\n"),
+  );
+  expect(readSquad(dir).roster.grunts).toEqual({ "a/b": { variant: "high" } });
+  expect(syncDescriptions({ dir, describe: () => "grunt. Owner rule: no secrets." })).toEqual([
+    "grunt-a-b.md",
+  ]);
+  expect(read("grunt-a-b.md")).toContain('description: "grunt. Owner rule: no secrets."\n');
+  expect(readSquad(dir).roster.grunts).toEqual({ "a/b": { variant: "high" } });
+});

@@ -98,11 +98,16 @@ const isGenerated = (text) => text.includes(GENERATED_MARKER_DETECT);
  *               `p/model.1` both slug to `grunt-p-model-1.md`), or the target
  *               file exists and is not ours (hand-authored).
  *
+ * Another generated file still claiming a kept agent is handled by name. A
+ * legacy `worker-` file is migrated: deleted once the agent's `grunt-` file is
+ * written, so the agent lives in one file and a later removal removes it
+ * completely. Any other one (a hand copy that kept our marker) is a separate
+ * agent to OpenCode, so deleting it is a removal like any other: refused
+ * without `allowRemove`, pruned with it.
+ *
  * On success: a file whose text is already identical is not rewritten (every
- * write makes opencode reload); a file pruned for a removed agent is never one
- * just written for a kept agent; and any other generated file still claiming a
- * kept agent — a legacy `worker-` name — is deleted as migrated, so the agent
- * lives in exactly one file and a later removal removes it completely.
+ * write makes opencode reload), and a file pruned for a removed agent is never
+ * one just written for a kept agent.
  *
  * `describe(role, modelId)` supplies each agent's description (see
  * describeAgent); without it the role's generic line is written.
@@ -158,7 +163,25 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
     }
   }
   if (problems.length) return refuse("collision", problems);
-  if (diff.removed.length > 0 && !allowRemove) return refuse("remove", diff.removed);
+
+  /** @type {string[]} */
+  const migrate = [];
+  /** @type {Array<{file: string, agent: string}>} */
+  const duplicates = [];
+  for (const [agent, files] of filesByAgent) {
+    if (diff.removed.includes(agent)) continue;
+    for (const f of files) {
+      if (byFile.has(f)) continue;
+      if (f.startsWith("worker-")) migrate.push(f);
+      else duplicates.push({ file: f, agent });
+    }
+  }
+  if ((diff.removed.length > 0 || duplicates.length > 0) && !allowRemove) {
+    return refuse("remove", [
+      ...diff.removed,
+      ...duplicates.map((d) => `${d.file} (a second file for ${d.agent})`),
+    ]);
+  }
 
   fs.mkdirSync(dir, { recursive: true });
 
@@ -193,14 +216,14 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
       pruned.push(f);
     }
   }
+  for (const { file } of duplicates) {
+    fs.unlinkSync(path.join(dir, file));
+    pruned.push(file);
+  }
   const migrated = [];
-  for (const [agent, files] of filesByAgent) {
-    if (diff.removed.includes(agent)) continue;
-    for (const f of files) {
-      if (byFile.has(f)) continue;
-      fs.unlinkSync(path.join(dir, f));
-      migrated.push(f);
-    }
+  for (const f of migrate) {
+    fs.unlinkSync(path.join(dir, f));
+    migrated.push(f);
   }
 
   return { ok: true, diff, written, pruned, migrated, refreshed, conflicts, dir };
@@ -278,8 +301,8 @@ export function formatApplyReport(result) {
   if (!result.ok) {
     lines.push(
       "",
-      `REFUSED: applying this roster would DELETE ${result.diff.removed.length} agent(s):`,
-      ...result.diff.removed.map((a) => `  - ${a}`),
+      `REFUSED: applying this roster would DELETE ${result.problems.length} agent(s):`,
+      ...result.problems.map((a) => `  - ${a}`),
       "",
       "Nothing was written. If the user asked for these deletions, retry with allow_remove.",
       "If you meant to ADD or RETUNE an agent, you are working from the wrong roster —",
