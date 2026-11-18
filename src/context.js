@@ -62,6 +62,24 @@ export function formatLocalDateTime(date, timeZone) {
 }
 
 /**
+ * A context window or size for display: `200k`, `1M`, `1.5M`.
+ *
+ * @param {number} n tokens
+ * @returns {string}
+ */
+export const formatContextSize = (n) =>
+  n >= 1_000_000 ? `${Math.round(n / 1e5) / 10}M` : `${Math.round(n / 1000)}k`;
+
+/**
+ * A token count in whole thousands, `42k` — even past a million, so a before /
+ * after pair reads on one scale.
+ *
+ * @param {number} n tokens
+ * @returns {string}
+ */
+export const formatThousands = (n) => `${Math.round(n / 1000)}k`;
+
+/**
  * Build a {modelID/providerID -> context window} lookup from the resolved
  * normalized provider list, keyed both as
  * `providerID/modelID` and bare `modelID`. Using the resolved list (not raw

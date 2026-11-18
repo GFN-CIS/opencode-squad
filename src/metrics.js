@@ -12,6 +12,9 @@
 // (`zai-coding-plan/glm-5.3` vs `zhipuai/glm-5.3` vs `z-ai/glm-5.3`), so
 // matching ignores the provider and compares the normalized model part.
 
+import { formatContextSize } from "./context.js";
+import { squadRoleOf } from "./workers.js";
+
 /**
  * The few benchmarks shown per model in the summary — chosen for coverage
  * across current frontier models and relevance to agentic coding work. The
@@ -227,9 +230,6 @@ export function billingFor(id, { note, plans, authTypes } = {}) {
   return { api: true };
 }
 
-const fmtCtx = (n) =>
-  n >= 1_000_000 ? `${Math.round(n / 1e5) / 10}M` : `${Math.round(n / 1000)}k`;
-
 const fmtVal = (v) => (Math.abs(v) >= 100 ? String(Math.round(v)) : String(Number(v.toFixed(3))));
 
 /** @param {number|null|undefined} at  epoch ms */
@@ -333,7 +333,7 @@ export function formatSummary({
       else parts.push(`SI ${e.score} (provisional, conf ${e.confidence ?? "?"}%)`);
     }
     const ctx = m.context ?? s?.entry.context;
-    if (ctx) parts.push(`ctx ${fmtCtx(ctx)}`);
+    if (ctx) parts.push(`ctx ${formatContextSize(ctx)}`);
     const billing = billingFor(m.id, { note, plans, authTypes });
     if (!billing.api) parts.push(`subscription: ${billing.plan ?? "plan not set"}`);
     else if (/-free$/.test(modelKey(m.id))) parts.push("free");
@@ -368,7 +368,7 @@ export function formatDetail(id, detail, si) {
     head.push(
       `SuperIndex: ${si.score ?? "unscored"}${si.rank !== null ? ` (#${si.rank})` : ""}, ` +
         `status ${si.status ?? "?"}, confidence ${si.confidence ?? "?"}%, ` +
-        `$${si.priceIn ?? "?"}/$${si.priceOut ?? "?"} per 1M, ctx ${si.context ? fmtCtx(si.context) : "?"}`,
+        `$${si.priceIn ?? "?"}/$${si.priceOut ?? "?"} per 1M, ctx ${si.context ? formatContextSize(si.context) : "?"}`,
     );
   }
   const scores = Array.isArray(detail?.scores) ? detail.scores : [];
@@ -408,7 +408,7 @@ export function squadRoles(agents) {
   /** @type {Record<string, string[]>} */
   const out = {};
   for (const a of Array.isArray(agents) ? agents : []) {
-    const role = /^(grunt|drill)-/.exec(a?.name ?? "")?.[1];
+    const role = squadRoleOf(a?.name);
     if (!role || !a.model) continue;
     const id = `${a.model.providerID}/${a.model.modelID}`;
     out[id] ??= [];
