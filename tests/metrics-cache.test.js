@@ -9,7 +9,6 @@ import { afterEach, expect, test } from "vitest";
 import { KEY_METRICS } from "../src/metrics.js";
 import {
   fetchDetail,
-  isStale,
   LLMBENCH_API,
   readMetrics,
   refreshMetrics,
@@ -62,17 +61,20 @@ test("first refresh fetches every source and writes the cache", async () => {
   const data = readMetrics(dir);
   expect(Object.keys(data.superindex.index)).toHaveLength(60);
   expect(data.scores.byMetric.tbench_4_0_accuracy["m-1"].values[0].value).toBe(0.5);
-  expect(isStale(data, 1000)).toBe(false);
-  expect(isStale(data, 1000 + TTL_MS)).toBe(true);
 });
 
-test("within the TTL nothing is fetched", async () => {
+test("within the TTL nothing is fetched; at the TTL every source is refetched", async () => {
   const dir = tmp();
   await refreshMetrics({ fetch: healthy().fetch, dir, now: 0 });
-  const { fetch, calls } = healthy();
-  const r = await refreshMetrics({ fetch, dir, now: TTL_MS - 1 });
-  expect(calls).toHaveLength(0);
-  expect(r.superindex).toBe("fresh");
+  const before = healthy();
+  const r = await refreshMetrics({ fetch: before.fetch, dir, now: TTL_MS - 1 });
+  expect(before.calls).toHaveLength(0);
+  expect(r).toEqual({ superindex: "fresh", scores: "fresh", ids: "fresh" });
+
+  const at = healthy();
+  const r2 = await refreshMetrics({ fetch: at.fetch, dir, now: TTL_MS });
+  expect(at.calls).toHaveLength(2 + KEY_METRICS.length);
+  expect(r2).toEqual({ superindex: "updated", scores: "updated", ids: "updated" });
 });
 
 test("a failed or shrunken source keeps its previous data", async () => {
@@ -118,6 +120,12 @@ test("fetchDetail caches per model and serves a stale copy when the fetch fails"
   const again = stubFetch(() => new Error("should not be called"));
   await fetchDetail({ fetch: again.fetch, dir, now: TTL_MS - 1, llmbId: "z-ai/glm-5.3" });
   expect(again.calls).toHaveLength(0);
+
+  // Expired exactly at the TTL: the boundary is shared with refreshMetrics.
+  const atTtl = stubFetch(() => new Error("down"));
+  const kept = await fetchDetail({ fetch: atTtl.fetch, dir, now: TTL_MS, llmbId: "z-ai/glm-5.3" });
+  expect(atTtl.calls).toHaveLength(1);
+  expect(kept.id).toBe("z-ai/glm-5.3");
 
   const down = stubFetch(() => new Error("down"));
   const stale = await fetchDetail({
