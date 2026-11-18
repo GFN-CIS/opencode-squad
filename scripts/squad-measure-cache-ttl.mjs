@@ -4,7 +4,9 @@
 // Usage:
 //   node squad-measure-cache-ttl.mjs [--db <file>] [--models] [--json]
 //
-// Reads the assistant messages opencode already stores, pairs consecutive ones
+// Reads the assistant messages opencode already stores (OpenCode 2's
+// session_v2/session_message tables, or OpenCode 1's session/message on an
+// older database), pairs consecutive ones
 // on the same provider+model, and correlates the gap between them against
 // whether the later one hit the prefix cache. See src/cache-ttl-measure.js for
 // the method and why it's trustworthy (it reproduces Anthropic's published
@@ -62,39 +64,107 @@ function readArgs(argv) {
   }
 }
 
-/** Pull every session's assistant messages, shaped for collectSamples(). */
+// The two storage layouts this script understands. OpenCode 2 migrates the
+// OpenCode 1 history into its own tables and keeps the old ones, so where both
+// exist only the OpenCode 2 tables are read — reading both would count every
+// migrated session twice.
+//
+// OpenCode 2 (`session_message`): one row per entry, `type` beside `data`.
+// An assistant turn's data holds `model: {id, providerID}`, `time.created`
+// and `tokens: {input, output, reasoning, cache: {read, write}}` with no
+// `total`. A context compaction is its own `compaction` entry, read as the
+// summary turn OpenCode 1 stored inline.
+const STORAGE = [
+  {
+    name: "OpenCode 2",
+    tables: ["session_v2", "session_message"],
+    sessions: "select id from session_v2",
+    messages:
+      "select type, data from session_message where session_id = ? and type in ('assistant', 'compaction') order by seq",
+    /** @param {{type: string}} row @param {any} m */
+    shape: (row, m) => ({
+      providerID: m.model?.providerID,
+      modelID: m.model?.id,
+      summary: row.type === "compaction",
+    }),
+  },
+  {
+    name: "OpenCode 1",
+    tables: ["session", "message"],
+    sessions: "select id from session",
+    messages:
+      "select 'assistant' as type, data from message where session_id = ? and json_extract(data,'$.role') = 'assistant' order by time_created",
+    /** @param {{type: string}} _row @param {any} m */
+    shape: (_row, m) => ({
+      providerID: m.providerID,
+      modelID: m.modelID,
+      summary: Boolean(m.summary),
+    }),
+  },
+];
+
+/**
+ * The prompt a turn was sent with: the stored total, or the sum of its parts
+ * where none is stored (OpenCode 2).
+ *
+ * @param {any} tokens
+ */
+function totalTokens(tokens) {
+  if (typeof tokens?.total === "number") return tokens.total;
+  const cache = tokens?.cache ?? {};
+  return [tokens?.input, tokens?.output, tokens?.reasoning, cache.read, cache.write]
+    .map((n) => (typeof n === "number" ? n : 0))
+    .reduce((a, b) => a + b, 0);
+}
+
+/**
+ * Pull every session's assistant messages, shaped for collectSamples().
+ *
+ * @param {string} dbFile
+ * @returns {{storage: string, samples: ReturnType<typeof collectSamples>} | {error: string}}
+ */
 function readSamples(dbFile) {
   // Read-only: opencode may well be running against this same file.
   const db = new DatabaseSync(dbFile, { readOnly: true });
-  const sessions = db.prepare("select id from session").all();
-  const stmt = db.prepare(
-    "select data from message where session_id = ? and json_extract(data,'$.role') = 'assistant' order by time_created",
-  );
-  const samples = [];
-  for (const { id } of sessions) {
-    const messages = [];
-    for (const row of stmt.all(id)) {
-      let m;
-      try {
-        m = JSON.parse(row.data);
-      } catch {
-        continue; // a single unparseable row must not abort the sweep
-      }
-      const tokens = m.tokens ?? {};
-      const cache = tokens.cache ?? {};
-      messages.push({
-        time: m.time?.created ?? 0,
-        total: tokens.total ?? 0,
-        cacheRead: cache.read ?? 0,
-        providerID: m.providerID,
-        modelID: m.modelID,
-        summary: Boolean(m.summary),
-      });
+  try {
+    const tables = new Set(
+      db
+        .prepare("select name from sqlite_master where type = 'table'")
+        .all()
+        .map((r) => String(r.name)),
+    );
+    const layout = STORAGE.find((s) => s.tables.every((t) => tables.has(t)));
+    if (!layout) {
+      return {
+        error:
+          `Unsupported opencode storage in ${dbFile}: expected the OpenCode 2 tables ` +
+          "(session_v2, session_message) or the OpenCode 1 tables (session, message).",
+      };
     }
-    samples.push(...collectSamples(messages, id));
+    const stmt = db.prepare(layout.messages);
+    const samples = [];
+    for (const { id } of db.prepare(layout.sessions).all()) {
+      const messages = [];
+      for (const row of stmt.all(id)) {
+        let m;
+        try {
+          m = JSON.parse(String(row.data));
+        } catch {
+          continue; // a single unparseable row must not abort the sweep
+        }
+        messages.push({
+          time: m.time?.created ?? 0,
+          total: totalTokens(m.tokens),
+          cacheRead: m.tokens?.cache?.read ?? 0,
+          .../** @type {any} */ (layout.shape)(row, m),
+        });
+      }
+      samples.push(...collectSamples(messages, String(id)));
+    }
+    return { storage: layout.name, samples };
+  } finally {
+    db.close();
   }
-  db.close();
-  return samples;
 }
 
 function main() {
@@ -104,7 +174,12 @@ function main() {
     process.exit(1);
   }
 
-  const samples = readSamples(db);
+  const read = readSamples(db);
+  if ("error" in read) {
+    console.error(read.error);
+    process.exit(1);
+  }
+  const { storage, samples } = read;
   if (samples.length === 0) {
     console.error("No usable samples: every message pair was filtered out. Nothing to report.");
     process.exit(1);
@@ -123,11 +198,13 @@ function main() {
   }
 
   if (asJson) {
-    console.log(JSON.stringify({ db, samples: samples.length, providers: verdicts }, null, 2));
+    console.log(
+      JSON.stringify({ db, storage, samples: samples.length, providers: verdicts }, null, 2),
+    );
     return;
   }
 
-  console.log(`Database: ${db}`);
+  console.log(`Database: ${db} (${storage} storage)`);
   console.log(
     `Usable samples: ${samples.length} across ${new Set(samples.map((s) => s.sessionID)).size} sessions\n`,
   );
