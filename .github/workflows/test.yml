@@ -17,3 +17,16 @@ jobs:
       - run: npm run lint
       - run: npm run knip
       - run: npm run typecheck # tsc --strict over the plugin's production JavaScript
+
+  # The plugin inside the real OpenCode 2 host, offline: TestLLM scripts the
+  # model, the network is blocked (tests-integration/setup.js). Node 24:
+  # OpenCode's own packages use `await using`, which Node 22 cannot parse.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run test:integration
