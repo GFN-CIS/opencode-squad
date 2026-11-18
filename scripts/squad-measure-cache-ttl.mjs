@@ -23,6 +23,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { parseArgs } from "node:util";
 
 import {
   bucketize,
@@ -32,21 +33,33 @@ import {
 } from "../src/cache-ttl-measure.js";
 import { opencodeDataDir } from "../src/paths.js";
 
-function parseArgs(argv) {
-  let db = path.join(opencodeDataDir(process.env, os.homedir()), "opencode.db");
-  let perModel = false;
-  let asJson = false;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--db") db = argv[++i];
-    else if (a === "--models") perModel = true;
-    else if (a === "--json") asJson = true;
-    else {
-      console.error(`Unknown arg: ${a}`);
-      process.exit(2);
-    }
+/**
+ * @param {string[]} argv
+ * @returns {{db: string, perModel: boolean, asJson: boolean}}
+ */
+function readArgs(argv) {
+  try {
+    const { values } = parseArgs({
+      args: argv,
+      options: {
+        db: { type: "string" },
+        models: { type: "boolean", default: false },
+        json: { type: "boolean", default: false },
+      },
+      strict: true,
+      allowPositionals: false,
+    });
+    return {
+      db: values.db ?? path.join(opencodeDataDir(process.env, os.homedir()), "opencode.db"),
+      perModel: values.models,
+      asJson: values.json,
+    };
+  } catch (e) {
+    console.error(
+      `${e.message}\nUsage: squad-measure-cache-ttl.mjs [--db <file>] [--models] [--json]`,
+    );
+    process.exit(2);
   }
-  return { db, perModel, asJson };
 }
 
 /** Pull every session's assistant messages, shaped for collectSamples(). */
@@ -84,18 +97,8 @@ function readSamples(dbFile) {
   return samples;
 }
 
-function groupBy(samples, keyFn) {
-  const out = new Map();
-  for (const s of samples) {
-    const k = keyFn(s);
-    if (!out.has(k)) out.set(k, []);
-    out.get(k).push(s);
-  }
-  return out;
-}
-
 function main() {
-  const { db, perModel, asJson } = parseArgs(process.argv.slice(2));
+  const { db, perModel, asJson } = readArgs(process.argv.slice(2));
   if (!fs.existsSync(db)) {
     console.error(`No opencode database at ${db}. Pass --db <file>.`);
     process.exit(1);
@@ -107,7 +110,7 @@ function main() {
     process.exit(1);
   }
 
-  const byProvider = [...groupBy(samples, (s) => s.providerID)].sort(
+  const byProvider = [...Map.groupBy(samples, (s) => s.providerID)].sort(
     (a, b) => b[1].length - a[1].length,
   );
   const verdicts = {};
@@ -132,7 +135,7 @@ function main() {
 
   if (perModel) {
     console.log("\n\n--- per model (only where there is enough to bucket) ---\n");
-    const byModel = [...groupBy(samples, (s) => `${s.providerID}/${s.modelID}`)].sort(
+    const byModel = [...Map.groupBy(samples, (s) => `${s.providerID}/${s.modelID}`)].sort(
       (a, b) => b[1].length - a[1].length,
     );
     for (const [id, rows] of byModel) {

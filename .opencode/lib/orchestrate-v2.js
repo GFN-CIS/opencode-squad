@@ -25,7 +25,7 @@
  */
 
 import { formatCompactReport } from "../../src/compact.js";
-import { buildLimitMap, buildVariantMap, estimateContextTokens } from "../../src/context.js";
+import { estimateContextTokens, indexModelCatalog } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
 import { formatDetail, formatSummary, lookup, squadRoles } from "../../src/metrics.js";
 import { fetchDetail } from "../../src/metrics-cache.js";
@@ -37,7 +37,7 @@ import {
   isSilentHang,
   normalizeGuardConfig,
 } from "../../src/rate-limit-guard.js";
-import { validateRoster } from "../../src/roster.js";
+import { validatePatchInput } from "../../src/roster-schema.js";
 import {
   formatNow,
   formatOwnStatus,
@@ -61,7 +61,6 @@ import {
   applyOrchestratorTransformV2,
   applySystemPartsTransform,
   normalizeAgents,
-  normalizeProviders,
   normalizeUsageMessages,
   retryToStatus,
 } from "../../src/v2/adapt.js";
@@ -74,11 +73,11 @@ import {
 } from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
 import {
+  describerScope,
   ensureGlobalModelDataFresh,
   getMetrics,
   loadAuthTypes,
-  loadModelData,
-  loadProviderPlans,
+  loadModelSettings,
   loadRolePrompt,
   METRICS_DIR,
   ORCHESTRATOR_AGENT,
@@ -141,21 +140,29 @@ export default {
       return agentsPromise;
     };
 
-    /** @type {Promise<ReturnType<typeof normalizeProviders> | null> | undefined} */
-    let providersPromise;
-    const getProviders = () => {
-      providersPromise ??= ctx.model
-        .list()
-        .then((r) => normalizeProviders(unwrap(r)))
-        .catch(() => null);
-      return providersPromise;
+    // The model catalog barely changes while the process lives, so a
+    // successful lookup is kept. Concurrent callers share one in-flight
+    // request; a FAILED one is dropped, so the next tool call asks again
+    // instead of running without variant checks until a restart.
+    /** @type {Promise<ReturnType<typeof indexModelCatalog> | null> | undefined} */
+    let catalogPromise;
+    const getCatalog = () => {
+      if (!catalogPromise) {
+        /** @type {Promise<ReturnType<typeof indexModelCatalog> | null>} */
+        const pending = Promise.resolve()
+          .then(() => ctx.model.list())
+          .then((r) => indexModelCatalog(unwrap(r)))
+          .catch(() => {
+            if (catalogPromise === pending) catalogPromise = undefined;
+            return null;
+          });
+        catalogPromise = pending;
+      }
+      return catalogPromise;
     };
-    const getLimitMap = async () => buildLimitMap((await getProviders()) ?? []);
+    const getLimitMap = async () => (await getCatalog())?.limits ?? {};
     // null means "could not ask", reported as unknown rather than as "none".
-    const getVariantMap = async () => {
-      const providers = await getProviders();
-      return providers === null ? null : buildVariantMap(providers);
-    };
+    const getVariantMap = async () => (await getCatalog())?.variants ?? null;
 
     let inventory;
     let inventoryFrom; // the agents list `inventory` was rendered from
@@ -236,7 +243,7 @@ export default {
               }),
             };
           }
-          const modelData = loadModelData(directory);
+          const modelData = loadModelSettings(directory).models;
           const reports = await Promise.all(
             ids.map(async (sessionID) => {
               let facts;
@@ -247,7 +254,7 @@ export default {
                   e?.message || e?._tag || e?.name || JSON.stringify(e) || "unknown error";
                 return `session ${sessionID}: could not be read (${why}). Treat it as cold.`;
               }
-              const ttl = facts.model ? modelData?.[facts.model]?.cache_ttl_seconds : undefined;
+              const ttl = facts.model ? modelData[facts.model]?.cache_ttl_seconds : undefined;
               return formatSessionStatus({
                 sessionID,
                 facts,
@@ -402,20 +409,27 @@ export default {
             };
           }
           const limits = await getLimitMap();
+          const settings = loadModelSettings(directory);
           const models = wanted.map((id) => ({
             id,
             ...(limits[id] ? { context: limits[id] } : {}),
           }));
           return {
-            content: formatSummary({
-              models,
-              roles: squadRoles(await getAgents()),
-              notes: loadModelData(directory),
-              plans: loadProviderPlans(directory),
-              authTypes: loadAuthTypes(),
-              data,
-              now,
-            }),
+            content:
+              formatSummary({
+                models,
+                roles: squadRoles(await getAgents()),
+                notes: settings.found ? settings.models : null,
+                plans: settings.providers,
+                authTypes: loadAuthTypes(),
+                data,
+                now,
+              }) +
+              (settings.problems.length
+                ? `\n\nmodel_data.json ignored (owner notes missing above):\n${settings.problems
+                    .map((p) => `  - ${p}`)
+                    .join("\n")}`
+                : ""),
             metadata: { title: `metrics: ${models.length} model(s)` },
           };
         },
@@ -449,10 +463,21 @@ export default {
             };
           }
           const roster = { grunts: doc.grunts ?? {}, drills: doc.drills ?? {} };
-          const errors = validateRoster(doc);
+          const errors = validatePatchInput(input ?? {});
           errors.push(...validateVariants(roster, await getVariantMap()));
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
+          }
+          // Descriptions carry the owner's routing rules from model_data.json;
+          // writing from an unreadable file would strip them from every agent.
+          const problems = loadModelSettings(describerScope(dir, directory)).problems;
+          if (problems.length) {
+            return {
+              content:
+                "Refused: model_data.json cannot be read, and agent descriptions are built " +
+                "from it — writing now would drop the owner's routing rules. Nothing was " +
+                `written. Ask the user to fix:\n${problems.map((p) => `  - ${p}`).join("\n")}`,
+            };
           }
           const result = applySquad({
             roster,
@@ -478,6 +503,7 @@ export default {
     const sessionInfo = new Map(); // sessionID -> {parentID, agent} | null
     const lastActivity = new Map(); // sessionID -> epoch ms
     const pollTimers = new Map(); // sessionID -> interval handle
+    const activeExecutions = new Set(); // children with an execution in flight
 
     const getSessionInfo = async (sessionID) => {
       if (sessionInfo.has(sessionID)) return sessionInfo.get(sessionID);
@@ -512,6 +538,7 @@ export default {
         until: result.until,
         silentMs: result.silentMs,
         errorText: result.errorText,
+        interrupt: result.interrupt,
       });
       try {
         await ctx.session.synthetic({
@@ -560,14 +587,22 @@ export default {
         if (!info) return stopSilenceWatch(sessionID);
         guardStates.set(sessionID, { ...(state ?? initGuardState()), guarded: true });
         stopSilenceWatch(sessionID);
+        // The parent is told what actually happened: a failed interrupt leaves
+        // a child that may still be running, and redispatching it then puts
+        // two agents on one task.
+        /** @type {"confirmed" | "idle" | "unconfirmed"} */
+        let interrupt = "unconfirmed";
         try {
-          await ctx.session.interrupt({ sessionID, continue: false });
+          const res = unwrap(await ctx.session.interrupt({ sessionID, resume: false }));
+          if (res?.interrupted === true) interrupt = "confirmed";
+          else if (res?.interrupted === false) interrupt = "idle";
         } catch {
-          // No worse off than without the guard.
+          // Stays "unconfirmed".
         }
         await sendGuardNote(info.parentID, info.agent, {
           reason: "silent_hang",
           silentMs: Date.now() - last,
+          interrupt,
         });
       }, SILENCE_POLL_INTERVAL_MS);
       timer.unref?.();
@@ -586,7 +621,24 @@ export default {
       await sendGuardNote(info.parentID, info.agent, { reason: "terminal_error", errorText: text });
     };
 
+    // A child resumed by session id starts a new execution without a new
+    // session.created, so each execution arms its own silence window and
+    // starts with clean retry state — a `guarded` flag left by the previous
+    // execution would otherwise stop the new watcher on its first tick and
+    // make handleTerminalError skip a real failure.
+    const armExecution = async (sessionID) => {
+      activeExecutions.add(sessionID);
+      const info = await getSessionInfo(sessionID);
+      if (!info) return; // top-level session — never guarded
+      // The execution may have ended while the session lookup was in flight.
+      if (!activeExecutions.has(sessionID)) return;
+      guardStates.delete(sessionID);
+      lastActivity.set(sessionID, Date.now());
+      startSilenceWatch(sessionID);
+    };
+
     const forget = (sessionID) => {
+      activeExecutions.delete(sessionID);
       guardStates.delete(sessionID);
       sessionInfo.delete(sessionID);
       lastActivity.delete(sessionID);
@@ -610,14 +662,19 @@ export default {
                 startSilenceWatch(sessionID);
               }
               break;
+            case "session.execution.started":
+              void armExecution(sessionID);
+              break;
             case "session.deleted":
               forget(sessionID);
               break;
             case "session.execution.succeeded":
             case "session.execution.interrupted":
+              activeExecutions.delete(sessionID);
               stopSilenceWatch(sessionID);
               break;
             case "session.execution.failed":
+              activeExecutions.delete(sessionID);
               stopSilenceWatch(sessionID);
               void handleTerminalError(sessionID, data.error);
               break;

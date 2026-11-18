@@ -1,9 +1,10 @@
 import { expect, test } from "vitest";
 import {
-  buildLimitMap,
-  buildVariantMap,
   estimateContextTokens,
+  formatContextSize,
   formatLocalDateTime,
+  formatThousands,
+  indexModelCatalog,
 } from "../src/context.js";
 
 test("estimate returns null before any assistant reply", () => {
@@ -77,44 +78,53 @@ test("formatLocalDateTime renders ISO-like time with the zone", () => {
   expect(moscow).toContain("(Europe/Moscow)");
 });
 
-test("limit map keys by provider/model and bare model (provider array)", () => {
-  const map = buildLimitMap([
-    {
-      id: "anthropic",
-      models: {
-        "claude-opus-4-7": { limit: { context: 1000000 } },
-        "claude-sonnet-4-6": { limit: { context: 190000 } },
-        broken: {},
-      },
-    },
+test("indexModelCatalog keys limits by provider/model and bare model", () => {
+  const { limits } = indexModelCatalog([
+    { providerID: "anthropic", id: "claude-opus-4-7", limit: { context: 1000000 } },
+    { providerID: "anthropic", id: "claude-sonnet-4-6", limit: { context: 190000 } },
+    { providerID: "other", id: "claude-sonnet-4-6", limit: { context: 1 } }, // bare id: first wins
+    { providerID: "anthropic", id: "broken" },
   ]);
-  expect(map["anthropic/claude-opus-4-7"]).toBe(1000000);
-  expect(map["claude-opus-4-7"]).toBe(1000000);
-  expect(map["claude-sonnet-4-6"]).toBe(190000);
-  expect(map.broken).toBeUndefined();
-  expect(buildLimitMap(undefined)).toEqual({});
-  expect(buildLimitMap([])).toEqual({});
+  expect(limits["anthropic/claude-opus-4-7"]).toBe(1000000);
+  expect(limits["claude-opus-4-7"]).toBe(1000000);
+  expect(limits["claude-sonnet-4-6"]).toBe(190000);
+  expect(limits["other/claude-sonnet-4-6"]).toBe(1);
+  expect(limits.broken).toBeUndefined();
+  expect(indexModelCatalog(undefined)).toEqual({ limits: {}, variants: {} });
+  expect(indexModelCatalog([])).toEqual({ limits: {}, variants: {} });
 });
 
-test("buildVariantMap reads the variant names opencode itself accepts", () => {
-  const map = buildVariantMap([
-    {
-      id: "anthropic",
-      // Keyed object of per-variant settings — the shape opencode serves.
-      models: { "claude-haiku-4-5": { variants: { high: {}, max: {} } } },
-    },
-    // A model with reasoning but no usable variant knob reports an empty set,
-    // which must stay distinguishable from "we could not look it up".
-    { id: "alibaba-token-plan", models: { "qwen3.7-max": { variants: {} } } },
-    { id: "zai-coding-plan", models: { "glm-5.3": { variants: ["low", "high", "max"] } } },
+test("indexModelCatalog reads the variant names opencode itself accepts", () => {
+  const { variants } = indexModelCatalog([
+    // The host shape: [{id, settings}].
+    { providerID: "anthropic", id: "claude-haiku-4-5", variants: [{ id: "high" }, { id: "max" }] },
+    // A model with no usable variant knob reports an empty set, which must stay
+    // distinguishable from "we could not look it up".
+    { providerID: "alibaba-token-plan", id: "qwen3.7-max", variants: [] },
+    { providerID: "zai-coding-plan", id: "glm-5.3", variants: ["low", "high", "max"] },
+    { providerID: "p", id: "keyed", variants: { low: {}, high: {} } },
+    { providerID: "p", id: "none" },
   ]);
-  expect(map["anthropic/claude-haiku-4-5"]).toEqual(["high", "max"]);
-  expect(map["alibaba-token-plan/qwen3.7-max"]).toEqual([]);
-  expect(map["zai-coding-plan/glm-5.3"]).toEqual(["low", "high", "max"]);
+  expect(variants["anthropic/claude-haiku-4-5"]).toEqual(["high", "max"]);
+  expect(variants["alibaba-token-plan/qwen3.7-max"]).toEqual([]);
+  expect(variants["zai-coding-plan/glm-5.3"]).toEqual(["low", "high", "max"]);
+  expect(variants["p/keyed"]).toEqual(["low", "high"]);
+  expect(variants["p/none"]).toEqual([]);
 });
 
-test("buildVariantMap survives junk without inventing entries", () => {
-  expect(buildVariantMap(null)).toEqual({});
-  expect(buildVariantMap([{ models: { "a/b": {} } }])).toEqual({}); // no provider id
-  expect(buildVariantMap([{ id: "p", models: { m: {} } }])).toEqual({ "p/m": [] });
+test("indexModelCatalog survives junk without inventing entries", () => {
+  expect(indexModelCatalog(null)).toEqual({ limits: {}, variants: {} });
+  expect(indexModelCatalog([null, { id: "m" }, { providerID: "p" }])).toEqual({
+    limits: {},
+    variants: {},
+  });
+});
+
+test("token formatters: context windows scale to M, counts stay in thousands", () => {
+  expect(formatContextSize(200_000)).toBe("200k");
+  expect(formatContextSize(1_000_000)).toBe("1M");
+  expect(formatContextSize(1_048_576)).toBe("1M");
+  expect(formatContextSize(1_500_000)).toBe("1.5M");
+  expect(formatThousands(42_400)).toBe("42k");
+  expect(formatThousands(1_500_000)).toBe("1500k");
 });

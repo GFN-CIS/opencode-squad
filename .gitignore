@@ -1,5 +1,7 @@
 node_modules/
 *.log
 .DS_Store
-docs/artifacts/.toolchain/
+# Code-health reports and raw analysis outputs: keep them in access-controlled
+# storage, never in this public repository.
+docs/artifacts/
 coverage/
