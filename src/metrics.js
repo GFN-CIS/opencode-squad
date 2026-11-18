@@ -262,8 +262,12 @@ function fmtValues(values) {
  */
 
 /**
- * The summary: one line per connected model. Models with no data in either
- * source collapse into a single trailing line.
+ * The summary: one line per connected model. What belongs to the model itself
+ * — context limit, how it is paid for, the owner's rules — is always on its
+ * own line. Only benchmark data is shared: a serving tier (`-fast`, `-free`,
+ * ...) whose scores are another listed model's says so instead of repeating
+ * them, and a model with no benchmark data says that. Only a model with
+ * nothing to show at all collapses into the single trailing line.
  *
  * @param {object} p
  * @param {Array<{id: string, context?: number}>} p.models  connected opencode models
@@ -309,8 +313,8 @@ export function formatSummary({
 
   const lines = [];
   const noData = [];
-  // A serving tier (`-fast`, `-free`, ...) of a model already listed under the
-  // same provider carries the same numbers: one short line instead of a copy.
+  // Benchmark rows already shown, by provider: a tier matching the same rows
+  // points at the first model instead of repeating its numbers.
   /** @type {Map<string, string>} */
   const firstBySignature = new Map();
   for (const m of [...models].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -320,15 +324,34 @@ export function formatSummary({
     const rules = ownerRules(m.id, { note, providers: plans });
     const info = rules.length ? rules.join(" / ") : null;
     const role = roles[m.id]?.length ? ` [${roles[m.id].join("+")}]` : "";
-    if (!s && hits.every((h) => h === null) && !info) {
-      noData.push(m.id);
+
+    // The model's own facts.
+    const own = [];
+    const ctx = m.context ?? s?.entry.context;
+    if (ctx) own.push(`ctx ${formatContextSize(ctx)}`);
+    const billing = billingFor(m.id, { note, plans, authTypes });
+    if (!billing.api) own.push(`subscription: ${billing.plan ?? "plan not set"}`);
+    else if (/-free$/.test(modelKey(m.id))) own.push("free");
+    // A list price read off another model's row is that model's price.
+    const price =
+      billing.api && !/-free$/.test(modelKey(m.id)) && s?.entry.priceIn != null
+        ? `$${s.entry.priceIn}/$${s.entry.priceOut ?? "?"}`
+        : null;
+    const rule = info ? [`owner rule: ${info}`] : [];
+
+    if (!s && hits.every((h) => h === null)) {
+      if (!own.length && !rule.length) noData.push(m.id);
+      else lines.push(`- ${m.id}${role}: ${[...own, "no benchmark data", ...rule].join(" · ")}`);
       continue;
     }
     const provider = m.id.split("/")[0];
     const signature = `${provider}|${s?.key ?? ""}|${hits.map((h) => h?.key ?? "").join("|")}`;
     const same = firstBySignature.get(signature);
-    if (same && !info) {
-      lines.push(`- ${m.id}${role}: same data as ${same}`);
+    if (same) {
+      const shared = [...own, ...(s?.key === modelKey(m.id) && price ? [price] : [])];
+      lines.push(
+        `- ${m.id}${role}: ${[...shared, `same benchmarks as ${same}`, ...rule].join(" · ")}`,
+      );
       continue;
     }
     firstBySignature.set(signature, m.id);
@@ -341,14 +364,7 @@ export function formatSummary({
       // Unranked scores rest on too few benchmarks to compare with ranked ones.
       else parts.push(`SI ${e.score} (provisional, conf ${e.confidence ?? "?"}%)`);
     }
-    const ctx = m.context ?? s?.entry.context;
-    if (ctx) parts.push(`ctx ${formatContextSize(ctx)}`);
-    const billing = billingFor(m.id, { note, plans, authTypes });
-    if (!billing.api) parts.push(`subscription: ${billing.plan ?? "plan not set"}`);
-    else if (/-free$/.test(modelKey(m.id))) parts.push("free");
-    else if (s?.entry.priceIn != null) {
-      parts.push(`$${s.entry.priceIn}/$${s.entry.priceOut ?? "?"}`);
-    }
+    parts.push(...own, ...(price ? [price] : []));
     hits.forEach((h, i) => {
       if (h) parts.push(`${KEY_METRICS[i].label} ${fmtValues(h.entry.values)}`);
     });
@@ -356,7 +372,7 @@ export function formatSummary({
       .filter(Boolean)
       .find((k) => k !== modelKey(m.id));
     if (matched) parts.push(`(data for ${matched})`);
-    if (info) parts.push(`owner rule: ${info}`);
+    parts.push(...rule);
     lines.push(`- ${m.id}${role}: ${parts.join(" · ")}`);
   }
   if (noData.length) lines.push(`- no benchmark data: ${noData.join(", ")}`);
