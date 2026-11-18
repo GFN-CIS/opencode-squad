@@ -1,7 +1,7 @@
 // Pure formatting of the subagent inventory for the orchestrator bootstrap.
 
-const fmtCtx = (n) =>
-  n >= 1_000_000 ? `${Math.round(n / 1e5) / 10}M` : `${Math.round(n / 1000)}k`;
+import { formatContextSize } from "./context.js";
+import { squadRoleOf } from "./workers.js";
 
 /**
  * @param {Array<{name:string,mode:string,description?:string,model?:{providerID:string,modelID:string}}>} agents
@@ -20,7 +20,7 @@ export function formatInventory(agents, limits) {
       const desc = a.description || "(no description)";
       const model = a.model ? `${a.model.providerID}/${a.model.modelID}` : "inherited";
       const ctx = limits && a.model ? (limits[model] ?? limits[a.model.modelID]) : undefined;
-      const ctxStr = typeof ctx === "number" && ctx > 0 ? ` · ctx ${fmtCtx(ctx)}` : "";
+      const ctxStr = typeof ctx === "number" && ctx > 0 ? ` · ctx ${formatContextSize(ctx)}` : "";
       return `- \`${a.name}\`: ${desc} (model: ${model}${ctxStr})`;
     })
     .join("\n");
@@ -36,5 +36,5 @@ export function formatInventory(agents, limits) {
  * @returns {boolean}
  */
 export function hasSquad(agents) {
-  return (agents || []).some((a) => a && /^(?:grunt|drill)-/.test(a.name));
+  return (agents || []).some((a) => a && squadRoleOf(a.name));
 }

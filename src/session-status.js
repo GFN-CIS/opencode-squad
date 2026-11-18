@@ -12,7 +12,7 @@
 // arithmetic already done: warm for N more seconds, or cold for N seconds.
 
 import { resolveCacheTtl } from "./cache-status.js";
-import { estimateContextTokens, formatLocalDateTime } from "./context.js";
+import { estimateContextTokens, formatLocalDateTime, formatThousands as k } from "./context.js";
 import { formatTaskOutcome } from "./task-outcome.js";
 import { normalizeUsageMessages } from "./v2/adapt.js";
 
@@ -21,8 +21,6 @@ import { normalizeUsageMessages } from "./v2/adapt.js";
  * @returns {number} whole seconds, never negative (clock-skew safety)
  */
 const secs = (ms) => Math.max(0, Math.round(ms / 1000));
-
-const k = (n) => `${Math.round(n / 1000)}k`;
 
 /**
  * Facts about a session from its messages.

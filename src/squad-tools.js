@@ -1,6 +1,8 @@
 // Text, variant reporting and validation for the squad_* tools.
 // Input JSON Schemas read their wording from here.
 
+import { squadRoleOf } from "./workers.js";
+
 /** Tool descriptions, keyed by tool name. */
 export const TOOL_DESCRIPTIONS = {
   squad_compact:
@@ -98,7 +100,7 @@ export const ARG_DESCRIPTIONS = {
  * @param {unknown} agent the calling agent's id
  */
 export function isSubagentCaller(agent) {
-  return /^(?:grunt|drill)-/.test(typeof agent === "string" ? agent : "");
+  return squadRoleOf(agent) !== null;
 }
 
 /**

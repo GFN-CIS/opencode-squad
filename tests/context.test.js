@@ -3,7 +3,9 @@ import {
   buildLimitMap,
   buildVariantMap,
   estimateContextTokens,
+  formatContextSize,
   formatLocalDateTime,
+  formatThousands,
 } from "../src/context.js";
 
 test("estimate returns null before any assistant reply", () => {
@@ -117,4 +119,13 @@ test("buildVariantMap survives junk without inventing entries", () => {
   expect(buildVariantMap(null)).toEqual({});
   expect(buildVariantMap([{ models: { "a/b": {} } }])).toEqual({}); // no provider id
   expect(buildVariantMap([{ id: "p", models: { m: {} } }])).toEqual({ "p/m": [] });
+});
+
+test("token formatters: context windows scale to M, counts stay in thousands", () => {
+  expect(formatContextSize(200_000)).toBe("200k");
+  expect(formatContextSize(1_000_000)).toBe("1M");
+  expect(formatContextSize(1_048_576)).toBe("1M");
+  expect(formatContextSize(1_500_000)).toBe("1.5M");
+  expect(formatThousands(42_400)).toBe("42k");
+  expect(formatThousands(1_500_000)).toBe("1500k");
 });

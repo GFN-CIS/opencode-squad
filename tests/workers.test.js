@@ -7,6 +7,7 @@ import {
   describeAgent,
   GENERATED_MARKER,
   slugForModel,
+  squadRoleOf,
 } from "../src/workers.js";
 
 test("slug collapses provider/model and punctuation, prefixed by role", () => {
@@ -265,4 +266,14 @@ test("describeAgent carries the owner rule and the plan, nothing invented", () =
     `${base} Billing: subscription.`,
   );
   expect(() => describeAgent("captain")).toThrow();
+});
+
+test("squadRoleOf reads the role off a runtime agent id and nothing else", () => {
+  expect(squadRoleOf("grunt-openai-gpt-5-5")).toBe("grunt");
+  expect(squadRoleOf("drill-anthropic-claude-opus-5")).toBe("drill");
+  // Legacy worker- files are migrated on disk; at runtime they are not squad.
+  expect(squadRoleOf("worker-openai-gpt-5-5")).toBeNull();
+  expect(squadRoleOf("build")).toBeNull();
+  expect(squadRoleOf("my-grunt-helper")).toBeNull();
+  expect(squadRoleOf(undefined)).toBeNull();
 });

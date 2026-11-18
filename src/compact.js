@@ -20,7 +20,9 @@
 // It pays off when many turns follow. For one short dispatch, a fresh session
 // is cheaper.
 
-const k = (n) => `${Math.round(n / 1000)}k`;
+import { formatThousands } from "./context.js";
+
+const k = formatThousands;
 
 /**
  * The tool's answer. States the outcome in tokens — the only number that says
