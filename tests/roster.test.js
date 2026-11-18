@@ -1,12 +1,6 @@
 import { expect, test } from "vitest";
-import {
-  buildRoster,
-  diffRoster,
-  NOTES_CLOSE,
-  NOTES_OPEN,
-  parseAgentFile,
-  validateRoster,
-} from "../src/roster.js";
+import { buildRoster, diffRoster, NOTES_CLOSE, NOTES_OPEN, parseAgentFile } from "../src/roster.js";
+import { validateRoster } from "../src/roster-schema.js";
 
 const FILE = [
   "---",
