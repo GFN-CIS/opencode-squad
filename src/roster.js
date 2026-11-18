@@ -135,6 +135,7 @@ export function buildRoster(files) {
 }
 
 /** Flatten a roster tree to `"<role> <modelId>" -> entry`, for diffing. */
+/** @param {Record<string, Record<string, any>> | undefined} roster */
 function flatten(roster) {
   const out = new Map();
   for (const [key, role] of Object.entries(ROLE_KEYS)) {

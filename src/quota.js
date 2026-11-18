@@ -39,7 +39,9 @@ export function windowLabel(minutes) {
   return `${Math.round(minutes / 60)}h`;
 }
 
+/** @param {string|undefined} v */
 const num = (v) => {
+  if (v === undefined) return undefined;
   const n = Number.parseFloat(v);
   return Number.isFinite(n) ? n : undefined;
 };
@@ -55,6 +57,7 @@ const num = (v) => {
  */
 export function parseQuotaHeaders(headers) {
   if (!headers || typeof headers !== "object") return null;
+  /** @param {string} k */
   const h = (k) => headers[k];
 
   /** @type {Array<{label:string, used:number, resetAt?:number}>} */
@@ -85,7 +88,7 @@ export function parseQuotaHeaders(headers) {
   for (const slot of ["primary", "secondary"]) {
     const pct = num(h(`x-codex-${slot}-used-percent`));
     const mins = num(h(`x-codex-${slot}-window-minutes`));
-    if (pct === undefined || !(mins > 0)) continue; // a zeroed slot is unused
+    if (pct === undefined || mins === undefined || !(mins > 0)) continue; // a zeroed slot is unused
     windows.push({
       label: windowLabel(mins),
       used: pct / 100,
@@ -140,6 +143,7 @@ export function shouldReport(previousBand, band) {
   return band !== previousBand;
 }
 
+/** @param {number} used */
 const pct = (used) => `${Math.round(used * 100)}%`;
 
 /**

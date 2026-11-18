@@ -16,3 +16,4 @@ jobs:
       - run: npm run coverage # vitest run --coverage; fails the build under the 80% thresholds
       - run: npm run lint
       - run: npm run knip
+      - run: npm run typecheck # tsc --strict over the plugin's production JavaScript

@@ -79,6 +79,7 @@ export function formatTaskOutcome(info) {
   // Finish reason and token split share one parenthesis so the sentence still
   // reads when either half is missing — the token split is the evidence for the
   // finish reason, not a second independent clause.
+  /** @param {string|null|undefined} finishLabel */
   const detail = (finishLabel) => {
     const bits = [];
     if (finishLabel) bits.push(finishLabel);
