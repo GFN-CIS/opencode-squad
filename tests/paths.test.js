@@ -43,15 +43,15 @@ test("defaultAgentDir honors XDG_CONFIG_HOME", () => {
   expect(defaultAgentDir()).toBe(path.join("/xdg/cfg", "opencode", "agent"));
 });
 
-// The dotdir building blocks live only in src/paths.js (XDG-aware) and
-// src/benchmark-cache.js (cacheDir); tmp paths use os.tmpdir(), never a
-// hardcoded "/tmp/" literal — that only exists on this dev machine, not CI.
+// The dotdir building blocks live only in src/paths.js (XDG-aware); tmp paths
+// use os.tmpdir(), never a hardcoded "/tmp/" literal — that only exists on this
+// dev machine, not CI.
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GUARD_SELF = path
   .relative(ROOT, fileURLToPath(import.meta.url))
   .split(path.sep)
   .join("/");
-const DOTDIR_ALLOWED = new Set(["src/paths.js", "src/benchmark-cache.js"]);
+const DOTDIR_ALLOWED = new Set(["src/paths.js"]);
 const GUARD_ROOTS = ["src", path.join(".opencode", "lib"), "scripts", "tests"];
 
 function listJsFiles(dir, out = []) {
