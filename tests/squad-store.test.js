@@ -62,15 +62,18 @@ test("the revision is of the bytes: any edit changes it, none means no file (#89
 
 test("withStoreLock: exclusive, released after, busy while held, stale taken over", () => {
   const lock = `${file}.lock`;
-  expect(withStoreLock(file, () => fs.existsSync(lock))).toEqual({ busy: false, value: true });
-  expect(fs.existsSync(lock)).toBe(false);
-  // Released even when the body throws.
+  // Held while the body runs: the lock names this process.
+  expect(withStoreLock(file, () => fs.readFileSync(lock, "utf8"))).toEqual({
+    busy: false,
+    value: String(process.pid),
+  });
   expect(() =>
     withStoreLock(file, () => {
       throw new Error("boom");
     }),
   ).toThrow("boom");
-  // Released: an exclusive create succeeds, and stands in for another holder.
+  // Released both times, even after a throw: an exclusive create succeeds,
+  // and stands in for another process holding it.
   fs.closeSync(fs.openSync(lock, "wx"));
   expect(withStoreLock(file, () => 1)).toEqual({ busy: true });
   const old = new Date(Date.now() - 60_000);
