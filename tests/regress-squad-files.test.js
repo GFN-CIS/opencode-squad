@@ -33,7 +33,14 @@ afterEach(() => {
   vi.restoreAllMocks();
   if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = originalXdg;
-  for (const f of fs.readdirSync(agentDir)) fs.chmodSync(path.join(agentDir, f), 0o600);
+  // Undo the permission tests' chmod; symlinks (possibly dangling) are left
+  // alone and a subdirectory keeps its search bit.
+  for (const f of fs.readdirSync(agentDir)) {
+    const p = path.join(agentDir, f);
+    const st = fs.lstatSync(p);
+    if (st.isDirectory()) fs.chmodSync(p, 0o700);
+    else if (st.isFile()) fs.chmodSync(p, 0o600);
+  }
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -284,6 +291,23 @@ test("startup description sync leaves a shared destination intact and names it",
   expect(console.warn).toHaveBeenCalledWith(`[squad] description refresh skipped: ${line}`);
   // squad_dump surfaces it as well.
   expect(readSquad(agentDir).conflicts).toContain(line);
+});
+
+test("a link onto an agent in a subdirectory is a shared destination too", () => {
+  const nested = path.join(agentDir, "nested", "other-agent.md");
+  fs.mkdirSync(path.dirname(nested));
+  const { content } = agentMarkdown("grunt", "a/b", {});
+  fs.writeFileSync(nested, content);
+  fs.symlinkSync(nested, path.join(agentDir, "grunt-a-b.md"));
+  const line = `grunt-a-b.md, nested/other-agent.md all lead to ${fs.realpathSync(nested)}; each agent needs its own file`;
+  expect(readSquad(agentDir).conflicts).toContain(line);
+  expect(syncDescriptions({ dir: agentDir, describe: () => "new" })).toEqual([]);
+  const result = applySquad({
+    roster: { grunts: { "a/b": { variant: "low" } }, drills: {} },
+    dir: agentDir,
+  });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(fs.readFileSync(nested, "utf8")).toBe(content);
 });
 
 test("a symlink to a file nothing else reaches is still written through", () => {

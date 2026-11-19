@@ -128,7 +128,12 @@ function sharedDestinations(dir, targets) {
   /** @type {string[]} */
   let names = [];
   try {
-    names = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+    // OpenCode loads agent/**/*.md and names each by its relative path, so a
+    // file in a subdirectory is another agent name that can share the file.
+    names = fs
+      .readdirSync(dir, { recursive: true, encoding: "utf8" })
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => f.split(path.sep).join("/"));
   } catch {
     // No agent dir yet: only the targets themselves can collide.
   }
