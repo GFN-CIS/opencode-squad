@@ -27,12 +27,19 @@
 // that id IS that file (same prompt and model). Any other agent at a squad id
 // belongs to the user and is left exactly as the host built it.
 
+import crypto from "node:crypto";
+
 import { findPromptFence, placeholderBody, wrapPrompt } from "./prompt-inject.js";
 import { NOTES_CLOSE, NOTES_OPEN, ROLE_KEYS } from "./roster.js";
 import { roleRules, slugForModel, squadRoleOf } from "./workers.js";
 
-/** The throwaway agent the early transform creates for the late one to read. */
-export const PROBE_ID = "opencode-squad-probe";
+/**
+ * The throwaway agent the early transform creates for the late one to read:
+ * a fresh id per plugin instance, so no agent of the user's can hold it.
+ */
+export function newProbeId() {
+  return `opencode-squad-probe-${crypto.randomUUID().slice(0, 12)}`;
+}
 /** Marks where the probe's own rules end and the global ones begin. */
 const PROBE_MARK = Object.freeze({ action: "opencode-squad-probe", resource: "*", effect: "deny" });
 
@@ -41,8 +48,10 @@ const PROBE_MARK = Object.freeze({ action: "opencode-squad-probe", resource: "*"
  * @typedef {{id: string, role: "grunt"|"drill", modelId: string, description: string,
  *   system: string, model: {id: string, providerID: string, variant?: string},
  *   steps?: number, permissions: Rule[]}} AgentSpec
- * @typedef {{system: string, modelId: string}} LegacyAgent
- *   a generated file from the global agent dir, as the host would load it
+ * @typedef {{definition: import("./squad-apply.js").LegacyDefinition | null}} LegacyAgent
+ *   a generated file from the global agent dir, as the host builds it alone
+ * @typedef {{defaults?: Record<string, unknown>}} ProbeSeen
+ *   defaults: a fresh agent as the host creates one, seen by the early transform
  */
 
 /**
@@ -129,9 +138,12 @@ export function isSquadSystem(system) {
  * own rules deny everything, so it cannot run in the moment it exists.
  *
  * @param {{update: (id: string, f: (agent: any) => void) => void}} editor
+ * @param {string} probeId
+ * @param {ProbeSeen} [seen]  receives the host's fresh-agent defaults
  */
-export function earlyTransform(editor) {
-  editor.update(PROBE_ID, (agent) => {
+export function earlyTransform(editor, probeId, seen = {}) {
+  editor.update(probeId, (agent) => {
+    seen.defaults = JSON.parse(JSON.stringify(agent));
     agent.mode = "primary";
     agent.hidden = true;
     agent.description = "opencode-squad internal probe; removed before any request";
@@ -158,21 +170,51 @@ function globalRules(probe) {
   return mark === -1 ? [] : rules.slice(mark + 1).map((/** @type {Rule} */ r) => ({ ...r }));
 }
 
+/** JSON with object keys sorted, for comparing definitions. @param {unknown} v */
+function canonical(v) {
+  return JSON.stringify(v, (_k, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(
+          Object.keys(x)
+            .sort()
+            .map((k) => [k, x[k]]),
+        )
+      : x,
+  );
+}
+
 /**
- * Whether the live agent at an id is exactly the legacy file there: the host
+ * Whether the live agent at an id IS the legacy file there: equal, field for
+ * field, to what the host builds from that file alone (fresh defaults, the
+ * file's fields, then the global rules and the file's own rules). The host
  * loads agents from several config dirs, and another one may hold the id
- * (#88). Verifying the file proves we own the file, not the id.
+ * with any field changed (#88); verifying the file proves we own the file,
+ * not the id. Without the host's defaults or a reproducible file, never.
  *
  * @param {any} agent
  * @param {LegacyAgent | undefined} file
+ * @param {{defaults?: Record<string, unknown>, globals: Rule[]}} host
  */
-export function isLegacyFile(agent, file) {
-  if (!file || !agent) return false;
-  const model = agent.model ? `${agent.model.providerID}/${agent.model.id}` : "";
-  const system = String(agent.system ?? "")
-    .replaceAll("\r\n", "\n")
-    .trim();
-  return system === file.system && model === file.modelId;
+export function isLegacyFile(agent, file, { defaults, globals }) {
+  const def = file?.definition;
+  if (!def || !agent || !defaults) return false;
+  const { id: _i, name: _n, ...base } = /** @type {Record<string, any>} */ (defaults);
+  const expected = {
+    ...base,
+    ...def.fields,
+    permissions: [.../** @type {any[]} */ (base.permissions ?? []), ...globals, ...def.permissions],
+  };
+  const { id: _a, name: _b, ...live } = agent;
+  // Rules as a multiset: transforms after the config plugin (the browser
+  // plugin's deny, on 2.1.3) append to every agent, so on a file agent they
+  // land after the file's own rules, and on the probe before. A user's file
+  // cannot reorder rules without changing them.
+  /** @param {any} a */
+  const rules = (a) => (Array.isArray(a.permissions) ? a.permissions : []).map(canonical).sort();
+  return (
+    canonical({ ...live, permissions: rules(live) }) ===
+    canonical({ ...expected, permissions: rules(expected) })
+  );
 }
 
 /**
@@ -202,7 +244,10 @@ function build(agent, spec, globals) {
  *   marker (src/squad-apply.js readLegacySquad). Files from before the
  *   role-prompt fence, and every `worker-*`, are only recognisable this way:
  *   the marker is a YAML comment the host never exposes.
- * @returns {{built: string[], foreign: string[], hidden: string[], stray: string[], kept: string[]}}
+ * @param {{id: string, seen: ProbeSeen}} [probe]  this instance's probe and
+ *   what the early transform saw
+ * @returns {{globals: Rule[], built: string[], foreign: string[], hidden: string[], stray: string[], kept: string[]}}
+ *   globals: the user's global rules, read off the probe;
  *   built: the squad agents this transform created: the only ones the
  *          plugin polices per request;
  *   foreign: roster ids another agent already holds (left alone);
@@ -212,9 +257,10 @@ function build(agent, spec, globals) {
  *   kept: ids of legacy files the roster dropped, where another agent the
  *         host loaded holds the id (left alone)
  */
-export function lateTransform(editor, specs, legacy = new Map()) {
-  const globals = globalRules(editor.get(PROBE_ID));
-  editor.remove(PROBE_ID);
+export function lateTransform(editor, specs, legacy = new Map(), probe = { id: "", seen: {} }) {
+  const globals = globalRules(editor.get(probe.id));
+  editor.remove(probe.id);
+  const host = { defaults: probe.seen.defaults, globals };
   const wanted = new Map(specs.map((s) => [s.id, s]));
   /** @type {string[]} */
   const foreign = [];
@@ -230,7 +276,7 @@ export function lateTransform(editor, specs, legacy = new Map()) {
     const id = String(agent?.id ?? "");
     if (wanted.has(id)) continue;
     if (legacy.has(id)) {
-      if (isLegacyFile(agent, legacy.get(id))) {
+      if (isLegacyFile(agent, legacy.get(id), host)) {
         editor.remove(id);
         hidden.push(id);
       } else {
@@ -243,7 +289,7 @@ export function lateTransform(editor, specs, legacy = new Map()) {
   for (const spec of specs) {
     const current = editor.get(spec.id);
     if (current) {
-      if (!isLegacyFile(current, legacy.get(spec.id))) {
+      if (!isLegacyFile(current, legacy.get(spec.id), host)) {
         foreign.push(spec.id);
         continue;
       }
@@ -254,6 +300,7 @@ export function lateTransform(editor, specs, legacy = new Map()) {
     built.push(spec.id);
   }
   return {
+    globals,
     built: built.sort(),
     foreign: foreign.sort(),
     hidden: hidden.sort(),

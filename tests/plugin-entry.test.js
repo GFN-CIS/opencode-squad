@@ -592,7 +592,9 @@ test("no squad agent exists before the late transform; the prompt hook puts it i
   const { registered, hooks, dispose } = await setupHost({ directory, globals: [ALLOW_ALL] });
   try {
     // Only the probe: a request for the drill fails as an unknown agent.
-    expect(registered().map((a) => a.id)).toEqual(["opencode-squad-probe"]);
+    expect(registered().map((a) => a.id)).toEqual([
+      expect.stringMatching(/^opencode-squad-probe-/),
+    ]);
     await hooks.get("prompt")({ sessionID: "s" });
     const drill = registered().find((a) => a.id === "drill-a-b");
     expect(registered().map((a) => a.id)).toEqual(["drill-a-b"]);

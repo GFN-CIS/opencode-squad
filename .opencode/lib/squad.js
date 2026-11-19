@@ -65,7 +65,7 @@ import {
   endsWithRoleRules,
   isLegacyFile,
   lateTransform,
-  PROBE_ID,
+  newProbeId,
   rosterCollisions,
 } from "../../src/squad-agents.js";
 import {
@@ -244,6 +244,7 @@ export default {
     let storeSig = storeRevision(storeFile);
     /** From the late transform: hand-authored holders of roster ids, legacy agents hidden, stray ones left. */
     let lateReport = {
+      globals: /** @type {Array<{action: string, resource: string, effect: string}>} */ ([]),
       built: /** @type {string[]} */ ([]),
       foreign: /** @type {string[]} */ ([]),
       hidden: /** @type {string[]} */ ([]),
@@ -295,9 +296,14 @@ export default {
         },
       });
     };
+    // This instance's probe: its own id, and what the early transform saw.
+    const probe = {
+      id: newProbeId(),
+      seen: /** @type {{defaults?: Record<string, unknown>}} */ ({}),
+    };
     await ctx.agent.transform((editor) => {
       try {
-        earlyTransform(editor);
+        earlyTransform(editor, probe.id, probe.seen);
       } catch {
         // The late transform then finds no probe and adds no global rules.
       }
@@ -313,7 +319,9 @@ export default {
       for (const id of lateReport.kept) {
         notes.push(
           `${id}: an agent file from an earlier version has this id, but the agent OpenCode ` +
-            "loaded here is another one (a project's own?), so it is left as is",
+            "loaded here is not exactly that file (another agent, a project's own perhaps, or a " +
+            "file in a format this version cannot verify), so it is left as is. If it is the " +
+            "old squad file, the user may delete it",
         );
       }
       const store = readStore(storeFile);
@@ -361,9 +369,9 @@ export default {
         // An unreadable squad.json registers nothing and hides nothing:
         // legacy agent files, if any, keep working until it is fixed.
         const specs = specsNow();
-        if (specs) lateReport = lateTransform(editor, specs, legacyAgents);
+        if (specs) lateReport = lateTransform(editor, specs, legacyAgents, probe);
         else {
-          editor.remove(PROBE_ID);
+          editor.remove(probe.id);
           lateReport = { ...lateReport, built: [] };
         }
       } catch {
@@ -884,7 +892,10 @@ export default {
                 if (
                   agent &&
                   !lateReport.built.includes(id) &&
-                  !isLegacyFile(agent, legacyAgents.get(id))
+                  !isLegacyFile(agent, legacyAgents.get(id), {
+                    defaults: probe.seen.defaults,
+                    globals: lateReport.globals,
+                  })
                 ) {
                   foreign.push({ id, agent: `${role} ${modelId}` });
                 }

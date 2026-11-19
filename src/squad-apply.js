@@ -34,16 +34,16 @@ export function defaultAgentDir() {
  *
  * @param {string} dir
  * @returns {{roster: Record<string, Record<string, any>>, problems: string[], files: string[],
- *   agents: Array<{id: string, system: string, modelId: string}>}}
- *   agents: each file as the host would load it (its prompt is the body,
- *   trimmed), so the plugin can tell whether the live agent at that id is
- *   this file or another agent the host loaded from elsewhere (#88)
+ *   agents: Array<{id: string, definition: LegacyDefinition | null}>}}
+ *   agents: each file's agent as the host builds it from that file alone, or
+ *   null for a shape that cannot be reproduced exactly; the plugin compares it
+ *   to the live agent to tell this file from another agent at the id (#88)
  */
 export function readLegacySquad(dir) {
   const parsed = [];
   /** @type {string[]} */
   const files = [];
-  /** @type {Array<{id: string, system: string, modelId: string}>} */
+  /** @type {Array<{id: string, definition: LegacyDefinition | null}>} */
   const agents = [];
   /** @type {string[]} */
   const problems = [];
@@ -73,14 +73,80 @@ export function readLegacySquad(dir) {
     // Legacy `worker-` files predate the grunt/drill split: the executor.
     parsed.push({ role: m[1] === "worker" ? "grunt" : m[1], modelId, entry });
     files.push(name);
-    agents.push({
-      id: name.replace(/\.md$/, ""),
-      system: readFrontmatter(text).body.replaceAll("\r\n", "\n").trim(),
-      modelId,
-    });
+    agents.push({ id: name.replace(/\.md$/, ""), definition: legacyDefinition(text) });
   }
   const { roster, conflicts } = buildRoster(parsed);
   return { roster, problems: [...problems, ...conflicts], files, agents };
+}
+
+/**
+ * @typedef {{fields: Record<string, unknown>, permissions: Array<Record<string, unknown>>}} LegacyDefinition
+ *   fields: the agent fields the file sets, as OpenCode 2.1.3's config-agent
+ *   plugin applies them; permissions: the file's own rules
+ */
+
+/** Frontmatter keys of the last generated format, and nothing else. */
+const LEGACY_KEYS = new Set([
+  "description",
+  "mode",
+  "model",
+  "variant",
+  "steps",
+  "hidden",
+  "permissions",
+]);
+
+/**
+ * What the host builds from a generated file alone, for the format the last
+ * file-writing version produced (and older files using only its keys).
+ * Anything else (a `permission`/`tools` map, a key this does not model, a
+ * disabled agent) cannot be reproduced exactly: null, and the plugin then
+ * never treats the live agent at that id as this file.
+ *
+ * @param {string} text
+ * @returns {LegacyDefinition | null}
+ */
+function legacyDefinition(text) {
+  const fm = readFrontmatter(text);
+  if (fm.state !== "ok") return null;
+  const f = fm.fields;
+  if (Object.keys(f).some((k) => !LEGACY_KEYS.has(k))) return null;
+  if (typeof f.model !== "string" || !f.model.trim()) return null;
+  // `model: p/m#v`, or `variant:` folded into it, as the host's decode does.
+  let ref = f.model.trim();
+  if (!ref.includes("#") && typeof f.variant === "string" && /^[^#]+$/.test(f.variant)) {
+    ref = `${ref}#${f.variant}`;
+  } else if (f.variant !== undefined && !ref.includes("#")) return null;
+  const [path0, variant] = ref.split("#");
+  const slash = path0.indexOf("/");
+  if (slash <= 0) return null;
+  /** @type {Record<string, unknown>} */
+  const fields = {
+    system: fm.body.trim(),
+    model: {
+      id: path0.slice(slash + 1),
+      providerID: path0.slice(0, slash),
+      ...(variant ? { variant } : {}),
+    },
+  };
+  for (const key of ["description", "mode", "hidden", "steps"]) {
+    if (f[key] !== undefined) fields[key] = f[key];
+  }
+  const permissions = f.permissions ?? [];
+  if (!Array.isArray(permissions)) return null;
+  if (
+    permissions.some(
+      (r) =>
+        !r ||
+        typeof r !== "object" ||
+        Object.keys(r).sort().join() !== "action,effect,resource" ||
+        String(r.resource).startsWith("~") ||
+        String(r.resource).startsWith("$HOME"),
+    )
+  ) {
+    return null;
+  }
+  return { fields, permissions: permissions.map((r) => ({ ...r })) };
 }
 
 /**

@@ -14,7 +14,7 @@ import {
   endsWithRoleRules,
   isSquadSystem,
   lateTransform,
-  PROBE_ID,
+  newProbeId,
   rosterCollisions,
 } from "../src/squad-agents.js";
 import { roleRules } from "../src/workers.js";
@@ -106,10 +106,15 @@ function editorOf(agents) {
   };
 }
 
+const PROBE = "opencode-squad-probe-test";
+/** A fresh agent as the fake host creates one. */
+const DEFAULTS = { permissions: [] };
+
 /** @param {{files?: any[], specs: any[], legacy?: Map<string, any>, globals?: any[]}} run */
 function hostOrder({ files = [], specs, legacy, globals = [GLOBAL] }) {
   const editor = editorOf([]);
-  earlyTransform(editor);
+  const probe = { id: PROBE, seen: {} };
+  earlyTransform(editor, probe.id, probe.seen);
   for (const a of editor.list()) a.permissions.push(...globals.map((r) => ({ ...r })));
   for (const file of files) {
     editor.update(file.id, (a) => {
@@ -117,15 +122,17 @@ function hostOrder({ files = [], specs, legacy, globals = [GLOBAL] }) {
       a.permissions = [...(a.permissions ?? []), ...globals, ...(file.permissions ?? [])];
     });
   }
-  const report = lateTransform(editor, specs, legacy);
+  const report = lateTransform(editor, specs, legacy, probe);
   return { editor, report };
 }
 
-test("early: only the probe, which cannot be dispatched or selected", () => {
+test("early: only the probe, which cannot be dispatched or selected; host defaults seen", () => {
   const editor = editorOf([]);
-  earlyTransform(editor);
-  expect(editor.list().map((a) => a.id)).toEqual([PROBE_ID]);
-  const probe = editor.get(PROBE_ID);
+  const seen = {};
+  earlyTransform(editor, PROBE, seen);
+  expect(seen.defaults).toEqual({ id: PROBE, ...DEFAULTS });
+  expect(editor.list().map((a) => a.id)).toEqual([PROBE]);
+  const probe = editor.get(PROBE);
   // The subagent tool refuses a primary agent; a hidden one is never selected.
   expect(probe).toMatchObject({ mode: "primary", hidden: true, system: "" });
   expect(probe.permissions[0]).toEqual({ action: "*", resource: "*", effect: "deny" });
@@ -134,7 +141,7 @@ test("early: only the probe, which cannot be dispatched or selected", () => {
 test("late: built from a fresh default — global rules, then role rules last; probe removed", () => {
   const specs = agentSpecs({ drills: { "a/b": { variant: "max" } } }, io);
   const { editor } = hostOrder({ specs });
-  expect(editor.get(PROBE_ID)).toBeUndefined();
+  expect(editor.get(PROBE)).toBeUndefined();
   expect(editor.get("drill-a-b")).toEqual({
     id: "drill-a-b",
     mode: "subagent",
@@ -166,7 +173,21 @@ const legacyFile = (id, modelId, system) => {
       model: { providerID, id: rest.join("/") },
       permissions: [{ action: "edit", resource: "*", effect: "allow" }],
     },
-    seen: [id, { id, system, modelId }],
+    seen: [
+      id,
+      {
+        definition: {
+          fields: {
+            system,
+            description: "stale",
+            color: "#ff0000",
+            steps: 7,
+            model: { providerID, id: rest.join("/") },
+          },
+          permissions: [{ action: "edit", resource: "*", effect: "allow" }],
+        },
+      },
+    ],
   };
 };
 
@@ -174,7 +195,14 @@ test("late: a same-id legacy file is rebuilt from scratch, none of its fields ke
   const specs = agentSpecs({ drills: { "a/b": {} } }, io);
   const old = legacyFile("drill-a-b", "a/b", "an old inlined prompt");
   const { editor, report } = hostOrder({ specs, files: [old.live], legacy: new Map([old.seen]) });
-  expect(report).toEqual({ built: ["drill-a-b"], foreign: [], hidden: [], stray: [], kept: [] });
+  expect(report).toEqual({
+    globals: [GLOBAL],
+    built: ["drill-a-b"],
+    foreign: [],
+    hidden: [],
+    stray: [],
+    kept: [],
+  });
   const agent = editor.get("drill-a-b");
   expect(agent).not.toHaveProperty("color");
   expect(agent).not.toHaveProperty("steps");
@@ -223,6 +251,7 @@ test("late: verified legacy agents the roster dropped are hidden, worker- includ
     legacy: new Map([drill.seen, worker.seen]),
   });
   expect(report).toEqual({
+    globals: [GLOBAL],
     built: ["grunt-a-b"],
     foreign: [],
     hidden: ["drill-old-model", "worker-old-model"],
@@ -237,14 +266,38 @@ test("late: verified legacy agents the roster dropped are hidden, worker- includ
   ]);
 });
 
-test("a legacy file matches the live agent across CRLF and surrounding blank lines", () => {
-  const old = legacyFile("grunt-a-b", "a/b", "line one\nline two");
-  const { report } = hostOrder({
-    specs: agentSpecs({ grunts: { "a/b": {} } }, io),
-    files: [{ ...old.live, system: "\nline one\r\nline two\n" }],
-    legacy: new Map([old.seen]),
+test("a legacy id whose live agent differs from the file in any field is not ours (#88)", () => {
+  const old = legacyFile("drill-old-m", "old/m", "stale body");
+  const variants = [
+    { description: "mine" },
+    { model: { ...old.live.model, variant: "high" } },
+    { temperature: 0.2 },
+    { permissions: [{ action: "bash", resource: "*", effect: "allow" }] },
+  ];
+  for (const change of variants) {
+    const { editor, report } = hostOrder({
+      specs: [],
+      files: [{ ...old.live, ...change }],
+      legacy: new Map([old.seen]),
+    });
+    expect(report.kept).toEqual(["drill-old-m"]);
+    expect(editor.get("drill-old-m")).toBeDefined();
+  }
+  // Exactly the file: hidden.
+  const same = hostOrder({ specs: [], files: [old.live], legacy: new Map([old.seen]) });
+  expect(same.report.hidden).toEqual(["drill-old-m"]);
+  // A file this version cannot reproduce is never treated as the live agent.
+  const unknown = hostOrder({
+    specs: [],
+    files: [old.live],
+    legacy: new Map([["drill-old-m", { definition: null }]]),
   });
-  expect(report.foreign).toEqual([]);
+  expect(unknown.report.kept).toEqual(["drill-old-m"]);
+});
+
+test("each instance has its own probe id", () => {
+  expect(newProbeId()).toMatch(/^opencode-squad-probe-[0-9a-f-]{12}$/);
+  expect(newProbeId()).not.toBe(newProbeId());
 });
 
 test("endsWithRoleRules: global rules appended after the role's are caught", () => {

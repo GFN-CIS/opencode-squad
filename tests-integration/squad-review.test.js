@@ -121,7 +121,7 @@ test("#88: a hand-authored agent holding a roster id keeps its whole effective d
   expect(claimed).toEqual(alone);
 }, 180_000);
 
-/** An agent file as versions before #85 generated it. */
+/** An agent file exactly as the last file-writing version (0.5) generated it. */
 const legacy = (role, modelId) =>
   [
     "---",
@@ -129,6 +129,9 @@ const legacy = (role, modelId) =>
     'description: "stale description"',
     "mode: subagent",
     `model: ${modelId}`,
+    "hidden: true",
+    "permissions:",
+    '  - {"action":"edit","resource":"*","effect":"deny"}',
     "---",
     "",
     `<!-- squad:prompt role=${role} -->`,
@@ -210,3 +213,47 @@ test("#92: an equal-size roster with the old mtime still takes effect on the nex
   );
   expect(live).toEqual({ before: "low", after: "max" });
 }, 120_000);
+
+test("#88: a project agent with the legacy file's model and prompt but its own fields is left alone", async () => {
+  const mine = legacy("drill", "old/m#high").replace('"stale description"', '"mine"');
+  const files = async (project) => {
+    await fs.mkdir(path.join(configDir(), "agent"), { recursive: true });
+    await fs.writeFile(path.join(configDir(), "agent", "drill-old-m.md"), legacy("drill", "old/m"));
+    await fs.mkdir(path.join(project, "agent"), { recursive: true });
+    await fs.writeFile(path.join(project, "agent", "drill-old-m.md"), mine);
+  };
+  const alone = await definitionWith(null, "drill-old-m", async (project) => {
+    await files(project);
+    await fs.writeFile(storeFile(), "{");
+  });
+  expect(alone).toMatchObject({ description: "mine", model: { variant: "high" } });
+  expect(await definitionWith({}, "drill-old-m", files)).toEqual(alone);
+}, 180_000);
+
+test("#88: the plugin still recognises its own legacy file: hidden with an empty roster", async () => {
+  const files = async (project) => {
+    for (const dir of [path.join(configDir(), "agent"), path.join(project, "agent")]) {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, "drill-old-m.md"), legacy("drill", "old/m#high"));
+    }
+  };
+  const alone = await definitionWith(null, "drill-old-m", async (project) => {
+    await files(project);
+    await fs.writeFile(storeFile(), "{");
+  });
+  expect(alone?.model).toMatchObject({ providerID: "old", id: "m", variant: "high" });
+  expect(await definitionWith({}, "drill-old-m", files)).toBeUndefined();
+}, 180_000);
+
+test("#88: a hand-authored agent named like the plugin's probe is left intact", async () => {
+  const files = async (project) => {
+    await fs.mkdir(path.join(project, "agent"), { recursive: true });
+    await fs.writeFile(path.join(project, "agent", "opencode-squad-probe.md"), HAND);
+  };
+  const alone = await definitionWith(null, "opencode-squad-probe", async (project) => {
+    await files(project);
+    await fs.writeFile(storeFile(), "{");
+  });
+  expect(alone?.system).toContain("HAND-WRITTEN PROMPT");
+  expect(await definitionWith({}, "opencode-squad-probe", files)).toEqual(alone);
+}, 180_000);

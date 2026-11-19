@@ -116,15 +116,45 @@ test("readLegacySquad imports generated files only, worker- as a grunt", () => {
   });
   expect(out.files).toEqual(["drill-a-one.md", "grunt-a-one.md", "worker-a-two.md"]);
   expect(out.problems).toEqual([]);
-  // Each as the host would load it: the body is the prompt, the model without
-  // its variant, for telling this file from another agent at the id (#88).
-  expect(out.agents.map((a) => [a.id, a.modelId])).toEqual([
-    ["drill-a-one", "a/one"],
-    ["grunt-a-one", "a/one"],
-    ["worker-a-two", "a/two"],
-  ]);
-  const body = fs.readFileSync(path.join(dir, "grunt-a-one.md"), "utf8").split(/^---$/m)[2].trim();
-  expect(out.agents[1].system).toBe(body);
+  // Each as the host builds it from the file alone, for telling this file
+  // from another agent at the id (#88).
+  expect(out.agents.map((a) => a.id)).toEqual(["drill-a-one", "grunt-a-one", "worker-a-two"]);
+  expect(out.agents[1].definition?.fields.model).toEqual({
+    providerID: "a",
+    id: "one",
+    variant: "high",
+  });
+});
+
+test("legacy definitions: the last generator's format exactly, anything else unverifiable", () => {
+  const write = (name, text) => fs.writeFileSync(path.join(dir, name), text);
+  const head = "---\n# generated-by: opencode-squad squad-draft\n";
+  write(
+    "drill-a-b.md",
+    `${head}description: "d"\nmode: subagent\nmodel: a/b\nvariant: max\nsteps: 4\nhidden: true\n` +
+      'permissions:\n  - {"action":"edit","resource":"*","effect":"deny"}\n---\n\nbody\n',
+  );
+  write("drill-c-d.md", `${head}model: c/d\npermission:\n  edit: deny\n---\nbody\n`);
+  write("drill-e-f.md", `${head}model: e/f\ntemperature: 0.1\n---\nbody\n`);
+  write(
+    "drill-g-h.md",
+    `${head}model: g/h\npermissions:\n  - {"action":"read","resource":"~/x","effect":"deny"}\n---\nb\n`,
+  );
+  const defs = Object.fromEntries(readLegacySquad(dir).agents.map((a) => [a.id, a.definition]));
+  expect(defs["drill-a-b"]).toEqual({
+    fields: {
+      system: "body",
+      description: "d",
+      mode: "subagent",
+      hidden: true,
+      steps: 4,
+      model: { providerID: "a", id: "b", variant: "max" },
+    },
+    permissions: [{ action: "edit", resource: "*", effect: "deny" }],
+  });
+  expect(defs["drill-c-d"]).toBeNull();
+  expect(defs["drill-e-f"]).toBeNull();
+  expect(defs["drill-g-h"]).toBeNull();
 });
 
 test("readLegacySquad reads CRLF files and keeps notes", () => {
