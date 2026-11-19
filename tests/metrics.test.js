@@ -838,6 +838,19 @@ describe("one llmbenchmark identity per model, shared by every slice and both vi
     expect(l).toContain("APEX-Agents 0.3");
   });
 
+  test("candidates found only in the model list keep the summary uncertain, not empty", () => {
+    const data = dataOf(
+      [[TB, indexScoreRows([{ modelId: "z/x", value: 0.4 }])]],
+      [{ id: "a/m" }, { id: "b/m" }],
+    );
+    expect(resolveLlmbIdentity("q/m", data)).toMatchObject({ candidates: ["a/m", "b/m"] });
+    const out = formatSummary({ models: [{ id: "q/m" }, { id: "q/none" }], data, now: 0 });
+    expect(line(data, "q/m")).toContain("llmbenchmark identity ambiguous (a/m, b/m)");
+    expect(out).not.toMatch(/no benchmark data[^\n]*q\/m\b/);
+    // A model with no candidate at all still has no data.
+    expect(out).toContain("- no benchmark data: q/none");
+  });
+
   test("an alias unique in one slice but not in the source is ambiguous everywhere", () => {
     const data = dataOf(
       [[TB, indexScoreRows([{ modelId: "a/m", value: 0.4 }])]],

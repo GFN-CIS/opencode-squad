@@ -725,7 +725,13 @@ export function formatSummary({
     else if (facts.price) own.push(facts.price);
     const rule = info ? [`owner rule: ${info}`] : [];
 
-    if (!s && hits.every((h) => h === null)) {
+    // Candidates only the model list holds: no metric to mark ambiguous, but
+    // the uncertainty still belongs on the line, as in the full view.
+    const listOnly =
+      identity && "candidates" in identity && hits.every((h) => h === null)
+        ? identity.candidates
+        : null;
+    if (!s && !listOnly && hits.every((h) => h === null)) {
       if (!own.length && !rule.length) noData.push(m.id);
       else lines.push(`- ${m.id}${role}: ${[...own, "no benchmark data", ...rule].join(" · ")}`);
       continue;
@@ -734,7 +740,7 @@ export function formatSummary({
     // The SuperIndex row by id: two exact ids that normalize alike are two rows.
     const signature = `${provider}|${s?.entry.id ?? ""}|${hits
       .map((h) => h?.entry.candidates?.join(",") ?? h?.entry.id ?? "")
-      .join("|")}`;
+      .join("|")}|${listOnly?.join(",") ?? ""}`;
     const same = firstBySignature.get(signature);
     if (same) {
       lines.push(
@@ -763,7 +769,8 @@ export function formatSummary({
         `${KEY_METRICS[i].label} ${c ? `ambiguous (${fmtCandidates(c)})` : fmtValues(h.entry.values)}`,
       );
     });
-    const matched = [s?.key, ...hits.map((h) => h?.key)]
+    if (listOnly) parts.push(`llmbenchmark identity ambiguous (${fmtCandidates(listOnly)})`);
+    const matched = [s?.key, listOnly ? identity?.key : null, ...hits.map((h) => h?.key)]
       .filter(Boolean)
       .find((k) => k !== modelKey(m.id));
     if (matched) parts.push(`(data for ${matched})`);
