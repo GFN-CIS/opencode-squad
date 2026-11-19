@@ -396,6 +396,18 @@ Two properties make the flow safe, and neither is optional:
    says otherwise. The unit is the agent, which is also the unit on disk, so
    dropping just a drill is gated exactly like dropping a model.
 
+**One file, one agent.** OpenCode loads agent Markdown from `agent/` and
+`agents/` (recursively) and from `mode/` and `modes/` (top level), through
+links, so one file can be loaded under several agent names. Before it writes,
+prunes or migrates anything, `squad_patch` checks every path it touches against
+all of them: if another loadable name reaches the same file, or a directory
+cannot be listed, it refuses and names the paths. The startup description
+refresh skips such files and logs them, and `squad_dump` lists them.
+`allow_remove` permits dropping a roster entry, not breaking another agent.
+Known limitation: a plain `agents -> agent` directory link makes OpenCode load
+each file twice under the same id, which would be harmless, but Squad still
+refuses it. That errs on the safe side.
+
 `squad_patch` additionally refuses to run from a `grunt-`/`drill-` agent. A
 subagent rewriting the squad mid-task is never intended, and the damage outlives
 the session.
