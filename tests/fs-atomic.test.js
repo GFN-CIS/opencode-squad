@@ -1,6 +1,6 @@
 // Suite: src/fs-atomic.js — atomic whole-file writes. Covers symlinked
-// destinations (written through, link kept), permission bits kept, and no temp
-// file left behind. Run: npx vitest run tests/fs-atomic.test.js
+// destinations (written through, link kept), a dangling link refused and
+// kept, permission bits kept, and no temp file left behind. Run: npx vitest run tests/fs-atomic.test.js
 
 import fs from "node:fs";
 import os from "node:os";
@@ -33,6 +33,16 @@ test("a symlinked destination is written through and stays a link", () => {
   expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
   expect(fs.readFileSync(real, "utf8")).toBe("new");
   expect(fs.readdirSync(path.dirname(real))).toEqual(["model_data.json"]);
+});
+
+test("a dangling symlink is refused, not replaced by a regular file", () => {
+  const missing = path.join(dir, "dotfiles", "model_data.json");
+  const link = path.join(dir, "model_data.json");
+  fs.symlinkSync(missing, link);
+  expect(() => writeFileAtomic(link, "new")).toThrow(/does not exist/);
+  expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+  expect(fs.readlinkSync(link)).toBe(missing);
+  expect(fs.readdirSync(dir)).toEqual(["model_data.json"]);
 });
 
 test("the existing file's permission bits are kept", () => {

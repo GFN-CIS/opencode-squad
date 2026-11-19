@@ -5,7 +5,9 @@
 //
 // A symlinked path (a dotfiles checkout) is written THROUGH: the temp file goes
 // beside the link's target and replaces that, so the link survives and the
-// repo copy is the one updated. The existing file's permission bits are kept —
+// repo copy is the one updated. A DANGLING link (the checkout is absent) is
+// refused rather than replaced by a regular file, which would silently detach
+// the path from the repo copy. The existing file's permission bits are kept —
 // model_data.json can hold private routing rules and may be 0600.
 
 import fs from "node:fs";
@@ -18,9 +20,32 @@ function resolveTarget(file) {
   try {
     return fs.realpathSync(file);
   } catch (e) {
-    if (/** @type {NodeJS.ErrnoException} */ (e)?.code === "ENOENT") return file;
-    throw e;
+    if (/** @type {NodeJS.ErrnoException} */ (e)?.code !== "ENOENT") throw e;
+    const link = danglingLinkTarget(file);
+    if (link === null) return file; // a new file
+    throw Object.assign(
+      new Error(`${file} is a symlink to ${link}, which does not exist; the link is left in place`),
+      { code: "ENOENT", path: file },
+    );
   }
+}
+
+/**
+ * Where `file` points if it is a symlink whose target does not exist, else
+ * null (no such path, or not a dangling link).
+ *
+ * @param {string} file
+ * @returns {string | null}
+ */
+export function danglingLinkTarget(file) {
+  let link;
+  try {
+    if (!fs.lstatSync(file).isSymbolicLink()) return null;
+    link = fs.readlinkSync(file);
+  } catch {
+    return null;
+  }
+  return fs.existsSync(file) ? null : link;
 }
 
 /**

@@ -9,10 +9,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { writeFileAtomic } from "./fs-atomic.js";
+import { danglingLinkTarget, writeFileAtomic } from "./fs-atomic.js";
 import { opencodeConfigDir } from "./paths.js";
 import { buildRoster, diffRoster, parseAgentFile, ROLE_KEYS } from "./roster.js";
-import { agentMarkdown, GENERATED_MARKER_DETECT } from "./workers.js";
+import { agentMarkdown, isGeneratedAgent } from "./workers.js";
 
 const GENERATED_FILE_RE = /^(grunt|drill|worker)-.*\.md$/;
 
@@ -93,8 +93,7 @@ function readText(file) {
   }
 }
 
-/** @param {string} text */
-const isGenerated = (text) => text.includes(GENERATED_MARKER_DETECT);
+const isGenerated = isGeneratedAgent;
 
 /**
  * Ours, but with no model we can read (a truncated or mangled header). One
@@ -109,7 +108,7 @@ const isDamaged = (text) => isGenerated(text) && !parseAgentFile(text).modelId;
  * @typedef {{role: string, id: string, variant?: string, filename: string, unchanged?: boolean}} WrittenAgent
  * @typedef {{ok: true, diff: ReturnType<typeof diffRoster>, written: WrittenAgent[], pruned: string[],
  *   migrated: string[], refreshed: string[], conflicts: string[], dir: string}} ApplyDone
- * @typedef {{ok: false, refusal: "remove" | "collision" | "unreadable" | "damaged", problems: string[],
+ * @typedef {{ok: false, refusal: "remove" | "collision" | "unreadable" | "damaged" | "dangling", problems: string[],
  *   diff: ReturnType<typeof diffRoster>, written: [], pruned: [], conflicts: string[], dir: string}} ApplyRefused
  */
 
@@ -119,7 +118,7 @@ const isDamaged = (text) => isGenerated(text) && !parseAgentFile(text).modelId;
  * Returns `{ok: false, ...}` rather than throwing when the apply is refused —
  * the refusal is an ordinary outcome the caller reports, not an exception —
  * and every check runs before the first write, so a refused apply leaves the
- * squad exactly as it was. Four refusals:
+ * squad exactly as it was. Five refusals:
  *
  *   remove     — the apply would delete agents and `allowRemove` is not set;
  *   collision  — two roster agents map to one filename (`p/model-1` and
@@ -129,7 +128,10 @@ const isDamaged = (text) => isGenerated(text) && !parseAgentFile(text).modelId;
  *                ours cannot be established;
  *   damaged    — a target file is ours but its header has no readable model
  *                (the one squad_dump reports and leaves as is), so what it
- *                held and any edits to it would be lost.
+ *                held and any edits to it would be lost;
+ *   dangling   — a target path is a symlink whose target is missing (a dotfiles
+ *                checkout that is not there): writing would replace the link
+ *                with a regular file and detach the path from the repo copy.
  *
  * Another generated file still claiming a kept agent is handled by name. A
  * legacy `worker-` file is migrated: deleted once the agent's `grunt-` file is
@@ -176,6 +178,8 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
   const unreadable = [];
   /** @type {string[]} */
   const damaged = [];
+  /** @type {string[]} */
+  const dangling = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
     for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
       const { filename, content } = agentMarkdown(role, modelId, {
@@ -190,6 +194,13 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
       }
       byFile.set(filename, agent);
       const read = readText(path.join(dir, filename));
+      const link = read.state === "missing" ? danglingLinkTarget(path.join(dir, filename)) : null;
+      if (link !== null) {
+        dangling.push(
+          `${path.join(dir, filename)}: symlink to ${link}, which does not exist (${agent} targets it)`,
+        );
+        continue;
+      }
       if (read.state === "error") {
         unreadable.push(`${path.join(dir, filename)}: ${read.code} (${agent} targets it)`);
         continue;
@@ -212,6 +223,7 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
   }
   if (unreadable.length) return refuse("unreadable", unreadable);
   if (damaged.length) return refuse("damaged", damaged);
+  if (dangling.length) return refuse("dangling", dangling);
   if (problems.length) return refuse("collision", problems);
 
   /** @type {string[]} */
@@ -358,6 +370,19 @@ export function formatApplyReport(result) {
       "",
       "Nothing was written. Ask the user to repair or delete the file. Do not retry",
       "until they have.",
+    );
+    return lines.join("\n");
+  }
+  if (!result.ok && result.refusal === "dangling") {
+    lines.push(
+      "",
+      "REFUSED: an agent file this roster would replace is a symlink whose target",
+      "does not exist, and writing it would replace the link with a regular file:",
+      ...result.problems.map((p) => `  - ${p}`),
+      "",
+      "Nothing was written and the link is left in place. Ask the user to restore",
+      "the link's target (e.g. check out their dotfiles) or remove the link. Do not",
+      "retry until they have.",
     );
     return lines.join("\n");
   }

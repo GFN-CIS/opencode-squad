@@ -18,7 +18,24 @@ const GENERATED_MARKER_PREFIX = "generated-by: opencode-squad";
 export const GENERATED_MARKER = `${GENERATED_MARKER_PREFIX} squad-draft`;
 // Prune detection matches files from before the opencode-orchestrate -> squad
 // rename too, so regenerating cleanly migrates older generated agents.
-export const GENERATED_MARKER_DETECT = "generated-by: opencode-";
+const GENERATED_MARKER_DETECT = "generated-by: opencode-";
+// Every version of agentMarkdown has written the marker as the first line of
+// the frontmatter, so that is the only place it counts: a hand-authored agent
+// whose prompt quotes the marker is still the user's. No closing fence is
+// required — a header cut off mid-way is ours, just damaged. An optional BOM
+// and CRLF line endings survive an editor round trip.
+const GENERATED_HEADER_RE = new RegExp(
+  `^\\uFEFF?---[ \\t]*\\r?\\n#[ \\t]*${GENERATED_MARKER_DETECT}`,
+);
+
+/**
+ * Whether an agent file was written by this plugin (or its pre-rename self).
+ *
+ * @param {string} text  the file's full content
+ */
+export function isGeneratedAgent(text) {
+  return GENERATED_HEADER_RE.test(text);
+}
 
 const DRILL_SHELL_COMMANDS = [
   "git log",
