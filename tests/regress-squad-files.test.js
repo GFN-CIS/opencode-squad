@@ -310,6 +310,39 @@ test("a link onto an agent in a subdirectory is a shared destination too", () =>
   expect(fs.readFileSync(nested, "utf8")).toBe(content);
 });
 
+test.skipIf(isRoot)("an unlistable subdirectory holds every write back and is named", () => {
+  const shared = path.join(agentDir, "grunt-a-b.md");
+  const { content } = agentMarkdown("grunt", "a/b", {});
+  fs.writeFileSync(shared, content);
+  fs.symlinkSync(shared, path.join(agentDir, "drill-a-b.md"));
+  const locked = path.join(agentDir, "locked");
+  fs.mkdirSync(locked);
+  fs.chmodSync(locked, 0o000);
+  const line = (targets) =>
+    `cannot list ${locked} (EACCES), so whether ${targets} share a file with an agent there is unknown`;
+  expect(readSquad(agentDir).conflicts).toContain(line("drill-a-b.md, grunt-a-b.md"));
+  expect(syncDescriptions({ dir: agentDir, describe: (role) => `new ${role}` })).toEqual([]);
+  expect(fs.readFileSync(shared, "utf8")).toBe(content);
+  const result = applySquad({
+    roster: { grunts: { "a/b": { variant: "low" } }, drills: {} },
+    dir: agentDir,
+  });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(fs.readFileSync(shared, "utf8")).toBe(content);
+});
+
+test("a symlinked subdirectory is walked like OpenCode walks it", () => {
+  const elsewhere = path.join(root, "dotfiles", "more");
+  fs.mkdirSync(elsewhere, { recursive: true });
+  const { content } = agentMarkdown("grunt", "a/b", {});
+  fs.writeFileSync(path.join(elsewhere, "other.md"), content);
+  fs.symlinkSync(elsewhere, path.join(agentDir, "more"));
+  fs.symlinkSync(path.join(elsewhere, "other.md"), path.join(agentDir, "grunt-a-b.md"));
+  expect(readSquad(agentDir).conflicts.join("\n")).toMatch(
+    /grunt-a-b\.md, more\/other\.md all lead to/,
+  );
+});
+
 test("a symlink to a file nothing else reaches is still written through", () => {
   const own = path.join(root, "dotfiles", "grunt-a-b.md");
   fs.mkdirSync(path.dirname(own), { recursive: true });
