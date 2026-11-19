@@ -7,7 +7,7 @@ test("block starts with the marker and embeds inventory", () => {
   expect(out.startsWith(BOOTSTRAP_MARKER)).toBe(true);
   expect(out).toContain(inv);
   // Closed by the marker's own closing form, whatever the marker is named.
-  expect(out.trimEnd().endsWith(BOOTSTRAP_MARKER.replace("<", "</"))).toBe(true);
+  expect(out.trimEnd().endsWith(`</${BOOTSTRAP_MARKER.slice(1)}`)).toBe(true);
 });
 
 test("mentions the delegation decision and points to the protocol skill", () => {

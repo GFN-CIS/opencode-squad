@@ -5,7 +5,7 @@
 
 export const BOOTSTRAP_MARKER = "<ORCHESTRATE_BOOTSTRAP>";
 // The closing tag follows the marker, so renaming one cannot orphan the other.
-const BOOTSTRAP_END = BOOTSTRAP_MARKER.replace("<", "</");
+const BOOTSTRAP_END = `</${BOOTSTRAP_MARKER.slice(1)}`;
 
 /**
  * @param {string} inventoryMarkdown
