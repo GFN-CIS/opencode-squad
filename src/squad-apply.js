@@ -73,7 +73,9 @@ export function readSquad(dir) {
     filesByAgent.set(agent, [...(filesByAgent.get(agent) ?? []), name]);
   }
   const { roster, conflicts } = buildRoster(files);
-  return { roster, conflicts: [...conflicts, ...unreadable], filesByAgent };
+  // squad_dump shows these too, not only the write paths that refuse them.
+  const shared = sharedDestinations(dir, [...filesByAgent.values()].flat()).map((s) => s.line);
+  return { roster, conflicts: [...conflicts, ...unreadable, ...shared], filesByAgent };
 }
 
 /**
@@ -111,8 +113,8 @@ function physicalPath(file) {
  * An ordinary link onto a file nothing else in `dir` reaches is fine.
  *
  * @param {string} dir
- * @param {string[]} targets  filenames the apply will write
- * @returns {string[]}  one problem line per shared destination
+ * @param {string[]} targets  filenames about to be written
+ * @returns {Array<{names: string[], line: string}>}  one per shared destination
  */
 function sharedDestinations(dir, targets) {
   /** @type {Map<string, Set<string>>} physical path -> agent filenames reaching it */
@@ -134,7 +136,11 @@ function sharedDestinations(dir, targets) {
   const out = [];
   for (const [real, set] of reach) {
     if (set.size < 2 || !targets.some((t) => set.has(t))) continue;
-    out.push(`${[...set].sort().join(", ")} all lead to ${real}; each agent needs its own file`);
+    const names = [...set].sort();
+    out.push({
+      names,
+      line: `${names.join(", ")} all lead to ${real}; each agent needs its own file`,
+    });
   }
   return out;
 }
@@ -206,7 +212,8 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
     diff,
     written: [],
     pruned: [],
-    conflicts,
+    // A shared destination is both a dump note and this refusal: say it once.
+    conflicts: conflicts.filter((c) => !problems.includes(c)),
     dir,
   });
 
@@ -265,12 +272,11 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
       plan.push({ role, modelId, entry, filename, content, existing });
     }
   }
-  problems.push(
-    ...sharedDestinations(
-      dir,
-      plan.map((p) => p.filename),
-    ),
-  );
+  for (const shared of sharedDestinations(
+    dir,
+    plan.map((p) => p.filename),
+  ))
+    problems.push(shared.line);
   if (unreadable.length) return refuse("unreadable", unreadable);
   if (damaged.length) return refuse("damaged", damaged);
   if (dangling.length) return refuse("dangling", dangling);
@@ -358,7 +364,7 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
  */
 export function syncDescriptions({ dir, describe }) {
   const { roster, filesByAgent } = readSquad(dir);
-  const rewritten = [];
+  const planned = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
     for (const [modelId, entry] of Object.entries(roster[key] ?? {})) {
       const { filename, content } = agentMarkdown(role, modelId, {
@@ -366,17 +372,30 @@ export function syncDescriptions({ dir, describe }) {
         description: describe(role, modelId),
       });
       if (!filesByAgent.get(`${role} ${modelId}`)?.includes(filename)) continue;
-      const file = path.join(dir, filename);
-      let current;
-      try {
-        current = fs.readFileSync(file, "utf8");
-      } catch {
-        continue;
-      }
-      if (current === content) continue;
-      writeFileAtomic(file, content);
-      rewritten.push(filename);
+      planned.push({ filename, content });
     }
+  }
+  // The same destination contract as applySquad: paths that reach one file
+  // are left alone, whoever wrote last would win for both agents.
+  const shared = sharedDestinations(
+    dir,
+    planned.map((p) => p.filename),
+  );
+  const blocked = new Set(shared.flatMap((s) => s.names));
+  for (const s of shared) console.warn(`[squad] description refresh skipped: ${s.line}`);
+  const rewritten = [];
+  for (const { filename, content } of planned) {
+    if (blocked.has(filename)) continue;
+    const file = path.join(dir, filename);
+    let current;
+    try {
+      current = fs.readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    if (current === content) continue;
+    writeFileAtomic(file, content);
+    rewritten.push(filename);
   }
   return rewritten;
 }
