@@ -151,7 +151,7 @@ Create `docs/spikes/2026-06-18-transform-hook.md` containing the three named ans
 - [ ] **Step 6: Commit the findings doc**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add docs/spikes/2026-06-18-transform-hook.md
 git commit -m "spike: determine transform-hook injection and filter mechanism"
 ```
@@ -238,7 +238,7 @@ jobs:
 Run:
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate && bun install && bun test
+cd /path/to/opencode-orchestrate && bun install && bun test
 ```
 
 Expected: install succeeds; `bun test` reports `0 tests` (or "no tests found") and exits 0.
@@ -246,7 +246,7 @@ Expected: install succeeds; `bun test` reports `0 tests` (or "no tests found") a
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add package.json LICENSE .github/workflows/test.yml bun.lock .gitignore
 git commit -m "chore: package skeleton with bun test CI"
 ```
@@ -309,7 +309,7 @@ test("handles missing description", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/alex/Projects/opencode-orchestrate && bun test tests/inventory.test.js`
+Run: `cd /path/to/opencode-orchestrate && bun test tests/inventory.test.js`
 Expected: FAIL — cannot find module `../src/inventory.js`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -340,13 +340,13 @@ export function formatInventory(agents) {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /home/alex/Projects/opencode-orchestrate && bun test tests/inventory.test.js`
+Run: `cd /path/to/opencode-orchestrate && bun test tests/inventory.test.js`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add src/inventory.js tests/inventory.test.js
 git commit -m "feat: subagent inventory formatter"
 ```
@@ -392,7 +392,7 @@ test("marker is a stable non-empty string", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/alex/Projects/opencode-orchestrate && bun test tests/bootstrap.test.js`
+Run: `cd /path/to/opencode-orchestrate && bun test tests/bootstrap.test.js`
 Expected: FAIL — cannot find module `../src/bootstrap.js`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -429,13 +429,13 @@ ${inventoryMarkdown}
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /home/alex/Projects/opencode-orchestrate && bun test tests/bootstrap.test.js`
+Run: `cd /path/to/opencode-orchestrate && bun test tests/bootstrap.test.js`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add src/bootstrap.js tests/bootstrap.test.js
 git commit -m "feat: orchestrator bootstrap assembler"
 ```
@@ -510,7 +510,7 @@ least one high-severity issue prevents acceptance.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add prompts/worker.md prompts/work-reviewer.md
 git commit -m "feat: worker and reviewer prompts"
 ```
@@ -570,7 +570,7 @@ test("reviewer is read-only and cannot spawn tasks", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/alex/Projects/opencode-orchestrate && bun test tests/agents.test.js`
+Run: `cd /path/to/opencode-orchestrate && bun test tests/agents.test.js`
 Expected: FAIL — cannot find module `../src/agents.js`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -628,13 +628,13 @@ export function agentDefinitions(promptsDir) {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /home/alex/Projects/opencode-orchestrate && bun test tests/agents.test.js`
+Run: `cd /path/to/opencode-orchestrate && bun test tests/agents.test.js`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add src/agents.js tests/agents.test.js
 git commit -m "feat: programmatic worker and reviewer agent definitions"
 ```
@@ -761,7 +761,7 @@ export default { id: "orchestrate", server: OrchestratePlugin };
 
 - [ ] **Step 3: Verify the package still loads and tests pass**
 
-Run: `cd /home/alex/Projects/opencode-orchestrate && bun test`
+Run: `cd /path/to/opencode-orchestrate && bun test`
 Expected: PASS (all unit tests from Tasks 2/3/5 still green; the plugin file has no unit test but must parse — confirm no import/syntax error by also running `bun build .opencode/plugins/orchestrate.js --target node > /dev/null` and expecting exit 0).
 
 - [ ] **Step 4: Confirm export form and filter match the spike**
@@ -771,7 +771,7 @@ Verify the file ends with `export default { id: "orchestrate", server: Orchestra
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add .opencode/plugins/orchestrate.js
 git commit -m "feat: plugin entry wiring config and bootstrap hooks"
 ```
@@ -872,7 +872,7 @@ Confirm: the folder is exactly `skills/orchestrating-subagents/`, `name` equals 
 
 Run:
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 awk '/^description:/{print length($0)}' skills/orchestrating-subagents/SKILL.md
 ```
 Expected: a number well under 1024.
@@ -880,7 +880,7 @@ Expected: a number well under 1024.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add skills/orchestrating-subagents/SKILL.md
 git commit -m "feat: orchestrating-subagents PDCA skill"
 ```
@@ -935,7 +935,7 @@ any check fails, fix the underlying task before committing.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/alex/Projects/opencode-orchestrate
+cd /path/to/opencode-orchestrate
 git add README.md
 git commit -m "docs: README with install, usage, troubleshooting; record smoke result"
 ```
