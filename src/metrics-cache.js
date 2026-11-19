@@ -24,6 +24,7 @@ import {
   indexSuperIndex,
   KEY_METRICS,
   metricFetchedAt,
+  SUPERINDEX_FORMAT,
 } from "./metrics.js";
 
 export const TTL_MS = 48 * 3600_000;
@@ -115,16 +116,20 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
   const report = { superindex: "fresh", scores: "fresh", ids: "fresh" };
 
   const jobs = [];
-  if (due(prev.superindex)) {
+  // A block of an earlier format is due whatever its age: its serving facts
+  // may belong to another model (see superindexOf). If the refetch fails it
+  // is kept, still due, and read with those facts withheld.
+  if (due(prev.superindex) || prev.superindex?.format !== SUPERINDEX_FORMAT) {
     jobs.push(
       getJson(fetch, SUPERINDEX_URL, timeoutMs)
         .then((json) => {
           const index = indexSuperIndex(json);
-          // Count models, not keys: a row is indexed by basename and again by
-          // provider/basename, and only basenames are free of "/".
-          const n = Object.keys(index).filter((k) => !k.includes("/")).length;
+          // Count models, not keys: a row is indexed by basename, by
+          // provider/basename and by raw id ("=..."), and only basenames are
+          // free of both "/" and a leading "=".
+          const n = Object.keys(index).filter((k) => !k.includes("/") && !k.startsWith("=")).length;
           if (n < MIN_SUPERINDEX_MODELS) throw new Error(`only ${n} models`);
-          next.superindex = { fetchedAt: now, index };
+          next.superindex = { fetchedAt: now, format: SUPERINDEX_FORMAT, index };
           report.superindex = "updated";
         })
         .catch((e) => {

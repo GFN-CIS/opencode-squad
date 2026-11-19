@@ -10,8 +10,11 @@
 //
 // Neither source uses opencode's ids, and they disagree with each other
 // (`zai-coding-plan/glm-5.3` vs `zhipuai/glm-5.3` vs `z-ai/glm-5.3`), so
-// matching compares the normalized model part. A SuperIndex row whose
-// provider/model is exactly the requested id still wins over a shared basename.
+// matching compares the normalized model part. A SuperIndex row whose raw
+// provider/model id is exactly the requested one (case aside) wins over any
+// normalized match, so two ids that differ only by punctuation stay apart.
+// A normalized match that several rows share keeps only the facts they all
+// agree on and names the candidates.
 
 import { formatContextSize } from "./context.js";
 import { squadRoleOf } from "./workers.js";
@@ -96,17 +99,36 @@ export function keyCandidates(id, suffixes = SAME_MODEL_SUFFIXES) {
 }
 
 /**
- * For each candidate key, a row under the id's own provider (`provider/key`,
- * only SuperIndex is indexed that way) wins over the shared basename.
- * `key` is always the basename key.
+ * The current shape of the SuperIndex index (see indexSuperIndex). A cached
+ * block without it was written by an earlier version: see superindexOf.
+ */
+export const SUPERINDEX_FORMAT = 2;
+
+/**
+ * Index key of a raw provider/model id: lowercased, no punctuation folded.
+ * The "=" prefix keeps it apart from normalized keys, which never contain one.
+ *
+ * @param {string} id
+ */
+function exactKey(id) {
+  return `=${String(id).toLowerCase()}`;
+}
+
+/**
+ * The raw id itself first (only SuperIndex is indexed that way), then for
+ * each candidate key a row under the id's own provider (`provider/key`),
+ * then the shared basename. `key` is always the basename key.
  *
  * @template T
  * @param {string} id
- * @param {Record<string, T>} index  keyed by modelKey, optionally also by provider/modelKey
+ * @param {Record<string, T>} index  keyed by modelKey, optionally also by
+ *   provider/modelKey and exactKey
  * @returns {{key: string, entry: T} | null}
  */
 export function lookup(id, index) {
   if (!index) return null;
+  const raw = exactKey(id);
+  if (Object.hasOwn(index, raw)) return { key: modelKey(id), entry: index[raw] };
   const provider = providerKey(id);
   for (const key of keyCandidates(id)) {
     const exact = provider ? `${provider}/${key}` : null;
@@ -130,26 +152,48 @@ function ownsRow(id, key) {
 }
 
 /**
- * What a model is served at: its context limit and list price, the same in
- * the summary and the full view. The catalog's limit comes first; a row's
- * limit and price count only when the row is the model's own, and a tier on
- * its base model's row says both are unknown instead of staying silent. A
- * `-free` tier is free whatever price its row lists.
+ * What a model is served at: its context limit, how it is paid for and the
+ * source's list price — one helper, so the summary and the full view agree.
+ * The catalog's limit comes first; a row's limit and price count only when
+ * the row is the model's own, a tier on its base model's row says both are
+ * unknown instead of staying silent, and so does a match several rows share
+ * where they disagree. A `-free` tier is free whatever price its row lists.
+ * `billing` is the user's plan (null: metered API); `listed` marks `price`
+ * as SuperIndex's list price, which is reference data, not the user's bill.
  *
  * @param {string} id  opencode id
  * @param {SiEntry|null} entry  matched SuperIndex row
- * @param {number|null} [context]  opencode catalog context limit
- * @returns {{ctx: string|null, price: string|null, listed: boolean}}
+ * @param {BillingContext & {context?: number|null}} [opts]
+ *   context: opencode catalog context limit
+ * @returns {{ctx: string|null, billing: string|null, price: string|null, listed: boolean}}
  */
-function servingFacts(id, entry, context) {
+function servingFacts(id, entry, { context = null, note, plans, authTypes } = {}) {
   const own = entry !== null && ownsRow(id, modelKey(entry.id));
+  const ambiguous = Boolean(entry?.candidates);
   const limit = context ?? (own ? entry.context : null);
-  const ctx = limit ? `ctx ${formatContextSize(limit)}` : entry && !own ? "tier ctx unknown" : null;
-  if (/-free$/.test(modelKey(id))) return { ctx, price: "free", listed: false };
-  if (entry && !own) return { ctx, price: "tier price unknown", listed: false };
-  if (entry?.priceIn == null) return { ctx, price: null, listed: false };
-  return { ctx, price: `$${entry.priceIn}/$${entry.priceOut ?? "?"}`, listed: true };
+  const ctx = limit
+    ? `ctx ${formatContextSize(limit)}`
+    : entry && !own
+      ? "tier ctx unknown"
+      : ambiguous
+        ? "ctx unknown (ambiguous match)"
+        : null;
+  const paid = billingFor(id, { note, plans, authTypes });
+  const billing = paid.api ? null : `subscription: ${paid.plan ?? "plan not set"}`;
+  /** @param {string|null} price @param {boolean} [listed] */
+  const out = (price, listed = false) => ({ ctx, billing, price, listed });
+  if (/-free$/.test(modelKey(id))) return out("free");
+  if (entry && !own) return out("tier price unknown");
+  if (entry?.priceIn == null) return out(ambiguous ? "price unknown (ambiguous match)" : null);
+  return out(`$${entry.priceIn}/$${entry.priceOut ?? "?"}`, true);
 }
+
+/**
+ * @typedef {{note?: any, plans?: Record<string, unknown>|null,
+ *   authTypes?: Record<string, string>|null}} BillingContext
+ *   note: the model's model_data.json entry; plans: its `providers`;
+ *   authTypes: provider -> opencode auth type
+ */
 
 /** @param {unknown} v */
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -157,27 +201,27 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 /**
  * @typedef {{id: string, score: number|null, rank: number|null,
  *   status: string|null, confidence: number|null, priceIn: number|null,
- *   priceOut: number|null, context: number|null}} SiEntry
+ *   priceOut: number|null, context: number|null, candidates?: string[]}} SiEntry
+ *   candidates: set when several raw ids share this entry's key; the entry
+ *   then keeps the lowest id's scores and only the serving facts all agree on.
  */
 
 /**
- * SuperIndex models.json -> compact index keyed by modelKey, and by
- * provider/modelKey for an exact match. Rows of several providers sharing a
- * basename keep their price and context under their own provider only: the
- * basename entry (the lowest id, so row order does not matter) keeps a price
- * or context only where all of them agree.
+ * SuperIndex models.json -> compact index keyed three ways: by the raw id
+ * (exactKey), by provider/modelKey, and by modelKey. Rows that share a
+ * normalized key are merged there: the entry (the lowest id, so row order
+ * does not matter) keeps a price or context only where all of them agree and
+ * lists the candidates, while each row stays reachable under its raw id.
  *
  * @param {any} json
  * @returns {Record<string, SiEntry>}
  */
 export function indexSuperIndex(json) {
-  /** @type {Map<string, SiEntry[]>} */
-  const byKey = new Map();
+  /** @type {SiEntry[]} */
+  const rows = [];
   for (const m of Array.isArray(json?.models) ? json.models : []) {
     if (typeof m?.id !== "string") continue;
-    const key = modelKey(m.id);
-    if (!byKey.has(key)) byKey.set(key, []);
-    byKey.get(key)?.push({
+    rows.push({
       id: m.id,
       score: num(m.si_score),
       rank: num(m.rank),
@@ -188,22 +232,68 @@ export function indexSuperIndex(json) {
       context: num(m.context_window),
     });
   }
+  rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   /** @type {Record<string, SiEntry>} */
   const out = {};
-  for (const [key, rows] of byKey) {
-    rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  /** @param {(r: SiEntry) => string|null} keyOf */
+  const indexBy = (keyOf) => {
+    /** @type {Map<string, SiEntry[]>} */
+    const groups = new Map();
     for (const r of rows) {
-      const provider = providerKey(r.id);
-      if (provider) out[`${provider}/${key}`] ??= r;
+      const k = keyOf(r);
+      if (k === null) continue;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)?.push(r);
     }
-    /** @param {"priceIn"|"priceOut"|"context"} f */
-    const agreed = (f) => (rows.every((r) => r[f] === rows[0][f]) ? rows[0][f] : null);
-    out[key] = {
-      ...rows[0],
-      priceIn: agreed("priceIn"),
-      priceOut: agreed("priceOut"),
-      context: agreed("context"),
-    };
+    for (const [k, group] of groups) out[k] = mergeRows(group);
+  };
+  indexBy((r) => exactKey(r.id));
+  indexBy((r) => {
+    const provider = providerKey(r.id);
+    return provider ? `${provider}/${modelKey(r.id)}` : null;
+  });
+  indexBy((r) => modelKey(r.id));
+  return out;
+}
+
+/**
+ * One index entry for rows sharing a key (sorted by id).
+ *
+ * @param {SiEntry[]} rows
+ * @returns {SiEntry}
+ */
+function mergeRows(rows) {
+  if (rows.length === 1) return rows[0];
+  /** @param {"priceIn"|"priceOut"|"context"} f */
+  const agreed = (f) => (rows.every((r) => r[f] === rows[0][f]) ? rows[0][f] : null);
+  return {
+    ...rows[0],
+    priceIn: agreed("priceIn"),
+    priceOut: agreed("priceOut"),
+    context: agreed("context"),
+    candidates: rows.map((r) => r.id),
+  };
+}
+
+/**
+ * The SuperIndex index to read from a metrics cache. A block of an earlier
+ * format attributed a row to a requested id by normalized key only, so its
+ * prices and context limits may be another model's: until it is refetched
+ * (refreshMetrics treats it as due) only its basename scores are used, with
+ * no serving facts.
+ *
+ * @param {MetricsData|null|undefined} data
+ * @returns {Record<string, SiEntry>|undefined}
+ */
+export function superindexOf(data) {
+  const block = data?.superindex;
+  if (!block?.index) return undefined;
+  if (block.format === SUPERINDEX_FORMAT) return block.index;
+  /** @type {Record<string, SiEntry>} */
+  const out = {};
+  for (const [k, e] of Object.entries(block.index)) {
+    if (k.includes("/") || k.startsWith("=")) continue;
+    out[k] = { ...e, priceIn: null, priceOut: null, context: null };
   }
   return out;
 }
@@ -363,7 +453,9 @@ function fmtValues(values) {
 
 /**
  * @typedef {object} MetricsData
- * @property {{fetchedAt?: number, index?: ReturnType<typeof indexSuperIndex>}} [superindex]
+ * @property {{fetchedAt?: number, format?: number,
+ *   index?: ReturnType<typeof indexSuperIndex>}} [superindex]
+ *   no `format` (or another one): written by an earlier version; see superindexOf.
  * @property {{fetchedAt?: number, fetchedAtByMetric?: Record<string, number>,
  *   byMetric?: Record<string, ReturnType<typeof indexScoreRows>>}} [scores]
  *   `fetchedAt` is the single timestamp of the old cache format; see metricFetchedAt.
@@ -397,7 +489,7 @@ export function formatSummary({
   data,
   now,
 }) {
-  const si = data?.superindex?.index;
+  const si = superindexOf(data);
   const byMetric = data?.scores?.byMetric ?? {};
   const header = [
     `Model metrics for ${models.length} model(s).`,
@@ -407,12 +499,21 @@ export function formatSummary({
       "setting the leaderboard ran (mostly max effort) — NOT at your agents' variant. " +
       "Where a model was run at several settings, all are listed. A benchmark missing " +
       "from a line was not measured for that model — it is not a zero. " +
-      "Prices are list $ per 1M tokens in/out (metered API). `subscription: <plan>` " +
+      "Prices are SuperIndex list prices, $ per 1M tokens in/out: reference for metered " +
+      "API, not necessarily what your provider bills. `subscription: <plan>` " +
       "is a flat-rate plan: ~$0 per token, bounded by the plan's usage limits instead.",
     `Benchmarks: ${KEY_METRICS.map((m) => m.label).join(", ")}. Every metric for up to ` +
       "6 models: squad_metrics({models: [...], full: true}).",
     "",
   ];
+  if (si && data?.superindex?.format !== SUPERINDEX_FORMAT) {
+    header.splice(
+      -1,
+      0,
+      "The cached SuperIndex data predates exact-id matching: its list prices and context " +
+        "limits are withheld until it is refetched; its scores are matched by model name only.",
+    );
+  }
   if (!si && !Object.keys(byMetric).length) {
     header.push(
       "Metrics are unavailable right now (first fetch has not completed or both sources " +
@@ -437,10 +538,14 @@ export function formatSummary({
     // The model's own facts. A list price read off another tier's row is that
     // tier's price, whether or not that model is in this request.
     const own = [];
-    const facts = servingFacts(m.id, s?.entry ?? null, m.context);
+    const facts = servingFacts(m.id, s?.entry ?? null, {
+      context: m.context,
+      note,
+      plans,
+      authTypes,
+    });
     if (facts.ctx) own.push(facts.ctx);
-    const billing = billingFor(m.id, { note, plans, authTypes });
-    if (!billing.api) own.push(`subscription: ${billing.plan ?? "plan not set"}`);
+    if (facts.billing) own.push(facts.billing);
     else if (facts.price) own.push(facts.price);
     const rule = info ? [`owner rule: ${info}`] : [];
 
@@ -450,7 +555,8 @@ export function formatSummary({
       continue;
     }
     const provider = m.id.split("/")[0];
-    const signature = `${provider}|${s?.key ?? ""}|${hits.map((h) => h?.key ?? "").join("|")}`;
+    // The SuperIndex row by id: two exact ids that normalize alike are two rows.
+    const signature = `${provider}|${s?.entry.id ?? ""}|${hits.map((h) => h?.key ?? "").join("|")}`;
     const same = firstBySignature.get(signature);
     if (same) {
       lines.push(
@@ -467,6 +573,12 @@ export function formatSummary({
       else if (e.rank !== null) parts.push(`SI ${e.score} #${e.rank}`);
       // Unranked scores rest on too few benchmarks to compare with ranked ones.
       else parts.push(`SI ${e.score} (provisional, conf ${e.confidence ?? "?"}%)`);
+      // Several rows answer to this id: the score is the first one's.
+      if (e.candidates) {
+        const [shown, rest] = [e.candidates.slice(0, 3), e.candidates.length - 3];
+        parts[parts.length - 1] +=
+          ` (ambiguous: ${shown.join(", ")}${rest > 0 ? `, +${rest} more` : ""})`;
+      }
     }
     parts.push(...own);
     hits.forEach((h, i) => {
@@ -488,24 +600,35 @@ export function formatSummary({
  *
  * @param {string} id  opencode id as asked
  * @param {any} detail  llmbenchmark /v1/models/{id} body (or null)
- * @param {SiEntry | null} si
- * @param {{context?: number|null}} [opts]  context: opencode catalog limit
+ * @param {SiEntry | null} si  matched row, from lookup(id, superindexOf(data))
+ * @param {BillingContext & {context?: number|null}} [opts]  context: opencode
+ *   catalog limit; the rest is how the model is paid for, as the summary has it
  * @returns {string}
  */
-export function formatDetail(id, detail, si, { context = null } = {}) {
+export function formatDetail(id, detail, si, opts = {}) {
   const head = [`## ${id}`];
   if (si) {
-    // A tier read off its base model's row: say whose row it is.
+    // A tier read off its base model's row, or a match several rows share:
+    // say whose row it is.
     const own = ownsRow(id, modelKey(si.id));
+    const whose = si.candidates
+      ? ` (ambiguous match: ${si.candidates.join(", ")}; scores of ${si.id})`
+      : own
+        ? ""
+        : ` (row of ${si.id})`;
     head.push(
-      `SuperIndex${own ? "" : ` (row of ${si.id})`}: ` +
+      `SuperIndex${whose}: ` +
         `${si.score ?? "unscored"}${si.rank !== null ? ` (#${si.rank})` : ""}, ` +
         `status ${si.status ?? "?"}, confidence ${si.confidence ?? "?"}%`,
     );
   }
-  // Price and context as the summary shows them, never the base row's for a tier.
-  const facts = servingFacts(id, si, context);
-  const serving = [facts.ctx, facts.listed ? `${facts.price} per 1M` : facts.price].filter(Boolean);
+  // Context, billing and price as the summary shows them, never the base
+  // row's for a tier. A list price is SuperIndex's, not what the user pays.
+  const facts = servingFacts(id, si, opts);
+  const price = facts.listed
+    ? `SuperIndex list price ${facts.price} per 1M (reference${facts.billing ? ", not billed on this plan" : ""})`
+    : facts.price;
+  const serving = [facts.ctx, facts.billing, price].filter(Boolean);
   if (serving.length) head.push(`Serving: ${serving.join(" · ")}`);
   const scores = Array.isArray(detail?.scores) ? detail.scores : [];
   if (!scores.length) {

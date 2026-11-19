@@ -5,8 +5,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
-import { KEY_METRICS, metricFetchedAt } from "../src/metrics.js";
+import { afterEach, describe, expect, test } from "vitest";
+import { KEY_METRICS, metricFetchedAt, SUPERINDEX_FORMAT } from "../src/metrics.js";
 import {
   fetchDetail,
   LLMBENCH_API,
@@ -44,13 +44,14 @@ function stubFetch(routes) {
   return { fetch, calls };
 }
 
-const healthy = (v = 0.5) =>
-  stubFetch((url) => {
-    if (url === SUPERINDEX_URL) return SI_BODY;
-    if (url.startsWith(`${LLMBENCH_API}/models?`)) return IDS_BODY;
-    const metric = new URL(url).searchParams.get("metric");
-    return rowsFor(metric, v);
-  });
+/** @param {string} url @param {number} [v] */
+const healthyRoute = (url, v = 0.5) => {
+  if (url === SUPERINDEX_URL) return SI_BODY;
+  if (url.startsWith(`${LLMBENCH_API}/models?`)) return IDS_BODY;
+  const metric = new URL(url).searchParams.get("metric");
+  return rowsFor(metric, v);
+};
+const healthy = (v = 0.5) => stubFetch((url) => healthyRoute(url, v));
 
 test("first refresh fetches every source and writes the cache", async () => {
   const dir = tmp();
@@ -198,4 +199,44 @@ test("fetchDetail caches per model and serves a stale copy when the fetch fails"
   });
   expect(stale.id).toBe("z-ai/glm-5.3");
   expect(await fetchDetail({ fetch: down.fetch, dir, now: 0, llmbId: "x/none" })).toBeNull();
+});
+
+describe("a SuperIndex block from an earlier cache format (#54)", () => {
+  // The previous format: no format marker, provider/basename keys only.
+  const OLD = {
+    superindex: { fetchedAt: 1000, index: { "p/m-1": { id: "p/m-1", priceIn: 1, priceOut: 2 } } },
+  };
+  const writeOld = (dir) => fs.writeFileSync(path.join(dir, "metrics.json"), JSON.stringify(OLD));
+
+  test("is refetched even within the TTL", async () => {
+    const dir = tmp();
+    writeOld(dir);
+    const { fetch, calls } = healthy();
+    const r = await refreshMetrics({ fetch, dir, now: 2000 });
+    expect(calls).toContain(SUPERINDEX_URL);
+    expect(r.superindex).toBe("updated");
+    const data = readMetrics(dir);
+    expect(data.superindex.format).toBe(SUPERINDEX_FORMAT);
+    expect(data.superindex.index["=p/m-1"]?.id).toBe("p/m-1");
+  });
+
+  test("is kept when the refetch fails, and stays due", async () => {
+    const dir = tmp();
+    writeOld(dir);
+    const failing = stubFetch((url) => (url === SUPERINDEX_URL ? 503 : healthyRoute(url)));
+    const r = await refreshMetrics({ fetch: failing.fetch, dir, now: 2000 });
+    expect(r.superindex).toMatch(/^failed/);
+    expect(readMetrics(dir).superindex).toEqual(OLD.superindex);
+    const again = healthy();
+    await refreshMetrics({ fetch: again.fetch, dir, now: 3000 });
+    expect(again.calls).toContain(SUPERINDEX_URL);
+  });
+
+  test("a current-format block within the TTL is not refetched", async () => {
+    const dir = tmp();
+    await refreshMetrics({ fetch: healthy().fetch, dir, now: 0 });
+    const { fetch, calls } = healthy();
+    await refreshMetrics({ fetch, dir, now: 1 });
+    expect(calls).not.toContain(SUPERINDEX_URL);
+  });
 });
