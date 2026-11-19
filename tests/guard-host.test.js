@@ -58,6 +58,8 @@ async function host(over = {}) {
   const notes = [];
   const interrupts = [];
   const tools = new Map();
+  /** @type {Map<string, (input: any) => unknown>} */
+  const hooks = new Map();
   const dispose = await plugin.setup({
     location: { directory: os.tmpdir() },
     options: { rate_limit_guard: { max_silence_seconds: SILENCE_S } },
@@ -65,7 +67,9 @@ async function host(over = {}) {
     agent: { list: async () => [] },
     model: { list: over.modelList ?? (async () => []) },
     session: {
-      hook: async () => {},
+      hook: async (name, callback) => {
+        hooks.set(name, callback);
+      },
       get: async ({ sessionID }) => {
         if (over.getDelayMs) await new Promise((resolve) => setTimeout(resolve, over.getDelayMs));
         return sessionID === "child" ? { id: "child", parentID: "parent", agent: "grunt-a-b" } : {};
@@ -84,7 +88,7 @@ async function host(over = {}) {
       transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
     },
   });
-  return { events, notes, interrupts, tools, dispose };
+  return { events, notes, interrupts, tools, hooks, dispose };
 }
 
 const flush = () => vi.advanceTimersByTimeAsync(0);
@@ -264,5 +268,40 @@ test("squad_patch refuses while model_data.json is unreadable, writing nothing",
   } finally {
     h.dispose();
     fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/** A model response carrying Anthropic's unified quota headers (synthetic values). */
+const quotaResponse = (sessionID, used, kind = "primary") => ({
+  sessionID,
+  kind,
+  model: { providerID: "anthropic", id: "claude-x" },
+  response: new Response("", {
+    headers: {
+      "anthropic-ratelimit-unified-representative-claim": "five_hour",
+      "anthropic-ratelimit-unified-5h-utilization": String(used),
+      "anthropic-ratelimit-unified-7d-utilization": "0.2",
+    },
+  }),
+});
+
+test("a subagent's quota crossing a band is steered into its orchestrator once", async () => {
+  const h = await host();
+  try {
+    const onResponse = h.hooks.get("http.response");
+    expect(onResponse).toBeTypeOf("function");
+    onResponse?.(quotaResponse("child", 0.85));
+    await flush();
+    expect(h.notes).toHaveLength(1);
+    expect(h.notes[0]).toMatchObject({ sessionID: "parent", delivery: "steer", resume: false });
+    expect(h.notes[0].text).toMatch(/^\[QUOTA\] anthropic: 5h 85% \(binding\), 7d 20% used\./);
+
+    onResponse?.(quotaResponse("child", 0.86)); // same band: nothing new
+    onResponse?.(quotaResponse("child", 0.97, "title")); // not a task's own call
+    onResponse?.(quotaResponse("orchestrator", 0.97)); // a top-level session: nobody to tell
+    await flush();
+    expect(h.notes).toHaveLength(1);
+  } finally {
+    h.dispose();
   }
 });

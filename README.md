@@ -434,54 +434,40 @@ The stored-session regression fixtures exercise both empty-result diagnoses thro
 
 ---
 
-## Provider-quota signal (parser landed, delivery unsolved)
+## Provider-quota signal
 
-Providers report how much of their rate-limit window is already burnt **on every successful response**, and opencode keeps none of it — so the orchestrator only learns a provider is saturated by getting a 429 from it, mid-dispatch, after paying for the work so far.
+Providers report how much of their rate-limit window is already burnt **on every successful response**, and opencode keeps none of it. Without this signal, the orchestrator learns a provider is saturated only when a 429 comes back mid-dispatch, after it has paid for the work so far.
 
-Verified live on 2026-09-01, `HTTP 200` in both cases:
+On OpenCode 2 the plugin reads those headers through the `http.response` session hook. The hook runs on a subagent's own model calls (`kind: "primary"`). The response is left untouched: the hook reads headers only, never the body, and the lookup and note run beside the transport, not in front of it.
+
+What a 200 carries, re-checked on OpenCode 2.1.3 on 2026-11-18:
 
 ```
-POST api.anthropic.com/v1/messages
+POST api.anthropic.com/v1/messages   (Anthropic OAuth)
   anthropic-ratelimit-unified-representative-claim  five_hour   <- which window binds
-  anthropic-ratelimit-unified-5h-utilization        0.07
-  anthropic-ratelimit-unified-5h-reset              1788258600
-  anthropic-ratelimit-unified-7d-utilization        0.06
-
-POST chatgpt.com/backend-api/codex/responses
-  x-codex-primary-used-percent    51    x-codex-primary-window-minutes    300
-  x-codex-secondary-used-percent  15    x-codex-secondary-window-minutes  10080
-  x-codex-credits-has-credits     True
+  anthropic-ratelimit-unified-5h-utilization        0.48
+  anthropic-ratelimit-unified-5h-reset              <epoch s>
+  anthropic-ratelimit-unified-7d-utilization        0.39
 ```
 
-Note what is reported: **used**, not remaining (Anthropic as a fraction, codex as a percent). And `primary`/`secondary` are not fixed windows — codex re-ranks them by whichever is closest to its limit, so `src/quota.js` labels windows by `window-minutes` (300 → `5h`, 10080 → `7d`) rather than by the slot they arrive in. On the Anthropic side `representative-claim` names the binding window outright.
+- **Anthropic** reports **used**, not remaining, as a fraction, and `representative-claim` names the binding window.
+- **Codex** (ChatGPT OAuth): on 2.1.3 the responses carry **no** `x-codex-*` quota headers, only an opaque turn state. `src/quota.js` still parses the 2026-09 format (percent used, windows named by `window-minutes`, since Codex re-ranks primary/secondary), so the note comes back if the headers do. Until then nothing is reported for Codex.
+- **z.ai** sends nothing of the kind.
 
-z.ai returns nothing of the kind (`alt-svc`, `ga-traceid`, `x-log-id`, plumbing), so no snapshot is recorded for it and no claim is made about it.
+A provider that sends no quota data gets no note and no claim.
 
 ### Not polluting the context
 
-Once something feeds it, the clause would ride on the `squad_session` report — no extra tool — and stay **silent** unless the binding window crossed a reporting band (60% / 80% / 95%) or sits in the top one. A flat threshold would re-print the same figure on every task result for the rest of the session; transitions carry the same information for a fraction of the tokens, and the top band keeps repeating because there the exact number changes the decision.
-
-At the utilizations actually observed above (7% and 51%) it emits nothing at all:
+The note is steered into the subagent's orchestrator session as a synthetic message. It stays **silent** unless the binding window crosses a band: 60%, 80% or 95%. Inside the top band it repeats only after a further 2-point climb. A flat threshold would repeat the same figure on every model call for the rest of the session. Band transitions carry the same information in far fewer tokens.
 
 ```
 [QUOTA] anthropic: 5h 83% (binding), 7d 6% used. The 5h window resets in 2h 25m.
 
-[QUOTA] openai: 5h 97% (binding), 7d 15% used. The 5h window resets in 2h 21m.
-Credits are exhausted on this plan. Route further work to a different provider
-unless it must run here.
+[QUOTA] anthropic: 5h 97% (binding), 7d 15% used. The 5h window resets in 2h 21m.
+Route further work to a different provider unless it must run here.
 ```
 
-### Delivery: two measured dead ends
-
-`src/quota.js` parses and gates; **nothing currently feeds it.** Getting response headers out of opencode has no sanctioned hook — `chat.headers` is request-side, `ProviderHook` exposes only `{id, models}` (`ModelV2` is metadata, not an executable model), and the SDK has no usage/quota endpoint. Two seams were tried and measured:
-
-1. **Wrapping `globalThis.fetch`.** Installed correctly (`patched=true`, `fetch` no longer native, host regex verified) and was then called for **zero** requests. ai-sdk only falls back to `() => globalThis.fetch` when `options.fetch` is unset, and something upstream — the OAuth plugin — already sets it. Dead, not merely ugly.
-
-2. **Injecting `provider.<id>.options.fetch` from the `config` hook.** This *is* the documented ai-sdk seam (`new AY(H, {provider, url, headers, fetch: W.fetch, ...})` in the bundle) and a function can only get there from code. But at `config` time the OAuth plugin has not yet claimed the slot, so wrapping finds it empty, takes it first, and delegates to `globalThis.fetch` — dropping the token injection. Measured: a trivial session hung past a 240s timeout with the call live, and completed in **9.8s** with it disabled.
-
-The untried third option is to intercept the *later* assignment — a `defineProperty` accessor on `options` that wraps whatever the auth plugin assigns — leaving the transport theirs and reading headers on the way past. Unimplemented and unverified; a draft of the wrapper is kept out of tree.
-
-Worth weighing before building it: plugin initialisation order in opencode is undocumented and was established here only by measurement, so each attempt rests on behaviour that can change silently. A response-header hook upstream would make all of this unnecessary.
+Earlier attempts, kept here so nobody repeats them: wrapping `globalThis.fetch` saw zero model requests, because the OAuth plugin sets its own `fetch`. Injecting `provider.<id>.options.fetch` from the V1 `config` hook took the slot before the OAuth plugin did and dropped its token injection. A trivial session then hung for 240s instead of finishing in 9.8s.
 
 ---
 

@@ -206,6 +206,15 @@ though: capability and risk (§1a) still gate the choice; billing only breaks
 ties between comparably-fit candidates, or nudges you to route more volume to
 the flat-rate option when both would do.
 
+**Provider quota.** When a grunt's or drill's model calls show its provider's
+rate-limit window at 60%, 80% or 95% used, a `[QUOTA]` note arrives in your
+turn, once per band. At 95% it repeats as the figure climbs. It names the binding window and when it
+resets. Below 95%, treat it as a tie-breaker: between comparably fit candidates,
+prefer one on another provider. At 95%, route new work elsewhere unless it must
+run there: the next 429 stops the task midway, after you have paid for it. No
+note means nothing was reported, not that quota is fine: some providers send no
+quota data.
+
 **Context pressure is not a panic button.** Your context size (from
 `squad_session` with no arguments) exists so you weigh genuinely heavy work — something that would ingest or
 generate a lot of raw material — against offloading it. It is not a trigger to
