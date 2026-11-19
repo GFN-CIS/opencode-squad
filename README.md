@@ -85,7 +85,7 @@ Sources, both public and keyless:
 
 Neither source uses opencode's ids (`zai-coding-plan/glm-5.3` is `zhipuai/glm-5.3` in one and `z-ai/glm-5.3` in the other), so matching compares the model part only. Serving tiers that keep the same weights (`-fast`, `-ultrafast`, `-highspeed`, `-free`, `-latest`, `-preview`, date suffixes) fall back to the base model; `glm-5.3` never matches `glm-5.3-flash`. Scores are at the setting the leaderboard ran (mostly max effort), not at your agent's variant — the output says so, and lists every setting where there are several.
 
-Fetching: at plugin start and then whenever data is older than **48 hours** (checked every 4h), each source under its own 8s timeout, in parallel. Data is cached in the OS temp dir (`$TMPDIR/opencode-squad-<uid>/`). A source that fails or answers with an empty or shrunken body keeps its previous data — an empty 200 never overwrites good numbers. Per-model detail is fetched on request and cached under the same TTL.
+Fetching: at plugin start and then whenever data is older than **48 hours** (checked every 4h), each source under its own 8s timeout, in parallel. Data is cached in the OS temp dir (`$TMPDIR/opencode-squad-<uid>/`). A source that fails or answers with an empty or shrunken body keeps its previous data — an empty 200 never overwrites good numbers. Each llmbenchmark metric ages on its own: one that failed keeps its old numbers and age, is retried at the next 4h check, and the summary shows its age next to the others. Per-model detail is fetched on request and cached under the same TTL.
 
 ### `model_data.json`: your notes per model
 

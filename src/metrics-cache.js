@@ -4,6 +4,9 @@
 // TTL_MS. Each source is fetched in parallel under its own timeout and merged
 // into the cache on its own: a source that fails, or answers 200 with an
 // empty or shrunken body, keeps its previous data instead of overwriting it.
+// The llmbenchmark scores are one request per key metric, and each metric
+// ages on its own: a failed metric keeps its old rows with their old
+// timestamp, so it stays due and is retried at the next check.
 // That is the exact failure the old Artificial Analysis cron had — a free
 // endpoint returned nulls and the daily job committed them over good data.
 //
@@ -15,7 +18,13 @@ import os from "node:os";
 import path from "node:path";
 
 import { writeFileAtomic } from "./fs-atomic.js";
-import { indexModelIds, indexScoreRows, indexSuperIndex, KEY_METRICS } from "./metrics.js";
+import {
+  indexModelIds,
+  indexScoreRows,
+  indexSuperIndex,
+  KEY_METRICS,
+  metricFetchedAt,
+} from "./metrics.js";
 
 export const TTL_MS = 48 * 3600_000;
 const FETCH_TIMEOUT_MS = 8000;
@@ -121,10 +130,13 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
         }),
     );
   }
-  if (due(prev.scores)) {
+  const dueMetrics = KEY_METRICS.map(({ metric }) => metric).filter(
+    (metric) => force || !isFresh({ fetchedAt: metricFetchedAt(prev.scores, metric) }, now),
+  );
+  if (dueMetrics.length) {
     jobs.push(
       Promise.all(
-        KEY_METRICS.map(({ metric }) =>
+        dueMetrics.map((metric) =>
           getJson(
             fetch,
             `${LLMBENCH_API}/scores?metric=${encodeURIComponent(metric)}`,
@@ -136,17 +148,27 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
         ),
       ).then((results) => {
         const byMetric = { ...(prev.scores?.byMetric ?? {}) };
+        // Start from the resolved times so an old-format cache keeps its age.
+        /** @type {Record<string, number>} */
+        const fetchedAtByMetric = {};
+        for (const { metric } of KEY_METRICS) {
+          const at = metricFetchedAt(prev.scores, metric);
+          if (typeof at === "number") fetchedAtByMetric[metric] = at;
+        }
         const failed = [];
         for (const [metric, index] of results) {
-          // An empty 200 is a failure too: keep what we had for this metric.
-          if (index && Object.keys(index).length) byMetric[metric] = index;
-          else failed.push(metric);
+          // An empty 200 is a failure too: keep what we had for this metric,
+          // and its age, so it is retried at the next check.
+          if (index && Object.keys(index).length) {
+            byMetric[metric] = index;
+            fetchedAtByMetric[metric] = now;
+          } else failed.push(metric);
         }
         if (failed.length === results.length) {
           report.scores = `failed: no metric returned rows`;
           return;
         }
-        next.scores = { fetchedAt: now, byMetric };
+        next.scores = { fetchedAtByMetric, byMetric };
         report.scores = failed.length ? `updated (kept old: ${failed.join(", ")})` : "updated";
       }),
     );

@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { KEY_METRICS } from "../src/metrics.js";
+import { KEY_METRICS, metricFetchedAt } from "../src/metrics.js";
 import {
   fetchDetail,
   LLMBENCH_API,
@@ -108,6 +108,57 @@ test("an empty 200 for one metric keeps that metric's old rows", async () => {
   const by = readMetrics(dir).scores.byMetric;
   expect(by.tbench_4_0_accuracy["m-1"].values[0].value).toBe(0.5);
   expect(by.epoch_apex_agents["m-1"].values[0].value).toBe(0.9);
+});
+
+test("a failed metric keeps its old age and is retried at the next check", async () => {
+  const dir = tmp();
+  await refreshMetrics({ fetch: healthy(0.5).fetch, dir, now: 0 });
+  const partial = stubFetch((url) => {
+    if (url === SUPERINDEX_URL) return SI_BODY;
+    if (url.startsWith(`${LLMBENCH_API}/models?`)) return IDS_BODY;
+    const metric = new URL(url).searchParams.get("metric");
+    return metric === "tbench_4_0_accuracy" ? 503 : rowsFor(metric, 0.9);
+  });
+  const t1 = TTL_MS + 1;
+  const r = await refreshMetrics({ fetch: partial.fetch, dir, now: t1 });
+  expect(r.scores).toBe("updated (kept old: tbench_4_0_accuracy)");
+  const scores = readMetrics(dir).scores;
+  // The failed metric keeps its old rows and its old age; the others are new.
+  expect(scores.byMetric.tbench_4_0_accuracy["m-1"].values[0].value).toBe(0.5);
+  expect(metricFetchedAt(scores, "tbench_4_0_accuracy")).toBe(0);
+  expect(metricFetchedAt(scores, "epoch_apex_agents")).toBe(t1);
+
+  // Next scheduled check (4h later): only the failed metric is due.
+  const next = healthy(0.7);
+  const r2 = await refreshMetrics({ fetch: next.fetch, dir, now: t1 + 4 * 3600_000 });
+  expect(next.calls).toEqual([`${LLMBENCH_API}/scores?metric=tbench_4_0_accuracy`]);
+  expect(r2).toEqual({ superindex: "fresh", scores: "updated", ids: "fresh" });
+  const after = readMetrics(dir).scores;
+  expect(after.byMetric.tbench_4_0_accuracy["m-1"].values[0].value).toBe(0.7);
+  expect(after.byMetric.epoch_apex_agents["m-1"].values[0].value).toBe(0.9);
+  expect(metricFetchedAt(after, "epoch_apex_agents")).toBe(t1);
+});
+
+test("a cache file in the old single-timestamp format is read and aged as before", async () => {
+  const dir = tmp();
+  const byMetric = Object.fromEntries(
+    KEY_METRICS.map(({ metric }) => [metric, { "m-1": { id: "q/m-1", values: [{ value: 0.1 }] } }]),
+  );
+  fs.writeFileSync(
+    path.join(dir, "metrics.json"),
+    JSON.stringify({ scores: { fetchedAt: 0, byMetric } }),
+  );
+  const within = healthy();
+  const r = await refreshMetrics({ fetch: within.fetch, dir, now: TTL_MS - 1 });
+  expect(r.scores).toBe("fresh");
+  expect(within.calls.filter((u) => u.includes("/scores?"))).toHaveLength(0);
+
+  const at = healthy(0.6);
+  const r2 = await refreshMetrics({ fetch: at.fetch, dir, now: TTL_MS });
+  expect(r2.scores).toBe("updated");
+  expect(at.calls.filter((u) => u.includes("/scores?"))).toHaveLength(KEY_METRICS.length);
+  const scores = readMetrics(dir).scores;
+  for (const { metric } of KEY_METRICS) expect(metricFetchedAt(scores, metric)).toBe(TTL_MS);
 });
 
 test("fetchDetail caches per model and serves a stale copy when the fetch fails", async () => {

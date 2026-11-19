@@ -257,6 +257,42 @@ function fmtAge(at, now) {
   return h < 1 ? "<1h ago" : `${h}h ago`;
 }
 
+/**
+ * When one key metric's rows were last fetched. Each metric is refreshed on
+ * its own (a failed request keeps the old rows and their old age), so its
+ * time lives in `fetchedAtByMetric`. A cache written before that has only
+ * the block-wide `fetchedAt`, which stands for every metric it holds rows for.
+ *
+ * @param {MetricsData["scores"] | null | undefined} scores
+ * @param {string} metric
+ * @returns {number | undefined}  undefined: never fetched
+ */
+export function metricFetchedAt(scores, metric) {
+  const own = scores?.fetchedAtByMetric?.[metric];
+  if (typeof own === "number") return own;
+  const legacy = scores?.fetchedAt;
+  return typeof legacy === "number" && scores?.byMetric?.[metric] ? legacy : undefined;
+}
+
+/**
+ * Age of the llmbenchmark rows the summary shows: the newest one, then every
+ * metric whose rows are older than that, so a stale score is never passed off
+ * as freshly fetched.
+ *
+ * @param {MetricsData["scores"] | null | undefined} scores
+ * @param {number} now
+ */
+function fmtScoresAge(scores, now) {
+  const ages = KEY_METRICS.flatMap(({ metric, label }) => {
+    const at = metricFetchedAt(scores, metric);
+    return typeof at === "number" ? [{ label, at, age: fmtAge(at, now) }] : [];
+  });
+  if (!ages.length) return fmtAge(undefined, now);
+  const newest = ages.reduce((a, b) => (b.at > a.at ? b : a)).age;
+  const older = ages.filter((a) => a.age !== newest).map((a) => `${a.label}: ${a.age}`);
+  return older.length ? `${newest} (${older.join(", ")})` : newest;
+}
+
 /** @param {Array<{value:number, setting:string|null}>} values */
 function fmtValues(values) {
   if (values.length === 1) return fmtVal(values[0].value);
@@ -266,7 +302,9 @@ function fmtValues(values) {
 /**
  * @typedef {object} MetricsData
  * @property {{fetchedAt?: number, index?: ReturnType<typeof indexSuperIndex>}} [superindex]
- * @property {{fetchedAt?: number, byMetric?: Record<string, ReturnType<typeof indexScoreRows>>}} [scores]
+ * @property {{fetchedAt?: number, fetchedAtByMetric?: Record<string, number>,
+ *   byMetric?: Record<string, ReturnType<typeof indexScoreRows>>}} [scores]
+ *   `fetchedAt` is the single timestamp of the old cache format; see metricFetchedAt.
  * @property {{fetchedAt?: number, index?: Record<string, string>}} [ids]
  */
 
@@ -302,7 +340,7 @@ export function formatSummary({
   const header = [
     `Model metrics for ${models.length} model(s).`,
     `SuperIndex (superindex.app, CC-BY-4.0): fetched ${fmtAge(data?.superindex?.fetchedAt, now)}. ` +
-      `llmbenchmark.ai: fetched ${fmtAge(data?.scores?.fetchedAt, now)}.`,
+      `llmbenchmark.ai: fetched ${fmtScoresAge(data?.scores, now)}.`,
     "SI = SuperIndex composite score (#rank). Benchmarks are 0-1, measured at the " +
       "setting the leaderboard ran (mostly max effort) — NOT at your agents' variant. " +
       "Where a model was run at several settings, all are listed. A benchmark missing " +
