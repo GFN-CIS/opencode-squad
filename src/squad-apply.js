@@ -107,6 +107,56 @@ function physicalPath(file) {
 }
 
 /**
+ * Every agent file name OpenCode could load from `dir`: it reads every .md
+ * file below the agent dir, recursively, and names each by its relative path, so a file in a
+ * subdirectory is an agent name too. Symlinked directories are followed once
+ * each. A directory that cannot be listed is returned in `unlisted` (a missing
+ * top-level `dir` is not: there are no agents yet).
+ *
+ * @param {string} dir
+ * @returns {{names: string[], unlisted: string[]}}
+ */
+function listAgentFiles(dir) {
+  /** @type {string[]} */
+  const names = [];
+  /** @type {string[]} */
+  const unlisted = [];
+  const seen = new Set();
+  /** @param {string} rel */
+  const walk = (rel) => {
+    const abs = rel ? path.join(dir, rel) : dir;
+    /** @type {fs.Dirent[]} */
+    let entries;
+    try {
+      const real = fs.realpathSync(abs);
+      if (seen.has(real)) return;
+      seen.add(real);
+      entries = fs.readdirSync(abs, { withFileTypes: true });
+    } catch (e) {
+      const code = /** @type {NodeJS.ErrnoException} */ (e)?.code;
+      if (!rel && code === "ENOENT") return;
+      unlisted.push(`${abs} (${code ?? "error"})`);
+      return;
+    }
+    for (const ent of entries) {
+      const name = rel ? `${rel}/${ent.name}` : ent.name;
+      let isDir = ent.isDirectory();
+      if (ent.isSymbolicLink()) {
+        try {
+          isDir = fs.statSync(path.join(dir, name)).isDirectory();
+        } catch {
+          isDir = false; // dangling: a file name at most
+        }
+      }
+      if (isDir) walk(name);
+      else if (ent.name.endsWith(".md")) names.push(name);
+    }
+  };
+  walk("");
+  return { names, unlisted };
+}
+
+/**
  * Targets that reach one physical file under another agent file's name: two
  * symlinks onto one file, or a link onto a sibling agent. Writing both would
  * leave one agent with the other's configuration while both report success.
@@ -125,20 +175,19 @@ function sharedDestinations(dir, targets) {
     if (!reach.has(real)) reach.set(real, new Set());
     reach.get(real)?.add(name);
   };
-  /** @type {string[]} */
-  let names = [];
-  try {
-    // OpenCode loads agent/**/*.md and names each by its relative path, so a
-    // file in a subdirectory is another agent name that can share the file.
-    names = fs
-      .readdirSync(dir, { recursive: true, encoding: "utf8" })
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => f.split(path.sep).join("/"));
-  } catch {
-    // No agent dir yet: only the targets themselves can collide.
-  }
+  const { names, unlisted } = listAgentFiles(dir);
   for (const name of new Set([...names, ...targets])) add(name);
   const out = [];
+  // A tree we could not list completely proves nothing about uniqueness:
+  // every target is held back, and the gap is named.
+  if (unlisted.length && targets.length) {
+    out.push({
+      names: [...targets].sort(),
+      line:
+        `cannot list ${unlisted.join(", ")}, so whether ${[...targets].sort().join(", ")} ` +
+        "share a file with an agent there is unknown",
+    });
+  }
   for (const [real, set] of reach) {
     if (set.size < 2 || !targets.some((t) => set.has(t))) continue;
     const names = [...set].sort();
