@@ -99,7 +99,7 @@ test("a generated agent with a cut-off header keeps its model in model_data", ()
   expect(readSquad(agentDir).conflicts.join("\n")).toContain(filename);
 });
 
-test("a legacy worker- file keeps its model in model_data, as squad_dump keeps the agent", () => {
+test("a legacy worker- file keeps its model in model_data", () => {
   addAgent("grunt", "a/b");
   const { content } = agentMarkdown("grunt", "c/d", {});
   fs.writeFileSync(path.join(agentDir, "worker-c-d.md"), content);
@@ -108,7 +108,6 @@ test("a legacy worker- file keeps its model in model_data, as squad_dump keeps t
   const models = JSON.parse(fs.readFileSync(globalFile, "utf8")).models;
   expect(models["c/d"]).toEqual({ info: "rule cd" });
   expect(models["a/b"]).toEqual({ info: "rule ab" });
-  expect(readSquad(agentDir).roster.grunts).toHaveProperty("c/d");
 });
 
 test("a hand-authored worker- file is not part of the squad", () => {

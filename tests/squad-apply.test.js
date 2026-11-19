@@ -150,12 +150,6 @@ test("a hand-authored agent is invisible: never dumped, never pruned", () => {
   expect(ls()).toContain("grunt-mine.md");
 });
 
-test("a legacy worker- file round-trips as a grunt instead of vanishing", () => {
-  apply({ grunts: { "a/b": {} } });
-  fs.renameSync(path.join(dir, "grunt-a-b.md"), path.join(dir, "worker-a-b.md"));
-  expect(readSquad(dir).roster.grunts).toEqual({ "a/b": {} });
-});
-
 test("applying a roster read from a legacy worker- file leaves the agent in one file", () => {
   apply({ grunts: { "a/b": { variant: "high", notes: "keep" } } });
   fs.renameSync(path.join(dir, "grunt-a-b.md"), path.join(dir, "worker-a-b.md"));

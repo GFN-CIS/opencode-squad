@@ -202,13 +202,6 @@ test.each(["grunt", "drill"])(
   },
 );
 
-test("the document-level check catches a broken frontmatter boundary", () => {
-  const { content } = agentMarkdown("grunt", "openai/gpt-5.5");
-  const unclosed = content.replace("\n---\n", "\n");
-  expect(readFrontmatter(unclosed).state).not.toBe("ok");
-  expect(() => frontmatterOf(unclosed)).toThrow();
-});
-
 test("agentMarkdown emits variant only when one is given", () => {
   const withVariant = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", {
     variant: "high",

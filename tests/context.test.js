@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   estimateContextTokens,
   formatContextSize,
@@ -78,45 +78,62 @@ test("formatLocalDateTime renders ISO-like time with the zone", () => {
   expect(moscow).toContain("(Europe/Moscow)");
 });
 
-test("indexModelCatalog keys limits by provider/model and bare model", () => {
-  const { limits } = indexModelCatalog([
-    { providerID: "anthropic", id: "claude-opus-4-7", limit: { context: 1000000 } },
-    { providerID: "anthropic", id: "claude-sonnet-4-6", limit: { context: 190000 } },
-    { providerID: "other", id: "claude-sonnet-4-6", limit: { context: 1 } }, // bare id: first wins
-    { providerID: "anthropic", id: "broken" },
-  ]);
-  expect(limits["anthropic/claude-opus-4-7"]).toBe(1000000);
-  expect(limits["claude-opus-4-7"]).toBe(1000000);
-  expect(limits["claude-sonnet-4-6"]).toBe(190000);
-  expect(limits["other/claude-sonnet-4-6"]).toBe(1);
-  expect(limits.broken).toBeUndefined();
-  expect(indexModelCatalog(undefined)).toEqual({ limits: {}, variants: {} });
-  expect(indexModelCatalog([])).toEqual({ limits: {}, variants: {} });
-});
+// The host's model catalog (OpenCode 2 `app.models`): a flat list of
+// {id, providerID, limit, variants:[{id, settings}]}. One group covers the raw
+// host shape, a bare id shared by two providers, and a model with no variants.
+describe("indexModelCatalog", () => {
+  test("keys limits by provider/model and by bare id; the first provider keeps a shared bare id", () => {
+    const { limits } = indexModelCatalog([
+      { providerID: "anthropic", id: "claude-opus-4-7", limit: { context: 1000000 } },
+      {
+        providerID: "zai",
+        id: "glm-5.3",
+        limit: { context: 200000, output: 32000 },
+        variants: [{ id: "low", settings: { reasoningEffort: "low" } }],
+      },
+      { providerID: "other", id: "glm-5.3", limit: { context: 1 } }, // bare id: first wins
+      { providerID: "anthropic", id: "broken" },
+    ]);
+    expect(limits).toEqual({
+      "anthropic/claude-opus-4-7": 1000000,
+      "claude-opus-4-7": 1000000,
+      "zai/glm-5.3": 200000,
+      "glm-5.3": 200000,
+      "other/glm-5.3": 1,
+    });
+  });
 
-test("indexModelCatalog reads the variant names opencode itself accepts", () => {
-  const { variants } = indexModelCatalog([
-    // The host shape: [{id, settings}].
-    { providerID: "anthropic", id: "claude-haiku-4-5", variants: [{ id: "high" }, { id: "max" }] },
-    // A model with no usable variant knob reports an empty set, which must stay
-    // distinguishable from "we could not look it up".
-    { providerID: "alibaba-token-plan", id: "qwen3.7-max", variants: [] },
-    { providerID: "zai-coding-plan", id: "glm-5.3", variants: ["low", "high", "max"] },
-    { providerID: "p", id: "keyed", variants: { low: {}, high: {} } },
-    { providerID: "p", id: "none" },
-  ]);
-  expect(variants["anthropic/claude-haiku-4-5"]).toEqual(["high", "max"]);
-  expect(variants["alibaba-token-plan/qwen3.7-max"]).toEqual([]);
-  expect(variants["zai-coding-plan/glm-5.3"]).toEqual(["low", "high", "max"]);
-  expect(variants["p/keyed"]).toEqual(["low", "high"]);
-  expect(variants["p/none"]).toEqual([]);
-});
+  test("reads the variant names opencode itself accepts", () => {
+    const { variants } = indexModelCatalog([
+      // The raw host shape: [{id, settings}].
+      {
+        providerID: "zai",
+        id: "glm-5.3",
+        variants: [
+          { id: "low", settings: { reasoningEffort: "low" } },
+          { id: "max", settings: { reasoningEffort: "max" } },
+        ],
+      },
+      // A model with no usable variant knob reports an empty set, which must stay
+      // distinguishable from "we could not look it up".
+      { providerID: "opencode", id: "big-pickle", limit: { context: 128000 }, variants: [] },
+      { providerID: "zai-coding-plan", id: "glm-5.3", variants: ["low", "high", "max"] },
+      { providerID: "p", id: "keyed", variants: { low: {}, high: {} } },
+      { providerID: "p", id: "none" },
+    ]);
+    expect(variants).toEqual({
+      "zai/glm-5.3": ["low", "max"],
+      "opencode/big-pickle": [],
+      "zai-coding-plan/glm-5.3": ["low", "high", "max"],
+      "p/keyed": ["low", "high"],
+      "p/none": [],
+    });
+  });
 
-test("indexModelCatalog survives junk without inventing entries", () => {
-  expect(indexModelCatalog(null)).toEqual({ limits: {}, variants: {} });
-  expect(indexModelCatalog([null, { id: "m" }, { providerID: "p" }])).toEqual({
-    limits: {},
-    variants: {},
+  test("survives a missing catalog and junk entries without inventing any", () => {
+    for (const models of [undefined, null, [], [null, { id: "m" }, { providerID: "p" }]]) {
+      expect(indexModelCatalog(models)).toEqual({ limits: {}, variants: {} });
+    }
   });
 });
 
