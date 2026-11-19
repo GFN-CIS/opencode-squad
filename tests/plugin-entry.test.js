@@ -71,8 +71,10 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
  *
  * @param {{directory: string} & Record<string, unknown>} host
  */
-async function setupHost({ directory, agent, globals = [], ...over }) {
+async function setupHost({ directory, agent, globals = [], files = [], ...over }) {
   const tools = new Map();
+  /** How often the plugin asked the host to rebuild its agent list. */
+  const counts = { reloads: 0, agentTransforms: 0 };
   /** Agent transforms in registration order, as the host keeps them. */
   const transforms = [];
   /** @param {(editor: any) => void} run */
@@ -109,8 +111,13 @@ async function setupHost({ directory, agent, globals = [], ...over }) {
     },
     agent: {
       list: async () => registered(),
-      transform: async (callback) => register(callback),
-      reload: async () => {},
+      transform: async (callback) => {
+        counts.agentTransforms++;
+        return register(callback);
+      },
+      reload: async () => {
+        counts.reloads++;
+      },
       ...agent,
     },
     ...over,
@@ -120,6 +127,16 @@ async function setupHost({ directory, agent, globals = [], ...over }) {
   /** @param {any} editor */
   const configRun = (editor) => {
     for (const a of editor.list()) a.permissions.push(...globals.map((r) => ({ ...r })));
+    // Agent files: their fields on top; a new agent gets the global rules too.
+    for (const file of files) {
+      const exists = editor.get(file.id) !== undefined;
+      const { permissions = [], ...fields } = file;
+      editor.update(file.id, (a) => {
+        if (!exists) a.permissions.push(...globals.map((r) => ({ ...r })));
+        Object.assign(a, structuredClone(fields));
+        a.permissions.push(...permissions);
+      });
+    }
   };
   let config = register(configRun);
   /** The agent list the host would build: every transform over a fresh editor. */
@@ -149,7 +166,7 @@ async function setupHost({ directory, agent, globals = [], ...over }) {
     await config.dispose();
     config = register(configRun);
   };
-  return { tools, dispose, registered, firstRequest, hooks, reorderConfig };
+  return { tools, dispose, registered, firstRequest, hooks, reorderConfig, counts };
 }
 
 const dirs = [];
@@ -608,6 +625,52 @@ test("the config plugin re-registered behind the late transform is caught on the
   }
 });
 
+test("a fenced agent the plugin did not build is neither policed nor re-registered for", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { writeStore } = await import("../src/squad-store.js");
+  writeStore(defaultStoreFile(), { grunts: {}, drills: { "a/b": {} } });
+  // An old squad file of a project's own, at an id the roster does not have.
+  const fenced = "<!-- squad:prompt role=drill -->\nold\n<!-- /squad:prompt -->";
+  const { hooks, counts, dispose } = await setupHost({
+    directory,
+    globals: [ALLOW_ALL],
+    files: [{ id: "drill-x-y", system: fenced }],
+  });
+  try {
+    await hooks.get("prompt")({ sessionID: "s" });
+    const before = { ...counts };
+    const event = { agent: "drill-x-y", system: [], tools: drillTools() };
+    await hooks.get("context")(event);
+    expect(Object.keys(event.tools)).toEqual(Object.keys(drillTools()));
+    expect(counts).toEqual(before);
+  } finally {
+    dispose();
+  }
+});
+
+test("squad_patch refuses an id a fenced file of someone else's holds, as registration would (#88)", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const fenced = "<!-- squad:prompt role=grunt -->\nold\n<!-- /squad:prompt -->";
+  const { tools, firstRequest, registered, dispose } = await setupHost({
+    directory,
+    files: [{ id: "grunt-p-q", system: fenced }],
+  });
+  try {
+    await firstRequest();
+    const out = (
+      await tools
+        .get("squad_patch")
+        .execute({ revision: "none", grunts: { "p/q": {} } }, { agent: "build" })
+    ).content;
+    expect(out).toContain("REFUSED: the roster asks for an agent id that a hand-authored agent");
+    expect(registered().find((a) => a.id === "grunt-p-q").system).toBe(fenced);
+  } finally {
+    dispose();
+  }
+});
+
 test("a user's agent at a squad id is not policed by the squad's rules", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
   dirs.push(directory);
@@ -691,11 +754,12 @@ test("a hand-authored agent on an unchanged entry is no reason to refuse other c
   dirs.push(directory);
   const { writeStore } = await import("../src/squad-store.js");
   writeStore(defaultStoreFile(), { grunts: { "p/q": {} }, drills: {} });
-  const { tools, dispose } = await setupHost({
+  const { tools, dispose, firstRequest } = await setupHost({
     directory,
-    agent: { list: async () => [{ id: "grunt-p-q", system: "My own prompt." }] },
+    files: [{ id: "grunt-p-q", system: "My own prompt." }],
   });
   try {
+    await firstRequest();
     const patch = tools.get("squad_patch");
     const revision = () => storeRevision(defaultStoreFile());
     const kept = (

@@ -174,7 +174,7 @@ test("late: a same-id legacy file is rebuilt from scratch, none of its fields ke
   const specs = agentSpecs({ drills: { "a/b": {} } }, io);
   const old = legacyFile("drill-a-b", "a/b", "an old inlined prompt");
   const { editor, report } = hostOrder({ specs, files: [old.live], legacy: new Map([old.seen]) });
-  expect(report).toEqual({ foreign: [], hidden: [], stray: [], kept: [] });
+  expect(report).toEqual({ built: ["drill-a-b"], foreign: [], hidden: [], stray: [], kept: [] });
   const agent = editor.get("drill-a-b");
   expect(agent).not.toHaveProperty("color");
   expect(agent).not.toHaveProperty("steps");
@@ -223,6 +223,7 @@ test("late: verified legacy agents the roster dropped are hidden, worker- includ
     legacy: new Map([drill.seen, worker.seen]),
   });
   expect(report).toEqual({
+    built: ["grunt-a-b"],
     foreign: [],
     hidden: ["drill-old-model", "worker-old-model"],
     stray: ["drill-project-model"],

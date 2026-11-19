@@ -166,7 +166,7 @@ function globalRules(probe) {
  * @param {any} agent
  * @param {LegacyAgent | undefined} file
  */
-function isLegacyFile(agent, file) {
+export function isLegacyFile(agent, file) {
   if (!file || !agent) return false;
   const model = agent.model ? `${agent.model.providerID}/${agent.model.id}` : "";
   const system = String(agent.system ?? "")
@@ -202,7 +202,9 @@ function build(agent, spec, globals) {
  *   marker (src/squad-apply.js readLegacySquad). Files from before the
  *   role-prompt fence, and every `worker-*`, are only recognisable this way:
  *   the marker is a YAML comment the host never exposes.
- * @returns {{foreign: string[], hidden: string[], stray: string[], kept: string[]}}
+ * @returns {{built: string[], foreign: string[], hidden: string[], stray: string[], kept: string[]}}
+ *   built: the squad agents this transform created: the only ones the
+ *          plugin polices per request;
  *   foreign: roster ids another agent already holds (left alone);
  *   hidden: legacy generated agents removed because the roster no longer has them;
  *   stray: generated-looking agents from elsewhere (a project's own agent dir),
@@ -222,6 +224,8 @@ export function lateTransform(editor, specs, legacy = new Map()) {
   const stray = [];
   /** @type {string[]} */
   const kept = [];
+  /** @type {string[]} */
+  const built = [];
   for (const agent of [...editor.list()]) {
     const id = String(agent?.id ?? "");
     if (wanted.has(id)) continue;
@@ -247,8 +251,10 @@ export function lateTransform(editor, specs, legacy = new Map()) {
       editor.remove(spec.id);
     }
     editor.update(spec.id, (agent) => build(agent, spec, globals));
+    built.push(spec.id);
   }
   return {
+    built: built.sort(),
     foreign: foreign.sort(),
     hidden: hidden.sort(),
     stray: stray.sort(),

@@ -63,7 +63,7 @@ import {
   deniedTools,
   earlyTransform,
   endsWithRoleRules,
-  isSquadSystem,
+  isLegacyFile,
   lateTransform,
   PROBE_ID,
   rosterCollisions,
@@ -241,6 +241,7 @@ export default {
     let storeSig = storeSignature(storeFile);
     /** From the late transform: hand-authored holders of roster ids, legacy agents hidden, stray ones left. */
     let lateReport = {
+      built: /** @type {string[]} */ ([]),
       foreign: /** @type {string[]} */ ([]),
       hidden: /** @type {string[]} */ ([]),
       stray: /** @type {string[]} */ ([]),
@@ -358,7 +359,10 @@ export default {
         // legacy agent files, if any, keep working until it is fixed.
         const specs = specsNow();
         if (specs) lateReport = lateTransform(editor, specs, legacyAgents);
-        else editor.remove(PROBE_ID);
+        else {
+          editor.remove(PROBE_ID);
+          lateReport = { ...lateReport, built: [] };
+        }
       } catch {
         // A broken roster must not take the host's agent list down with it.
       }
@@ -376,14 +380,16 @@ export default {
         if (tool?.name) toolActions.set(tool.name, tool.options?.permission ?? tool.name);
       }
     };
-    /** Live squad agents (ours, not a user's at a squad id) and their roles. */
+    /**
+     * Live agents the late transform built, and their roles: nothing else is
+     * policed, not a user's agent, a stray fenced file or a legacy agent left
+     * live while squad.json is unreadable.
+     */
     const liveSquad = async () => {
       const agents = unwrap(await ctx.agent.list().catch(() => null)) ?? [];
       return (Array.isArray(agents) ? agents : []).flatMap((a) => {
         const role = squadRoleOf(a?.id);
-        return role && isSquadSystem(a?.system) && !lateReport.foreign.includes(a.id)
-          ? [{ agent: a, role }]
-          : [];
+        return role && lateReport.built.includes(a.id) ? [{ agent: a, role }] : [];
       });
     };
     let syncing = Promise.resolve();
@@ -400,7 +406,9 @@ export default {
       const run = syncing.then(async () => {
         if (!late || reposition) {
           // Old one out first: two of them would see each other's agents.
-          await late?.dispose?.();
+          const previous = late;
+          late = null;
+          await previous?.dispose?.();
           late = await ctx.agent.transform(runLate);
           force = true;
         }
@@ -868,7 +876,13 @@ export default {
                 if (before && JSON.stringify(before) === JSON.stringify(entry)) continue;
                 const id = slugForModel(modelId, role);
                 const agent = byId.get(id);
-                if (agent && !isSquadSystem(agent.system)) {
+                // Ours only if the late transform built it or it is our own
+                // legacy file: the same test the registration applies.
+                if (
+                  agent &&
+                  !lateReport.built.includes(id) &&
+                  !isLegacyFile(agent, legacyAgents.get(id))
+                ) {
                   foreign.push({ id, agent: `${role} ${modelId}` });
                 }
               }
