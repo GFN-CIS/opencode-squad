@@ -351,6 +351,11 @@ export function formatSummary({
       s.entry.priceIn != null
         ? `$${s.entry.priceIn}/$${s.entry.priceOut ?? "?"}`
         : null;
+    // Silence would read as "no dearer than the base": say it is unknown.
+    const tierUnknown =
+      billing.api && !/-free$/.test(modelKey(m.id)) && s && !ownsPrice(m.id, s.key)
+        ? "tier price unknown"
+        : null;
     const rule = info ? [`owner rule: ${info}`] : [];
 
     if (!s && hits.every((h) => h === null)) {
@@ -362,7 +367,7 @@ export function formatSummary({
     const signature = `${provider}|${s?.key ?? ""}|${hits.map((h) => h?.key ?? "").join("|")}`;
     const same = firstBySignature.get(signature);
     if (same) {
-      const shared = [...own, ...(price ? [price] : [])];
+      const shared = [...own, ...(price ? [price] : tierUnknown ? [tierUnknown] : [])];
       lines.push(
         `- ${m.id}${role}: ${[...shared, `same benchmarks as ${same}`, ...rule].join(" · ")}`,
       );
@@ -378,7 +383,7 @@ export function formatSummary({
       // Unranked scores rest on too few benchmarks to compare with ranked ones.
       else parts.push(`SI ${e.score} (provisional, conf ${e.confidence ?? "?"}%)`);
     }
-    parts.push(...own, ...(price ? [price] : []));
+    parts.push(...own, ...(price ? [price] : tierUnknown ? [tierUnknown] : []));
     hits.forEach((h, i) => {
       if (h) parts.push(`${KEY_METRICS[i].label} ${fmtValues(h.entry.values)}`);
     });

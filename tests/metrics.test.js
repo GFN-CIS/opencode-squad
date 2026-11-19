@@ -251,7 +251,7 @@ describe("formatSummary", () => {
       now,
     });
     expect(text).toContain(
-      "- openai/gpt-6.1-terra-fast [grunt]: ctx 1.1M · same benchmarks as openai/gpt-6.1-terra",
+      "- openai/gpt-6.1-terra-fast [grunt]: ctx 1.1M · tier price unknown · same benchmarks as openai/gpt-6.1-terra",
     );
   });
 
@@ -278,12 +278,15 @@ describe("formatSummary", () => {
       expect(fast).toContain("SI 70 #5");
       expect(fast).toContain("(data for b)");
       expect(fast).not.toContain("$5/$20");
+      expect(fast).toContain("tier price unknown");
     });
 
     test("asked with the base model, the base keeps its price and the tier does not", () => {
       const lines = summary(["x/b", "x/b-fast"]);
       expect(lineOf(lines, "x/b")).toContain("$5/$20");
-      expect(lineOf(lines, "x/b-fast")).toBe("- x/b-fast: same benchmarks as x/b");
+      expect(lineOf(lines, "x/b-fast")).toBe(
+        "- x/b-fast: tier price unknown · same benchmarks as x/b",
+      );
     });
 
     test("a tier with its own priced row shows its own price", () => {
