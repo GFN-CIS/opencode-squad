@@ -107,11 +107,18 @@ function physicalPath(file) {
 }
 
 /**
- * Every agent file name OpenCode could load from `dir`: it reads every .md
- * file below the agent dir, recursively, and names each by its relative path, so a file in a
- * subdirectory is an agent name too. Symlinked directories are followed once
- * each. A directory that cannot be listed is returned in `unlisted` (a missing
- * top-level `dir` is not: there are no agents yet).
+ * Every agent file name OpenCode could load next to `dir`. OpenCode reads
+ * every .md file below both `agent` and `agents` of a config dir, recursively
+ * and through directory links, and names each by its path: a file reached
+ * through a second root or a linked directory is a second agent name for the
+ * same file. Names are relative to `dir` (a sibling root's start with
+ * `../agents/`).
+ *
+ * Linked directories are followed as OpenCode follows them, so every alias
+ * path is listed. A link back into a directory already on the current path
+ * (a cycle) has no finite listing, and a directory that cannot be read hides
+ * what is in it: both go to `unlisted`, which callers treat as "uniqueness
+ * unknown". A missing root is no agents, not a gap.
  *
  * @param {string} dir
  * @returns {{names: string[], unlisted: string[]}}
@@ -121,38 +128,50 @@ function listAgentFiles(dir) {
   const names = [];
   /** @type {string[]} */
   const unlisted = [];
-  const seen = new Set();
-  /** @param {string} rel */
-  const walk = (rel) => {
-    const abs = rel ? path.join(dir, rel) : dir;
+  const base = path.basename(dir);
+  const roots =
+    base === "agent" || base === "agents"
+      ? [dir, path.join(path.dirname(dir), base === "agent" ? "agents" : "agent")]
+      : [dir];
+  /**
+   * @param {string} abs
+   * @param {Set<string>} ancestors  real paths of the directories above
+   * @param {boolean} isRoot
+   */
+  const walk = (abs, ancestors, isRoot) => {
     /** @type {fs.Dirent[]} */
     let entries;
+    let real;
     try {
-      const real = fs.realpathSync(abs);
-      if (seen.has(real)) return;
-      seen.add(real);
+      real = fs.realpathSync(abs);
       entries = fs.readdirSync(abs, { withFileTypes: true });
     } catch (e) {
       const code = /** @type {NodeJS.ErrnoException} */ (e)?.code;
-      if (!rel && code === "ENOENT") return;
+      if (isRoot && code === "ENOENT") return;
       unlisted.push(`${abs} (${code ?? "error"})`);
       return;
     }
+    if (ancestors.has(real)) {
+      unlisted.push(`${abs} (links back to a directory above it)`);
+      return;
+    }
+    const below = new Set(ancestors).add(real);
     for (const ent of entries) {
-      const name = rel ? `${rel}/${ent.name}` : ent.name;
+      const child = path.join(abs, ent.name);
       let isDir = ent.isDirectory();
       if (ent.isSymbolicLink()) {
         try {
-          isDir = fs.statSync(path.join(dir, name)).isDirectory();
+          isDir = fs.statSync(child).isDirectory();
         } catch {
           isDir = false; // dangling: a file name at most
         }
       }
-      if (isDir) walk(name);
-      else if (ent.name.endsWith(".md")) names.push(name);
+      if (isDir) walk(child, below, false);
+      else if (ent.name.endsWith(".md"))
+        names.push(path.relative(dir, child).split(path.sep).join("/"));
     }
   };
-  walk("");
+  for (const root of roots) walk(root, new Set(), true);
   return { names, unlisted };
 }
 
@@ -160,7 +179,7 @@ function listAgentFiles(dir) {
  * Targets that reach one physical file under another agent file's name: two
  * symlinks onto one file, or a link onto a sibling agent. Writing both would
  * leave one agent with the other's configuration while both report success.
- * An ordinary link onto a file nothing else in `dir` reaches is fine.
+ * An ordinary link onto a file no other loadable agent name reaches is fine.
  *
  * @param {string} dir
  * @param {string[]} targets  filenames about to be written
