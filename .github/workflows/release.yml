@@ -1,5 +1,8 @@
 # Release on every push to master (i.e. a merged PR) whose package.json version
-# has no GitHub release yet. Bump "version" in the PR to cut a release; pushes
+# is not yet both a GitHub release and an npm version. A run whose npm publish
+# failed after the GitHub release was created is recovered by running the
+# workflow again (workflow_dispatch): it sees the release, skips creating it and
+# publishes to npm. Bump "version" in the PR to cut a release; pushes
 # that keep the version (docs, CI) are no-ops. An existing
 # vX.Y.Z tag is reused as-is, otherwise the tag is created on the pushed commit.
 name: release
@@ -30,13 +33,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          name=$(node -p 'require("./package.json").name')
           version=$(node -p 'require("./package.json").version')
           tag="v${version}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists; nothing to do."
+          gh_release=false
+          gh release view "$tag" >/dev/null 2>&1 && gh_release=true
+          on_npm=false
+          [ "$(npm view "${name}@${version}" version 2>/dev/null)" = "$version" ] && on_npm=true
+          echo "gh_release=${gh_release}" >> "$GITHUB_OUTPUT"
+          echo "on_npm=${on_npm}" >> "$GITHUB_OUTPUT"
+          if [ "$gh_release" = true ] && [ "$on_npm" = true ]; then
+            echo "Release $tag exists on GitHub and npm; nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
+            echo "GitHub release: $gh_release, npm: $on_npm"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -54,9 +65,12 @@ jobs:
           npm run lint
           npm run knip
           npm run typecheck
+          # The plugin inside the real OpenCode 2 host (see test.yml): a runtime
+          # incompatibility must block publishing, not just turn a badge red.
+          npm run test:integration
 
       - name: Create release
-        if: steps.version.outputs.skip == 'false'
+        if: steps.version.outputs.skip == 'false' && steps.version.outputs.gh_release == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
@@ -65,13 +79,14 @@ jobs:
 
     outputs:
       skip: ${{ steps.version.outputs.skip }}
+      on_npm: ${{ steps.version.outputs.on_npm }}
 
   # Publishes to npm through trusted publishing: npm authenticates this workflow via
   # OIDC, no token exists. The trusted publisher on npmjs.com is bound to release.yml
   # and environment "npm".
   npm:
     needs: release
-    if: needs.release.outputs.skip == 'false'
+    if: needs.release.outputs.skip == 'false' && needs.release.outputs.on_npm == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm
