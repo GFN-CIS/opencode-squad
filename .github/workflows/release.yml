@@ -2,13 +2,13 @@
 # is not yet both a GitHub release and an npm version. Bump "version" in the PR
 # to cut a release; pushes that keep the version (docs, CI) are no-ops.
 #
-# One version is one source revision. The revision is the commit the vX.Y.Z tag
-# points at when the tag exists (an earlier, partial run created it), else the
-# pushed commit. Tests, the GitHub release and the npm publish all use that
-# revision, so a run that recovers a failed npm publish after master has moved
-# on still publishes what was tagged. Anything that contradicts it (a release
-# without its tag, a tagged commit with another version, an npm version built
-# from a different commit) stops the run instead of guessing.
+# One version is one source revision: the commit the vX.Y.Z tag points at
+# when the tag exists (an earlier, partial run created it), else the pushed
+# commit. Tests, the GitHub release and the npm publish all use it, so a run
+# that recovers a failed npm publish after master has moved on still publishes
+# what was tagged. scripts/release-resolve.sh decides; it stops the run when
+# GitHub or npm cannot be read, rather than taking "unknown" for "not
+# published".
 name: release
 
 on:
@@ -36,54 +36,9 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          name=$(node -p 'require("./package.json").name')
-          version=$(node -p 'require("./package.json").version')
-          tag="v${version}"
-          gh_release=false
-          gh release view "$tag" >/dev/null 2>&1 && gh_release=true
-          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            sha=$(git rev-list -n 1 "$tag")
-          elif [ "$gh_release" = true ]; then
-            echo "::error::Release $tag exists but its tag does not; cannot tell which revision it is."
-            exit 1
-          else
-            sha="$GITHUB_SHA"
-          fi
-          tagged=$(git show "${sha}:package.json" | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')
-          if [ "$tagged" != "$version" ]; then
-            echo "::error::$tag points at $sha, whose package.json says $tagged."
-            exit 1
-          fi
-          on_npm=false
-          if [ "$(npm view "${name}@${version}" version 2>/dev/null)" = "$version" ]; then
-            on_npm=true
-            # npm records the commit it was packed from; it must be this one.
-            npm_head=$(npm view "${name}@${version}" gitHead 2>/dev/null || true)
-            if [ -n "$npm_head" ] && [ "$npm_head" != "$sha" ]; then
-              if [ "$gh_release" = true ]; then
-                # Already complete; nothing will be published. Rewritten history
-                # (old tags re-pointed) leaves this on releases made before it.
-                echo "::warning::npm ${name}@${version} was packed from $npm_head, $tag is $sha."
-              else
-                echo "::error::npm ${name}@${version} was published from $npm_head, not $sha; refusing to release $tag on a different revision."
-                exit 1
-              fi
-            fi
-          fi
-          {
-            echo "tag=${tag}"
-            echo "sha=${sha}"
-            echo "gh_release=${gh_release}"
-            echo "on_npm=${on_npm}"
-          } >> "$GITHUB_OUTPUT"
-          echo "$tag -> $sha; GitHub release: $gh_release, npm: $on_npm"
-          if [ "$gh_release" = true ] && [ "$on_npm" = true ]; then
-            echo "Release $tag exists on GitHub and npm; nothing to do."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+        # Tag, revision and what is still missing; stops on unknown remote
+        # state. Tested in tests/release-resolve.test.js.
+        run: bash scripts/release-resolve.sh
 
       - name: Check out the release revision
         if: steps.version.outputs.skip == 'false'
