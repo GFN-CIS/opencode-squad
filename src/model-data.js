@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { legacyHeaderFields, readFrontmatter } from "./frontmatter.js";
-import { GENERATED_MARKER_DETECT } from "./workers.js";
+import { isGeneratedAgent } from "./workers.js";
 
 /**
  * Pull the model id out of an agent markdown file's frontmatter, without its
@@ -81,7 +81,7 @@ export function scanSquadModels(dir) {
       unreadable.push(f);
       continue;
     }
-    const generated = txt.includes(GENERATED_MARKER_DETECT);
+    const generated = isGeneratedAgent(txt);
     // A hand-authored worker-* agent was never part of the squad.
     if (m[1] === "worker" && !generated) continue;
     const id = extractModelId(txt);
