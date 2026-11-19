@@ -15,10 +15,14 @@ import {
   indexSuperIndex,
   KEY_METRICS,
   keyCandidates,
+  LLMBENCH_FORMAT,
+  llmbenchIdFor,
   lookup,
   ownerRules,
   providerEntry,
+  SUPERINDEX_FORMAT,
   squadRoles,
+  superindexOf,
 } from "../src/metrics.js";
 
 const fixture = (name) =>
@@ -30,8 +34,12 @@ const BY_METRIC = Object.fromEntries(
   Object.entries(ROWS).map(([metric, rows]) => [metric, indexScoreRows(rows)]),
 );
 const DATA = {
-  superindex: { fetchedAt: 0, index: SI },
-  scores: { fetchedAt: 0, byMetric: BY_METRIC },
+  superindex: { fetchedAt: 0, format: SUPERINDEX_FORMAT, index: SI },
+  scores: {
+    fetchedAt: 0,
+    formatByMetric: Object.fromEntries(KEY_METRICS.map(({ metric }) => [metric, LLMBENCH_FORMAT])),
+    byMetric: BY_METRIC,
+  },
 };
 
 // The squad as opencode names it; each source spells these differently.
@@ -80,11 +88,11 @@ describe("matching", () => {
     expect(lookup("opencode/big-pickle", SI)).toBeNull();
   });
 
-  test("indexModelIds keys llmbenchmark ids by normalized model part", () => {
-    expect(indexModelIds([{ id: "z-ai/glm-5.3" }, { id: "x" }])).toEqual({
-      "glm-5-3": "z-ai/glm-5.3",
-      x: "x",
-    });
+  test("indexModelIds keys llmbenchmark ids by raw id and normalized model part", () => {
+    const idx = indexModelIds([{ id: "z-ai/glm-5.3" }, { id: "x" }]);
+    expect(lookup("zai-coding-plan/glm-5.3", idx)?.entry).toEqual({ id: "z-ai/glm-5.3" });
+    expect(lookup("Z-AI/GLM-5.3", idx)?.entry).toEqual({ id: "z-ai/glm-5.3" });
+    expect(lookup("x", idx)?.entry).toEqual({ id: "x" });
   });
 });
 
@@ -200,6 +208,9 @@ describe("formatSummary", () => {
     expect(out).toContain("CC-BY-4.0");
     expect(out).toContain("fetched 5h ago");
     expect(out).toContain("NOT at your agents' variant");
+    // A list price is labeled as reference in the summary, as in the full view (#53).
+    expect(out).toContain("SuperIndex list prices");
+    expect(out).toContain("not necessarily what your provider bills");
   });
 
   test("subscription replaces the list price; roles and notes are shown", () => {
@@ -282,6 +293,7 @@ describe("formatSummary", () => {
     const PRICED = {
       superindex: {
         fetchedAt: 0,
+        format: SUPERINDEX_FORMAT,
         index: indexSuperIndex({
           models: [
             { id: "x/b", si_score: 70, rank: 5, price_in: 5, price_out: 20 },
@@ -408,7 +420,11 @@ describe("exact provider/model match wins over a shared basename (#54)", () => {
   ];
   const now = 0;
   const summaryLine = (index, id) =>
-    formatSummary({ models: [{ id }], data: { superindex: { fetchedAt: 0, index } }, now })
+    formatSummary({
+      models: [{ id }],
+      data: { superindex: { fetchedAt: 0, format: SUPERINDEX_FORMAT, index } },
+      now,
+    })
       .split("\n")
       .find((l) => l.startsWith(`- ${id}:`)) ?? "";
 
@@ -464,7 +480,7 @@ describe("a tier's context and billing come from the tier, in both views (#53)",
       },
     ],
   });
-  const data = { superindex: { fetchedAt: 0, index } };
+  const data = { superindex: { fetchedAt: 0, format: SUPERINDEX_FORMAT, index } };
   const summaryLine = (id, context) =>
     formatSummary({ models: [{ id, ...(context ? { context } : {}) }], data, now: 0 })
       .split("\n")
@@ -492,6 +508,251 @@ describe("a tier's context and billing come from the tier, in both views (#53)",
     const text = full("p/model-free");
     expect(text).toContain("free");
     expect(text).not.toContain("$3/$10");
+  });
+});
+
+describe("distinct exact ids that normalize alike stay apart (#54)", () => {
+  const DASH = {
+    id: "p/m-1",
+    si_score: 60,
+    rank: 9,
+    price_in: 1,
+    price_out: 2,
+    context_window: 100_000,
+  };
+  const DOT = {
+    id: "p/m.1",
+    si_score: 65,
+    rank: 8,
+    price_in: 5,
+    price_out: 25,
+    context_window: 300_000,
+  };
+  const orders = [
+    ["dash first", indexSuperIndex({ models: [DASH, DOT] })],
+    ["dot first", indexSuperIndex({ models: [DOT, DASH] })],
+  ];
+  const summary = (index, ids) =>
+    formatSummary({
+      models: ids.map((id) => ({ id })),
+      data: { superindex: { fetchedAt: 0, format: SUPERINDEX_FORMAT, index } },
+      now: 0,
+    }).split("\n");
+  const line = (lines, id) => lines.find((l) => l.startsWith(`- ${id}:`)) ?? "";
+  const full = (index, id) => formatDetail(id, null, lookup(id, index)?.entry ?? null);
+
+  for (const [name, index] of orders) {
+    test(`the exact raw id wins, case-insensitively, without punctuation folding (${name})`, () => {
+      expect(lookup("p/m.1", index)?.entry.id).toBe("p/m.1");
+      expect(lookup("p/m-1", index)?.entry.id).toBe("p/m-1");
+      expect(lookup("P/M.1", index)?.entry.id).toBe("p/m.1");
+    });
+
+    test(`each exact id keeps its own price and context in both views (${name})`, () => {
+      const dot = line(summary(index, ["p/m.1"]), "p/m.1");
+      expect(dot).toContain("$5/$25");
+      expect(dot).toContain("ctx 300k");
+      expect(dot).not.toContain("$1/$2");
+      expect(dot).not.toContain("100k");
+      const text = full(index, "p/m.1");
+      expect(text).toContain("$5/$25 per 1M");
+      expect(text).toContain("ctx 300k");
+      expect(text).not.toContain("$1/$2");
+    });
+
+    test(`both ids asked together get their own lines, not "same benchmarks" (${name})`, () => {
+      const lines = summary(index, ["p/m-1", "p/m.1"]);
+      expect(line(lines, "p/m-1")).toContain("SI 60 #9");
+      expect(line(lines, "p/m-1")).toContain("$1/$2");
+      expect(line(lines, "p/m.1")).toContain("SI 65 #8");
+      expect(line(lines, "p/m.1")).toContain("$5/$25");
+      expect(lines.join("\n")).not.toContain("same benchmarks as");
+    });
+
+    test(`a request that only normalizes to both rows gets no serving facts (${name})`, () => {
+      const l = line(summary(index, ["p/m_1"]), "p/m_1");
+      expect(l).not.toMatch(/\$\d/);
+      expect(l).not.toMatch(/ctx \d/);
+      expect(l).toContain("ctx unknown (ambiguous match)");
+      expect(l).toContain("price unknown (ambiguous match)");
+      expect(l).toContain("(ambiguous: p/m-1, p/m.1)");
+      const text = full(index, "p/m_1");
+      expect(text).not.toMatch(/\$\d/);
+      expect(text).toContain("ambiguous");
+      expect(text).toContain("p/m-1");
+      expect(text).toContain("p/m.1");
+    });
+  }
+});
+
+describe("a SuperIndex cache from an earlier format (#54)", () => {
+  // What the previous indexSuperIndex wrote: provider/basename keys where the
+  // first of two colliding raw ids won, and no format marker on the block.
+  const DASH = {
+    id: "p/m-1",
+    score: 60,
+    rank: 9,
+    status: null,
+    confidence: null,
+    priceIn: 1,
+    priceOut: 2,
+    context: 100_000,
+  };
+  const old = { superindex: { fetchedAt: 0, index: { "p/m-1": DASH, "m-1": DASH } } };
+
+  test("serves no price or context from it, in either view", () => {
+    const out = formatSummary({ models: [{ id: "p/m.1" }], data: old, now: 0 });
+    const l = out.split("\n").find((x) => x.startsWith("- p/m.1")) ?? "";
+    expect(l).not.toMatch(/\$\d/);
+    expect(l).not.toContain("100k");
+    expect(out).toContain("withheld");
+    const text = formatDetail("p/m.1", null, lookup("p/m.1", superindexOf(old))?.entry ?? null);
+    expect(text).not.toMatch(/\$\d/);
+    expect(text).not.toContain("100k");
+  });
+
+  test("the catalog's context limit still shows", () => {
+    const out = formatSummary({ models: [{ id: "p/m.1", context: 128_000 }], data: old, now: 0 });
+    expect(out).toContain("ctx 128k");
+  });
+
+  test("a current-format block is used as is", () => {
+    const index = indexSuperIndex({ models: [{ id: "p/m-1", price_in: 1, price_out: 2 }] });
+    const block = { superindex: { fetchedAt: 0, format: SUPERINDEX_FORMAT, index } };
+    expect(superindexOf(block)).toBe(index);
+  });
+});
+
+describe("full view knows the billing the summary shows (#53)", () => {
+  const index = indexSuperIndex({
+    models: [
+      {
+        id: "anthropic/opus",
+        si_score: 80,
+        rank: 2,
+        price_in: 3,
+        price_out: 10,
+        context_window: 200_000,
+      },
+    ],
+  });
+  const data = { superindex: { fetchedAt: 0, format: SUPERINDEX_FORMAT, index } };
+  const entry = lookup("anthropic/opus", index)?.entry ?? null;
+
+  test("a configured subscription appears in both views", () => {
+    const plans = { anthropic: "Max" };
+    const sum = formatSummary({ models: [{ id: "anthropic/opus" }], plans, data, now: 0 });
+    expect(sum).toContain("subscription: Max");
+    const text = formatDetail("anthropic/opus", null, entry, { plans });
+    expect(text).toContain("subscription: Max");
+    // The list price may stay as reference, never as what the plan costs.
+    expect(text).not.toMatch(/Serving:[^\n]*(?<!list price )\$3\/\$10/);
+    expect(text).toContain("list price $3/$10 per 1M (reference");
+  });
+
+  test("a model's own billing and the oauth login reach the full view too", () => {
+    const note = { billing: "Team" };
+    expect(formatDetail("anthropic/opus", null, entry, { note })).toContain("subscription: Team");
+    expect(
+      formatDetail("anthropic/opus", null, entry, { authTypes: { anthropic: "oauth" } }),
+    ).toContain("subscription: plan not set");
+  });
+
+  test("metered API shows the source's list price, labeled as reference", () => {
+    const text = formatDetail("anthropic/opus", null, entry, {});
+    expect(text).toContain("SuperIndex list price $3/$10 per 1M (reference)");
+  });
+});
+
+describe("distinct llmbenchmark ids that normalize alike stay apart (#54)", () => {
+  const ROWS = [
+    { modelId: "p/m-1", value: 0.5 },
+    { modelId: "p/m.1", value: 0.7, setting: "high" },
+    { modelId: "p/m.1", value: 0.8, setting: "max" },
+  ];
+  const orders = [
+    ["dash first", indexScoreRows(ROWS)],
+    ["dot first", indexScoreRows([...ROWS].reverse())],
+  ];
+  const TB = "tbench_4_0_accuracy";
+  const summary = (idx, ids) =>
+    formatSummary({
+      models: ids.map((id) => ({ id })),
+      data: {
+        scores: {
+          fetchedAtByMetric: { [TB]: 0 },
+          formatByMetric: { [TB]: LLMBENCH_FORMAT },
+          byMetric: { [TB]: idx },
+        },
+      },
+      now: 0,
+    }).split("\n");
+  const line = (lines, id) => lines.find((l) => l.startsWith(`- ${id}:`)) ?? "";
+
+  for (const [name, idx] of orders) {
+    test(`each raw id keeps its own values, every setting of one id stays together (${name})`, () => {
+      expect(lookup("p/m.1", idx)?.entry.id).toBe("p/m.1");
+      expect(
+        lookup("p/m.1", idx)
+          ?.entry.values.map((v) => v.value)
+          .sort(),
+      ).toEqual([0.7, 0.8]);
+      expect(lookup("p/m-1", idx)?.entry.values).toEqual([{ value: 0.5, setting: null }]);
+      expect(lookup("P/M.1", idx)?.entry.id).toBe("p/m.1");
+    });
+
+    test(`a request that only normalizes to both ids pools nothing and names them (${name})`, () => {
+      const hit = lookup("p/m_1", idx)?.entry;
+      expect(hit?.candidates).toEqual(["p/m-1", "p/m.1"]);
+      expect(hit?.values).toEqual([]);
+      const l = line(summary(idx, ["p/m_1"]), "p/m_1");
+      expect(l).toContain("TerminalBench4 ambiguous (p/m-1, p/m.1)");
+      expect(l).not.toMatch(/0\.[578]/);
+    });
+
+    test(`both ids asked together each get their own values (${name})`, () => {
+      const lines = summary(idx, ["p/m-1", "p/m.1"]);
+      expect(line(lines, "p/m-1")).toContain("TerminalBench4 0.5");
+      expect(line(lines, "p/m-1")).not.toContain("0.7");
+      expect(line(lines, "p/m.1")).toContain("0.7 (high)");
+      expect(line(lines, "p/m.1")).toContain("0.8 (max)");
+      expect(line(lines, "p/m.1")).not.toContain("0.5");
+      expect(lines.join("\n")).not.toContain("same benchmarks as");
+    });
+  }
+
+  test("the model-id list keeps them apart too, and the full view names the candidates", () => {
+    const index = indexModelIds([{ id: "p/m.1" }, { id: "p/m-1" }]);
+    const data = { ids: { fetchedAt: 0, format: LLMBENCH_FORMAT, index } };
+    expect(llmbenchIdFor("p/m.1", data)).toEqual({ id: "p/m.1" });
+    expect(llmbenchIdFor("p/m-1", data)).toEqual({ id: "p/m-1" });
+    expect(llmbenchIdFor("p/m_1", data)).toEqual({ candidates: ["p/m-1", "p/m.1"] });
+    const text = formatDetail("p/m_1", null, null, { llmbCandidates: ["p/m-1", "p/m.1"] });
+    expect(text).toContain("ambiguous");
+    expect(text).toContain("p/m-1, p/m.1");
+  });
+
+  test("an old-format id list is not trusted; current score rows still resolve the id", () => {
+    const old = { ids: { fetchedAt: 0, index: { "m-1": "p/m-1" } } };
+    expect(llmbenchIdFor("p/m.1", old)).toBeNull();
+    const withScores = {
+      ...old,
+      scores: { formatByMetric: { [TB]: LLMBENCH_FORMAT }, byMetric: { [TB]: orders[0][1] } },
+    };
+    expect(llmbenchIdFor("p/m.1", withScores)).toEqual({ id: "p/m.1" });
+  });
+
+  test("score rows from an earlier cache format are shown, but flagged", () => {
+    const legacy = indexScoreRows([{ modelId: "p/m-1", value: 0.5 }]);
+    delete legacy["=p/m-1"];
+    const out = formatSummary({
+      models: [{ id: "p/m-1" }],
+      data: { scores: { fetchedAt: 0, byMetric: { [TB]: legacy } } },
+      now: 0,
+    });
+    expect(out).toContain("TerminalBench4 0.5");
+    expect(out).toMatch(/llmbenchmark rows for TerminalBench4 predate exact-id matching/);
+    expect(llmbenchIdFor("p/m-1", { scores: { byMetric: { [TB]: legacy } } })).toBeNull();
   });
 });
 

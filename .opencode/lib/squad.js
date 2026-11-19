@@ -30,7 +30,14 @@
 import { formatCompactReport } from "../../src/compact.js";
 import { estimateContextTokens, indexModelCatalog } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
-import { formatDetail, formatSummary, lookup, squadRoles } from "../../src/metrics.js";
+import {
+  formatDetail,
+  formatSummary,
+  llmbenchIdFor,
+  lookup,
+  squadRoles,
+  superindexOf,
+} from "../../src/metrics.js";
 import { fetchDetail } from "../../src/metrics-cache.js";
 import { createQuotaReporter } from "../../src/quota.js";
 import {
@@ -410,24 +417,42 @@ export default {
           }
           const data = await getMetrics();
           const now = Date.now();
+          const limits = await getLimitMap();
+          // How each model is paid for, read once for both views so the full
+          // detail and the summary agree on it.
+          const settings = loadModelSettings(directory);
+          const notes = settings.found ? settings.models : null;
+          const plans = settings.providers;
+          const authTypes = loadAuthTypes();
+          const ignored = settings.problems.length
+            ? `\n\nmodel_data.json ignored (owner notes missing above):\n${settings.problems
+                .map((p) => `  - ${p}`)
+                .join("\n")}`
+            : "";
           if (full === true) {
-            const limits = await getLimitMap();
             const parts = await Promise.all(
               wanted.slice(0, MAX_FULL_MODELS).map(async (id) => {
-                const llmbId =
-                  lookup(id, data?.ids?.index)?.entry ??
-                  Object.values(data?.scores?.byMetric ?? {})
-                    .map((idx) => lookup(id, idx)?.entry.id)
-                    .find(Boolean);
-                const detail = llmbId
-                  ? await fetchDetail({ fetch: globalThis.fetch, dir: METRICS_DIR, now, llmbId })
-                  : null;
+                // Several llmbenchmark ids may match: then none is fetched.
+                const llmb = llmbenchIdFor(id, data);
+                const detail =
+                  llmb && "id" in llmb
+                    ? await fetchDetail({
+                        fetch: globalThis.fetch,
+                        dir: METRICS_DIR,
+                        now,
+                        llmbId: llmb.id,
+                      })
+                    : null;
                 return formatDetail(
                   id,
                   detail,
-                  lookup(id, data?.superindex?.index)?.entry ?? null,
+                  lookup(id, superindexOf(data) ?? {})?.entry ?? null,
                   {
                     context: limits[id] ?? null,
+                    note: notes?.[id],
+                    plans,
+                    authTypes,
+                    llmbCandidates: llmb && "candidates" in llmb ? llmb.candidates : undefined,
                   },
                 );
               }),
@@ -437,12 +462,11 @@ export default {
                 "Every metric llmbenchmark.ai holds for these models, grouped by source and the " +
                 "setting it was measured at; values are 0-1 unless a unit is shown. " +
                 "SuperIndex: superindex.app (CC-BY-4.0).\n\n" +
-                parts.join("\n\n"),
+                parts.join("\n\n") +
+                ignored,
               metadata: { title: `metrics (full): ${Math.min(wanted.length, MAX_FULL_MODELS)}` },
             };
           }
-          const limits = await getLimitMap();
-          const settings = loadModelSettings(directory);
           const models = wanted.map((id) => ({
             id,
             ...(limits[id] ? { context: limits[id] } : {}),
@@ -452,17 +476,12 @@ export default {
               formatSummary({
                 models,
                 roles: squadRoles(await getAgents()),
-                notes: settings.found ? settings.models : null,
-                plans: settings.providers,
-                authTypes: loadAuthTypes(),
+                notes,
+                plans,
+                authTypes,
                 data,
                 now,
-              }) +
-              (settings.problems.length
-                ? `\n\nmodel_data.json ignored (owner notes missing above):\n${settings.problems
-                    .map((p) => `  - ${p}`)
-                    .join("\n")}`
-                : ""),
+              }) + ignored,
             metadata: { title: `metrics: ${models.length} model(s)` },
           };
         },

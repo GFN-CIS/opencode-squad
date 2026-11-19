@@ -23,7 +23,9 @@ import {
   indexScoreRows,
   indexSuperIndex,
   KEY_METRICS,
+  LLMBENCH_FORMAT,
   metricFetchedAt,
+  SUPERINDEX_FORMAT,
 } from "./metrics.js";
 
 export const TTL_MS = 48 * 3600_000;
@@ -115,16 +117,20 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
   const report = { superindex: "fresh", scores: "fresh", ids: "fresh" };
 
   const jobs = [];
-  if (due(prev.superindex)) {
+  // A block of an earlier format is due whatever its age: its serving facts
+  // may belong to another model (see superindexOf). If the refetch fails it
+  // is kept, still due, and read with those facts withheld.
+  if (due(prev.superindex) || prev.superindex?.format !== SUPERINDEX_FORMAT) {
     jobs.push(
       getJson(fetch, SUPERINDEX_URL, timeoutMs)
         .then((json) => {
           const index = indexSuperIndex(json);
-          // Count models, not keys: a row is indexed by basename and again by
-          // provider/basename, and only basenames are free of "/".
-          const n = Object.keys(index).filter((k) => !k.includes("/")).length;
+          // Count models, not keys: a row is indexed by basename, by
+          // provider/basename and by raw id ("=..."), and only basenames are
+          // free of both "/" and a leading "=".
+          const n = Object.keys(index).filter((k) => !k.includes("/") && !k.startsWith("=")).length;
           if (n < MIN_SUPERINDEX_MODELS) throw new Error(`only ${n} models`);
-          next.superindex = { fetchedAt: now, index };
+          next.superindex = { fetchedAt: now, format: SUPERINDEX_FORMAT, index };
           report.superindex = "updated";
         })
         .catch((e) => {
@@ -132,8 +138,13 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
         }),
     );
   }
+  // Rows of an earlier format may pool distinct ids: due whatever their age,
+  // kept (and still due) when the refetch fails.
   const dueMetrics = KEY_METRICS.map(({ metric }) => metric).filter(
-    (metric) => force || !isFresh({ fetchedAt: metricFetchedAt(prev.scores, metric) }, now),
+    (metric) =>
+      force ||
+      !isFresh({ fetchedAt: metricFetchedAt(prev.scores, metric) }, now) ||
+      prev.scores?.formatByMetric?.[metric] !== LLMBENCH_FORMAT,
   );
   if (dueMetrics.length) {
     jobs.push(
@@ -153,9 +164,13 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
         // Start from the resolved times so an old-format cache keeps its age.
         /** @type {Record<string, number>} */
         const fetchedAtByMetric = {};
+        /** @type {Record<string, number>} */
+        const formatByMetric = {};
         for (const { metric } of KEY_METRICS) {
           const at = metricFetchedAt(prev.scores, metric);
           if (typeof at === "number") fetchedAtByMetric[metric] = at;
+          const format = prev.scores?.formatByMetric?.[metric];
+          if (typeof format === "number") formatByMetric[metric] = format;
         }
         const failed = [];
         for (const [metric, index] of results) {
@@ -164,25 +179,27 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
           if (index && Object.keys(index).length) {
             byMetric[metric] = index;
             fetchedAtByMetric[metric] = now;
+            formatByMetric[metric] = LLMBENCH_FORMAT;
           } else failed.push(metric);
         }
         if (failed.length === results.length) {
           report.scores = `failed: no metric returned rows`;
           return;
         }
-        next.scores = { fetchedAtByMetric, byMetric };
+        next.scores = { fetchedAtByMetric, formatByMetric, byMetric };
         report.scores = failed.length ? `updated (kept old: ${failed.join(", ")})` : "updated";
       }),
     );
   }
-  if (due(prev.ids)) {
+  if (due(prev.ids) || prev.ids?.format !== LLMBENCH_FORMAT) {
     jobs.push(
       getJson(fetch, `${LLMBENCH_API}/models?has_score=true`, timeoutMs)
         .then((list) => {
           const index = indexModelIds(list);
-          const n = Object.keys(index).length;
+          // Count models: only basename keys are free of "/" and a leading "=".
+          const n = Object.keys(index).filter((k) => !k.includes("/") && !k.startsWith("=")).length;
           if (n < MIN_LLMBENCH_MODELS) throw new Error(`only ${n} models`);
-          next.ids = { fetchedAt: now, index };
+          next.ids = { fetchedAt: now, format: LLMBENCH_FORMAT, index };
           report.ids = "updated";
         })
         .catch((e) => {

@@ -15,19 +15,29 @@ import plugin from "../index.js";
 // Startup refreshes write global model data and schedule network requests;
 // leave tool registration and the filesystem generator real.
 vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
-  const { indexScoreRows, indexSuperIndex } = await import("../src/metrics.js");
+  const { indexModelIds, indexScoreRows, indexSuperIndex, LLMBENCH_FORMAT, SUPERINDEX_FORMAT } =
+    await import("../src/metrics.js");
   const fx = (name) =>
     JSON.parse(
       fs.readFileSync(path.join(import.meta.dirname, "fixtures", "metrics", name), "utf8"),
     );
   const rows = fx("llmbench-scores.json");
   const data = {
-    superindex: { fetchedAt: Date.now(), index: indexSuperIndex(fx("superindex.json")) },
+    superindex: {
+      fetchedAt: Date.now(),
+      format: SUPERINDEX_FORMAT,
+      index: indexSuperIndex(fx("superindex.json")),
+    },
     scores: {
       fetchedAt: Date.now(),
+      formatByMetric: Object.fromEntries(Object.keys(rows).map((m) => [m, LLMBENCH_FORMAT])),
       byMetric: Object.fromEntries(Object.entries(rows).map(([m, r]) => [m, indexScoreRows(r)])),
     },
-    ids: { fetchedAt: Date.now(), index: { "glm-5-3": "z-ai/glm-5.3" } },
+    ids: {
+      fetchedAt: Date.now(),
+      format: LLMBENCH_FORMAT,
+      index: indexModelIds([{ id: "z-ai/glm-5.3" }]),
+    },
   };
   return {
     ...(await importOriginal()),
@@ -179,6 +189,8 @@ test("squad_metrics renders the asked models, squad roles and full detail", asyn
     expect(fetched).toEqual(["https://api.llmbenchmark.ai/v1/models/z-ai%2Fglm-5.3"]);
     expect(one).toContain("## zai-coding-plan/glm-5.3");
     expect(one).toContain("cursorbench (max): cursorbench_4_0_score=0.426");
+    // The full view knows the plan the summary shows (#53).
+    expect(one).toMatch(/Serving: ctx 1M · subscription: GLM Coding Pro/);
   } finally {
     dispose();
     vi.unstubAllGlobals();
