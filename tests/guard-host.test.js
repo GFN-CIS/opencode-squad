@@ -10,15 +10,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { loadModelSettings } from "../.opencode/lib/runtime.js";
 import plugin from "../index.js";
-import { defaultStoreFile } from "../src/squad-store.js";
 
 vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   ensureGlobalModelDataFresh: () => {},
   importLegacySquad: () => ({ imported: 0, problems: [] }),
-  squadDescriber: () => (role, id) => `${role} on ${id}.`,
+  squadDescriber: () => () => ({
+    describe: (role, id) => `${role} on ${id}.`,
+    problems: globalThis.__modelDataProblems ?? [],
+    stale: false,
+  }),
   startMetricsRefresh: () => {},
   getMetrics: async () => null,
   loadModelSettings: vi.fn(() => ({ models: {}, providers: {}, found: false, problems: [] })),
@@ -254,24 +256,23 @@ test("a failed model catalog lookup is retried by the next call", async () => {
   }
 });
 
-test("squad_patch refuses while model_data.json is unreadable, writing nothing", async () => {
+test("an unreadable model_data.json does not block squad_patch; the report names it (#91)", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-unreadable-"));
   const h = await host();
-  vi.mocked(loadModelSettings).mockReturnValueOnce({
-    models: {},
-    providers: {},
-    found: false,
-    problems: ["/cfg/opencode/model_data.json: invalid JSON at line 3, column 1"],
-  });
+  globalThis.__modelDataProblems = [
+    "/cfg/opencode/model_data.json: invalid JSON at line 3, column 1",
+  ];
   try {
     const res = await h.tools
       .get("squad_patch")
       .execute({ revision: "none", grunts: { "a/b": {} } }, { agent: "build" });
-    expect(res.content).toContain("Refused: model_data.json cannot be read");
+    expect(res.content).toContain("+1 added");
+    expect(res.content).toContain("model_data.json cannot be read");
     expect(res.content).toContain("invalid JSON at line 3, column 1");
-    expect(fs.existsSync(defaultStoreFile())).toBe(false);
+    expect(res.content).toContain("agent descriptions carry no owner rules and say so");
     expect(fs.readdirSync(directory)).toEqual([]);
   } finally {
+    delete globalThis.__modelDataProblems;
     h.dispose();
     fs.rmSync(directory, { recursive: true, force: true });
   }

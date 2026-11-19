@@ -4,6 +4,8 @@
 //        offers only the drill's tools and enforces its rules;
 //   #88  an agent the user wrote keeps its whole effective definition when the
 //        roster asks for its id, or when a verified legacy file shares its id.
+//   #91  an unreadable model_data.json never registers a squad agent whose
+//        description silently lacks the owner's rules.
 // Run: npm run test:integration   (Node >= 24)
 
 import fs from "node:fs/promises";
@@ -151,3 +153,29 @@ test("#88: a verified legacy file does not hide another agent the host loaded at
   expect(alone?.system).toContain("HAND-WRITTEN PROMPT");
   expect(live).toEqual(alone);
 }, 180_000);
+
+test("#91: with model_data.json unreadable, the live description says the owner rules are unknown", async () => {
+  await writeRoster({ grunts: { "p/m": {} } });
+  // The owner's rule is in there, but the file does not parse.
+  await fs.writeFile(
+    path.join(configDir(), "model_data.json"),
+    '{"models": {"p/m": {"info": "no secrets"}},',
+  );
+  try {
+    const live = await withHost(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.llm.serve((request) =>
+            isTitleRequest(request) ? TestLLM.text("Title", "title") : TestLLM.text("ok", "answer"),
+          );
+          yield* oneTurn(h);
+          return yield* liveAgent(h, "grunt-p-m");
+        }),
+      GLOBAL_ALLOW,
+    );
+    expect(live?.description).toContain("Owner rules UNKNOWN");
+    expect(live?.description).toContain("model_data.json could not be read");
+  } finally {
+    await fs.rm(path.join(configDir(), "model_data.json"), { force: true });
+  }
+}, 120_000);

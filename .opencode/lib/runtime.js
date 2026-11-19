@@ -259,15 +259,47 @@ export function importLegacySquad() {
   }
 }
 
+/** Said in a squad agent's description when the owner's rules cannot be read. */
+export const OWNER_RULES_UNKNOWN =
+  "Owner rules UNKNOWN: model_data.json could not be read, so any routing rule the " +
+  "owner set for this model is missing here. Ask the user before giving it secrets or " +
+  "anything they may restrict.";
+
 /**
  * describe(role, modelId) for the squad, from the GLOBAL model_data.json: the
  * squad is global, and with project overrides its descriptions would flip with
  * whichever project's instance registered last.
  *
- * @returns {(role: "grunt"|"drill", modelId: string) => string}
+ * The owner's rules in there are binding routing rules ("no secrets"), and a
+ * description is the line the orchestrator routes by, so a file that cannot
+ * be read must not turn them into a plain description (#91). One contract for
+ * startup, every reload and squad_patch alike:
+ *   - the settings last read without a problem stay in force, for the life of
+ *     the plugin instance (`stale`);
+ *   - with none read yet, each description says the owner's rules are unknown;
+ *   - either way `problems` names the file, for squad_dump and squad_patch.
+ *
+ * @returns {() => {describe: (role: "grunt"|"drill", modelId: string) => string,
+ *   problems: string[], stale: boolean}}
  */
 export function squadDescriber() {
-  return describerFrom(loadModelSettings(null));
+  /** @type {ModelSettings | null} */
+  let lastGood = null;
+  return () => {
+    const settings = loadModelSettings(null);
+    if (!settings.problems.length) {
+      lastGood = settings;
+      return { describe: describerFrom(settings), problems: [], stale: false };
+    }
+    if (lastGood) {
+      return { describe: describerFrom(lastGood), problems: settings.problems, stale: true };
+    }
+    return {
+      describe: (role) => `${describeAgent(role)} ${OWNER_RULES_UNKNOWN}`,
+      problems: settings.problems,
+      stale: false,
+    };
+  };
 }
 
 /**

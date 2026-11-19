@@ -275,11 +275,13 @@ export default {
       }
       return { state: "ok", roster: legacy.roster, revision: NO_STORE_REVISION };
     };
+    // The owner's rules for descriptions, with the last good read kept (#91).
+    const readDescriptions = squadDescriber();
     const specsNow = () => {
       const store = readStore(storeFile);
       if (store.state !== "ok") return null;
       return agentSpecs(store.roster, {
-        describe: squadDescriber(),
+        describe: readDescriptions().describe,
         prompt: (role) => {
           try {
             return loadRolePrompt(role);
@@ -323,6 +325,16 @@ export default {
         notes.push(
           `${id}: looks generated but is not in the global agent dir, so it is left as is; ` +
             "if it is an old squad file of a project, the user may delete it",
+        );
+      }
+      const described = readDescriptions();
+      if (described.problems.length) {
+        notes.push(
+          `model_data.json cannot be read (${described.problems.join("; ")}): ` +
+            (described.stale
+              ? "agent descriptions keep the owner rules read earlier in this session"
+              : "agent descriptions carry no owner rules and say so") +
+            ". Ask the user to fix the file.",
         );
       }
       for (const p of legacyImport.problems) {
@@ -811,17 +823,9 @@ export default {
               content: `Roster is invalid:\n${variantErrors.map((e) => `  - ${e}`).join("\n")}`,
             };
           }
-          // Descriptions carry the owner's routing rules from model_data.json;
-          // registering from an unreadable file would strip them from every agent.
-          const problems = loadModelSettings(null).problems;
-          if (problems.length) {
-            return {
-              content:
-                "Refused: model_data.json cannot be read, and agent descriptions are built " +
-                "from it — applying now would drop the owner's routing rules. Nothing was " +
-                `written. Ask the user to fix:\n${problems.map((p) => `  - ${p}`).join("\n")}`,
-            };
-          }
+          // An unreadable model_data.json does not block the roster: the
+          // descriptions keep the owner's rules last read, or say they are
+          // unknown, and the report's notes name the file (#91).
           // Every await happens above this line. From here to the write the
           // handler is synchronous, so no other patch of this process runs in
           // between, and the lock keeps other OpenCode processes out (#89).

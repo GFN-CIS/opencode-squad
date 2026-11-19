@@ -46,7 +46,11 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
     ...(await importOriginal()),
     ensureGlobalModelDataFresh: () => {},
     importLegacySquad: () => ({ imported: 0, problems: [] }),
-    squadDescriber: () => (role, id) => `${role} on ${id}. Owner rule: no secrets.`,
+    squadDescriber: () => () => ({
+      describe: (role, id) => `${role} on ${id}. Owner rule: no secrets.`,
+      problems: [],
+      stale: false,
+    }),
     startMetricsRefresh: () => {},
     // A test may swap in its own cache contents.
     getMetrics: async () => globalThis.__squadMetricsData ?? data,

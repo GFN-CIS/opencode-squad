@@ -12,6 +12,8 @@ import {
   ensureGlobalModelDataFresh,
   importLegacySquad,
   loadModelSettings,
+  OWNER_RULES_UNKNOWN,
+  squadDescriber,
 } from "../.opencode/lib/runtime.js";
 import { readStore, writeStore } from "../src/squad-store.js";
 
@@ -144,6 +146,29 @@ test("legacy files whose models map to one agent id block the import (#90)", () 
   expect(r.imported).toBe(0);
   expect(r.problems).toEqual([expect.stringContaining("grunt-p-m-1")]);
   expect(fs.existsSync(storeFile)).toBe(false);
+});
+
+test("an unreadable model_data.json never yields a description without its rules (#91)", () => {
+  const read = squadDescriber();
+  // Broken from the start: no rules known, and the description says so.
+  fs.writeFileSync(globalFile, '{"models": {"a/b": {"info": "no secrets"}},');
+  let now = read();
+  expect(now.problems).toEqual([expect.stringContaining(globalFile)]);
+  expect(now.stale).toBe(false);
+  expect(now.describe("grunt", "a/b")).toContain(OWNER_RULES_UNKNOWN);
+  expect(now.describe("grunt", "a/b")).not.toContain("no secrets");
+  // Readable: the owner's rule, no problems.
+  fs.writeFileSync(globalFile, JSON.stringify({ models: { "a/b": { info: "no secrets" } } }));
+  now = read();
+  expect(now.problems).toEqual([]);
+  expect(now.describe("grunt", "a/b")).toContain("Owner rule: no secrets.");
+  // Broken again: the rules last read stay in force, and the problem is named.
+  fs.writeFileSync(globalFile, "{");
+  now = read();
+  expect(now.stale).toBe(true);
+  expect(now.problems).toEqual([expect.stringContaining(globalFile)]);
+  expect(now.describe("grunt", "a/b")).toContain("Owner rule: no secrets.");
+  expect(now.describe("grunt", "a/b")).not.toContain(OWNER_RULES_UNKNOWN);
 });
 
 test("no legacy squad, no import: squad.json is not created empty", () => {
