@@ -399,3 +399,85 @@ test("squad_patch validates its input with the same schema it advertises", async
     dispose();
   }
 });
+
+/** A squad file as versions before #85 wrote it, in the global agent dir. */
+function legacyAgent(name, model) {
+  const dir = path.join(process.env.XDG_CONFIG_HOME, "opencode", "agent");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, name),
+    `---\n# generated-by: opencode-squad squad-draft\nmode: subagent\nmodel: ${model}\n---\n`,
+  );
+  return dir;
+}
+
+test("without squad.json, a legacy squad that cannot be read is unknown, not empty", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const agentDir = legacyAgent("grunt-a-b.md", "a/b");
+  dirs.push(agentDir);
+  fs.writeFileSync(
+    path.join(agentDir, "grunt-c-d.md"),
+    "---\n# generated-by: opencode-squad x\ndesc",
+  );
+  const { tools, dispose } = await setupHost({ directory });
+  try {
+    const dump = (await tools.get("squad_dump").execute({}, { agent: "build" })).content;
+    expect(dump).toContain("The squad cannot be read, so it is NOT empty");
+    expect(dump).toContain("grunt-c-d.md");
+    const patch = (
+      await tools.get("squad_patch").execute({ grunts: { "x/y": {} } }, { agent: "build" })
+    ).content;
+    expect(patch).toContain("Refused: the current squad cannot be read");
+    expect(readStore(defaultStoreFile()).state).toBe("missing");
+  } finally {
+    dispose();
+  }
+});
+
+test("without squad.json, the legacy squad is what a patch is diffed against", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  dirs.push(legacyAgent("grunt-a-b.md", "a/b"));
+  legacyAgent("drill-a-b.md", "a/b");
+  const { tools, dispose } = await setupHost({ directory });
+  try {
+    const dump = (await tools.get("squad_dump").execute({}, { agent: "build" })).content;
+    expect(dump).toContain('"a/b"');
+    // Rebuilt from memory without the drill: a deletion, refused.
+    const patch = (
+      await tools.get("squad_patch").execute({ grunts: { "a/b": {} } }, { agent: "build" })
+    ).content;
+    expect(patch).toContain("would DELETE 1 agent(s)");
+    expect(patch).toContain("drill a/b");
+    expect(readStore(defaultStoreFile()).state).toBe("missing");
+  } finally {
+    dispose();
+  }
+});
+
+test("a hand-authored agent on an unchanged entry is no reason to refuse other changes", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { writeStore } = await import("../src/squad-store.js");
+  writeStore(defaultStoreFile(), { grunts: { "p/q": {} }, drills: {} });
+  const { tools, dispose } = await setupHost({
+    directory,
+    agent: { list: async () => [{ id: "grunt-p-q", system: "My own prompt." }] },
+  });
+  try {
+    const patch = tools.get("squad_patch");
+    const kept = (await patch.execute({ grunts: { "p/q": {}, "p/r": {} } }, { agent: "build" }))
+      .content;
+    expect(kept).toContain("+1 added");
+    // Changing that entry is a new claim on the user's id: refused.
+    const changed = (
+      await patch.execute({ grunts: { "p/q": { variant: "high" }, "p/r": {} } }, { agent: "build" })
+    ).content;
+    expect(changed).toContain(
+      "REFUSED: the roster asks for an agent id that a hand-authored agent",
+    );
+  } finally {
+    dispose();
+  }
+});

@@ -12,7 +12,10 @@ import { promptOpen } from "../src/prompt-inject.js";
 import { model, TestLLM, withHost } from "./host.js";
 
 const storeFile = () => path.join(process.env.XDG_CONFIG_HOME ?? "", "opencode", "squad.json");
-afterEach(() => fs.rm(storeFile(), { force: true }));
+afterEach(async () => {
+  await fs.rm(storeFile(), { force: true });
+  await fs.rm(path.join(path.dirname(storeFile()), "agent"), { recursive: true, force: true });
+});
 
 /** @param {object} roster */
 async function writeRoster(roster) {
@@ -89,11 +92,17 @@ test("the squad is registered from squad.json: dispatch, drill policy, legacy ag
               prompt: "CHILD-GHOST",
             });
           if (turn === 4)
+            return callTool("p-worker", "subagent", {
+              agent: "worker-old-w",
+              description: "old",
+              prompt: "CHILD-WORKER",
+            });
+          if (turn === 5)
             return code(
               "p-patch",
               'return await tools.squad_patch({grunts: {"p/m": {variant: "high"}, "p/n": {}}, drills: {"p/m": {}}})',
             );
-          if (turn === 5)
+          if (turn === 6)
             return callTool("p-new", "subagent", {
               agent: "grunt-p-n",
               description: "new",
@@ -115,14 +124,25 @@ test("the squad is registered from squad.json: dispatch, drill policy, legacy ag
     GLOBAL_ALLOW,
     {
       prepare: async (project) => {
-        await fs.mkdir(path.join(project, "agent"));
-        // The same id as a roster agent, with fields the squad does not set.
-        await fs.writeFile(
-          path.join(project, "agent", "grunt-p-m.md"),
-          legacy("grunt", "p/m", 'steps: 3\ncolor: "#ff0000"'),
-        );
-        // A legacy agent the roster no longer has.
-        await fs.writeFile(path.join(project, "agent", "drill-old-m.md"), legacy("drill", "old/m"));
+        // In a real install the host loads agents from the same global dir the
+        // plugin verifies legacy files in; here the host's config dir is the
+        // project, so the files go to both.
+        const files = {
+          // The same id as a roster agent, with fields the squad does not set.
+          "grunt-p-m.md": legacy("grunt", "p/m", 'steps: 3\ncolor: "#ff0000"'),
+          // A legacy agent the roster no longer has.
+          "drill-old-m.md": legacy("drill", "old/m"),
+          // Generated before the role-prompt fence existed: no fence at all.
+          "worker-old-w.md": legacy("grunt", "old/w").replace(/<!--[^\n]*-->\n?/g, ""),
+        };
+        for (const dir of [
+          path.join(project, "agent"),
+          path.join(path.dirname(storeFile()), "agent"),
+        ]) {
+          await fs.mkdir(dir, { recursive: true });
+          for (const [name, text] of Object.entries(files))
+            await fs.writeFile(path.join(dir, name), text);
+        }
       },
     },
   );
@@ -144,9 +164,12 @@ test("the squad is registered from squad.json: dispatch, drill policy, legacy ag
   expect(drill.results).toMatch(/"id":"c-rm".{0,200}permission\.rejected/);
   expect(drill.results).not.toMatch(/"id":"c-gl".{0,200}permission\.rejected/);
 
-  // The legacy agent the roster dropped is not dispatchable.
+  // Legacy agents the roster dropped are not dispatchable, a pre-fence
+  // worker- included.
   expect(toolState(out.context, "p-ghost")?.status).toBe("error");
   expect(children["CHILD-GHOST"]).toBeUndefined();
+  expect(toolState(out.context, "p-worker")?.status).toBe("error");
+  expect(children["CHILD-WORKER"]).toBeUndefined();
 
   // squad_patch: written to squad.json, live on the next dispatch.
   expect(JSON.stringify(toolState(out.context, "p-patch"))).toContain("+1 added");

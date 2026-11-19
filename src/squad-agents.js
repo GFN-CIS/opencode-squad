@@ -19,9 +19,11 @@
 //          gets: base, global, own. The host then filters the child's tool
 //          catalog by them: a drill sees read-only tools only.
 //
-// A roster id whose agent is hand-authored (its system prompt has no
-// squad:prompt fence after the config plugin ran) is left alone and reported:
-// the user's agent wins, and squad_patch refuses that id.
+// Which agents are ours: one registered from the roster, or one an earlier
+// version generated as a file in the global agent dir (marker-verified at
+// start). A roster id an agent of anyone else already holds (no squad:prompt
+// fence, not a verified legacy file) is left alone and reported: the user's
+// agent wins, and squad_patch refuses that id.
 
 import { findPromptFence, placeholderBody, wrapPrompt } from "./prompt-inject.js";
 import { NOTES_CLOSE, NOTES_OPEN, ROLE_KEYS } from "./roster.js";
@@ -112,29 +114,42 @@ export function earlyTransform(editor, specs) {
 /**
  * @param {{list: () => readonly any[], get: (id: string) => any, update: (id: string, f: (agent: any) => void) => void, remove: (id: string) => void}} editor
  * @param {AgentSpec[]} specs
- * @returns {{foreign: string[], hidden: string[]}}
+ * @param {Set<string>} [legacy]  agent ids of the generated files an earlier
+ *   version wrote to the global agent dir, verified by their marker
+ *   (src/squad-apply.js readLegacySquad). Files from before the role-prompt
+ *   fence, and every `worker-*`, are only recognisable this way: the marker is
+ *   a YAML comment the host never exposes.
+ * @returns {{foreign: string[], hidden: string[], stray: string[]}}
  *   foreign: roster ids a hand-authored agent already holds (left alone);
- *   hidden: legacy generated agents removed because the roster no longer has them
+ *   hidden: legacy generated agents removed because the roster no longer has them;
+ *   stray: generated-looking agents from elsewhere (a project's own agent dir),
+ *          left alone because this plugin did not verify them as its own
  */
-export function lateTransform(editor, specs) {
+export function lateTransform(editor, specs, legacy = new Set()) {
   const wanted = new Map(specs.map((s) => [s.id, s]));
   /** @type {string[]} */
   const foreign = [];
   /** @type {string[]} */
   const hidden = [];
+  /** @type {string[]} */
+  const stray = [];
   for (const agent of [...editor.list()]) {
     const id = String(agent?.id ?? "");
-    if (wanted.has(id) || squadRoleOf(id) === null || !isSquadSystem(agent?.system)) continue;
-    editor.remove(id);
-    hidden.push(id);
+    if (wanted.has(id)) continue;
+    if (legacy.has(id)) {
+      editor.remove(id);
+      hidden.push(id);
+    } else if (squadRoleOf(id) !== null && isSquadSystem(agent?.system)) {
+      stray.push(id);
+    }
   }
   for (const spec of specs) {
     const current = editor.get(spec.id);
-    if (current && !isSquadSystem(current.system)) {
+    if (current && !isSquadSystem(current.system) && !legacy.has(spec.id)) {
       foreign.push(spec.id);
       continue;
     }
     editor.update(spec.id, (agent) => shape(agent, spec));
   }
-  return { foreign: foreign.sort(), hidden: hidden.sort() };
+  return { foreign: foreign.sort(), hidden: hidden.sort(), stray: stray.sort() };
 }

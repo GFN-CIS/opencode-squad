@@ -27,6 +27,8 @@
  * hooks and tools.
  */
 
+import path from "node:path";
+
 import { formatCompactReport } from "../../src/compact.js";
 import { estimateContextTokens, indexModelCatalog } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
@@ -226,10 +228,39 @@ export default {
 
     const storeFile = defaultStoreFile();
     let storeSig = storeSignature(storeFile);
-    /** Agents a hand-authored file holds, and legacy ones hidden; from the late transform. */
+    /** From the late transform: hand-authored holders of roster ids, legacy agents hidden, stray ones left. */
     let lateReport = {
       foreign: /** @type {string[]} */ ([]),
       hidden: /** @type {string[]} */ ([]),
+      stray: /** @type {string[]} */ ([]),
+    };
+    // The agents earlier versions generated as files in the global agent dir,
+    // verified by their marker once, at start: the only way to know a
+    // pre-fence file or a worker-* is ours (src/squad-agents.js lateTransform).
+    const legacyIds = new Set(
+      readLegacySquad(defaultAgentDir()).files.map((f) => f.replace(/\.md$/, "")),
+    );
+    /**
+     * The roster as it stands. Without squad.json yet (its import was blocked),
+     * the squad still exists as files: that is the roster an apply diffs
+     * against, so rebuilding from an empty dump cannot delete it unguarded.
+     *
+     * @returns {{state: "ok", roster: any} | {state: "invalid", problems: string[]}}
+     */
+    const currentSquad = () => {
+      const store = readStore(storeFile);
+      if (store.state === "ok") return { state: "ok", roster: store.roster };
+      if (store.state === "invalid") {
+        return { state: "invalid", problems: [`${storeFile}: ${store.reason}`] };
+      }
+      const legacy = readLegacySquad(defaultAgentDir());
+      if (legacy.problems.length) {
+        return {
+          state: "invalid",
+          problems: legacy.problems.map((p) => path.join(defaultAgentDir(), p)),
+        };
+      }
+      return { state: "ok", roster: legacy.roster };
     };
     const specsNow = () => {
       const store = readStore(storeFile);
@@ -260,6 +291,12 @@ export default {
           `${id}: a hand-authored agent holds this id, so the squad's entry is not registered`,
         );
       }
+      for (const id of lateReport.stray) {
+        notes.push(
+          `${id}: looks generated but is not in the global agent dir, so it is left as is; ` +
+            "if it is an old squad file of a project, the user may delete it",
+        );
+      }
       for (const p of legacyImport.problems) {
         notes.push(`legacy squad files were not imported: ${p}. Fix or delete it, then restart`);
       }
@@ -284,7 +321,7 @@ export default {
             // An unreadable squad.json registers nothing and hides nothing:
             // legacy agent files, if any, keep working until it is fixed.
             const specs = specsNow();
-            if (specs) lateReport = lateTransform(editor, specs);
+            if (specs) lateReport = lateTransform(editor, specs, legacyIds);
           } catch {
             // As above.
           }
@@ -474,16 +511,17 @@ export default {
         execute: async (input) => {
           const { directory: asked } = /** @type {{directory?: unknown}} */ (input ?? {});
           if (asked !== undefined) return { content: DIRECTORY_GONE };
-          const store = readStore(storeFile);
-          if (store.state === "invalid") {
+          const squad = currentSquad();
+          if (squad.state === "invalid") {
             return {
               content:
-                `The squad roster ${storeFile} cannot be read (${store.reason}). Nothing is ` +
-                "registered from it and squad_patch refuses until it is fixed: ask the user to " +
-                "repair or restore the file. It is never overwritten.",
+                "The squad cannot be read, so it is NOT empty: it is unknown. Nothing new is " +
+                "registered and squad_patch refuses until the user fixes:\n" +
+                squad.problems.map((p) => `  - ${p}`).join("\n") +
+                "\nAsk the user to repair or restore these. Do not build a roster from scratch.",
             };
           }
-          const roster = store.state === "ok" ? store.roster : { grunts: {}, drills: {} };
+          const roster = squad.roster;
           const count = Object.keys(roster.grunts).length + Object.keys(roster.drills).length;
           const notes = squadNotes();
           const note = notes.length ? `\n\nnotes:\n${notes.map((c) => `  ${c}`).join("\n")}` : "";
@@ -647,16 +685,16 @@ export default {
           }
           // Re-read right before writing: another OpenCode process may have
           // changed the roster since this one last looked.
-          const store = readStore(storeFile);
-          if (store.state === "invalid") {
+          const squad = currentSquad();
+          if (squad.state === "invalid") {
             return {
               content:
-                `Refused: the squad roster ${storeFile} cannot be read (${store.reason}), and ` +
-                "writing over it could lose the user's squad. Nothing was written. Ask the " +
-                "user to repair or restore it.",
+                "Refused: the current squad cannot be read, and writing a roster now could " +
+                "lose it. Nothing was written. Ask the user to fix:\n" +
+                squad.problems.map((p) => `  - ${p}`).join("\n"),
             };
           }
-          const current = store.state === "ok" ? store.roster : { grunts: {}, drills: {} };
+          const current = squad.roster;
           // A hand-authored agent already holding an id this roster wants.
           const agents = unwrap(await ctx.agent.list().catch(() => null)) ?? [];
           const byId = new Map(
@@ -667,7 +705,12 @@ export default {
             ["grunts", "grunt"],
             ["drills", "drill"],
           ])) {
-            for (const modelId of Object.keys(roster[key])) {
+            for (const [modelId, entry] of Object.entries(roster[key])) {
+              // An entry kept as it was is not a new claim on the id: a user
+              // agent that took it over later is reported, not a reason to
+              // refuse every future patch.
+              const before = current[key]?.[modelId];
+              if (before && JSON.stringify(before) === JSON.stringify(entry)) continue;
               const id = slugForModel(modelId, role);
               const agent = byId.get(id);
               if (agent && !isSquadSystem(agent.system)) {

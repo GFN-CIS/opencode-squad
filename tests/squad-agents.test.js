@@ -118,7 +118,7 @@ test("late: a same-id legacy generated file is taken over, its own fields cleare
   };
   const editor = editorOf([legacy]);
   const report = lateTransform(editor, specs);
-  expect(report).toEqual({ foreign: [], hidden: [] });
+  expect(report).toEqual({ foreign: [], hidden: [], stray: [] });
   const agent = editor.get("grunt-a-b");
   expect(agent.system).toContain("the grunt prompt");
   expect(agent.description).toBe("grunt on a/b");
@@ -130,18 +130,48 @@ test("late: a hand-authored agent with a roster id is left alone and reported", 
   const specs = agentSpecs({ grunts: { "a/b": {} } }, io);
   const mine = { id: "grunt-a-b", system: "My own prompt.", description: "mine", permissions: [] };
   const editor = editorOf([mine]);
-  expect(lateTransform(editor, specs)).toEqual({ foreign: ["grunt-a-b"], hidden: [] });
+  expect(lateTransform(editor, specs)).toEqual({ foreign: ["grunt-a-b"], hidden: [], stray: [] });
   expect(editor.get("grunt-a-b")).toEqual(mine);
 });
 
-test("late: legacy generated agents the roster dropped are hidden; nothing else is", () => {
+test("late: verified legacy agents the roster dropped are hidden, worker- included; nothing else is", () => {
   const fenced = `${promptOpen("drill")}\nx\n${PROMPT_CLOSE}`;
   const editor = editorOf([
     { id: "drill-old-model", system: fenced, permissions: [] },
+    // Generated before the fence existed: only the marker-verified set knows it.
+    { id: "worker-old-model", system: "an old inlined prompt", permissions: [] },
     { id: "drill-hand-written", system: "mine", permissions: [] },
+    // Fenced, but from a project's own agent dir: not verified as ours.
+    { id: "drill-project-model", system: fenced, permissions: [] },
     { id: "build", system: fenced, permissions: [] },
   ]);
-  const report = lateTransform(editor, agentSpecs({ grunts: { "a/b": {} } }, io));
-  expect(report.hidden).toEqual(["drill-old-model"]);
-  expect([...editor.map.keys()].sort()).toEqual(["build", "drill-hand-written", "grunt-a-b"]);
+  const report = lateTransform(
+    editor,
+    agentSpecs({ grunts: { "a/b": {} } }, io),
+    new Set(["drill-old-model", "worker-old-model"]),
+  );
+  expect(report).toEqual({
+    foreign: [],
+    hidden: ["drill-old-model", "worker-old-model"],
+    stray: ["drill-project-model"],
+  });
+  expect([...editor.map.keys()].sort()).toEqual([
+    "build",
+    "drill-hand-written",
+    "drill-project-model",
+    "grunt-a-b",
+  ]);
+});
+
+test("late: a pre-fence legacy file with a roster id is taken over, not foreign", () => {
+  const editor = editorOf([
+    { id: "grunt-a-b", system: "old inlined grunt prompt", permissions: [] },
+  ]);
+  const report = lateTransform(
+    editor,
+    agentSpecs({ grunts: { "a/b": {} } }, io),
+    new Set(["grunt-a-b"]),
+  );
+  expect(report.foreign).toEqual([]);
+  expect(editor.get("grunt-a-b").system).toContain("the grunt prompt");
 });
