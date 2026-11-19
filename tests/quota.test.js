@@ -242,3 +242,12 @@ test("the reporter announces a rejection at any utilization, once per allowed-to
   expect(first).toMatch(/^\[QUOTA\] anthropic: 5h 50% \(binding\).*REJECTING/);
   expect(fresh("orch|anthropic", "anthropic", anthropicStatus(0.5, "rejected"), 0)).toBe("");
 });
+
+test("one continuous rejection is announced once, even as the bands climb", () => {
+  const report = createQuotaReporter();
+  const notes = [0.5, 0.81, 0.96, 0.99]
+    .map((used) => report("orch|anthropic", "anthropic", anthropicStatus(used, "rejected"), 0))
+    .filter(Boolean);
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toMatch(/5h 50%.*REJECTING/);
+});

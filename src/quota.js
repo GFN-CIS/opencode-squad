@@ -206,8 +206,8 @@ export const TOP_BAND_STEP = 0.02;
  * again only once it has climbed by TOP_BAND_STEP. Falling below the first
  * band resets, so the next climb is reported afresh. A rejection is reported
  * on its own: the first one seen, and every allowed-to-rejected transition,
- * whatever the band; repeated rejections stay quiet until the provider has
- * accepted again.
+ * whatever the band; while the rejection lasts nothing more is said, not even
+ * on a band change, until the provider has accepted again.
  *
  * @returns {(key: string, providerID: string, headers: Record<string, string>, now: number) => string}
  *   the clause to deliver, or "" when there is nothing new to say
@@ -224,6 +224,12 @@ export function createQuotaReporter() {
     const prev = last.get(key);
     const blocked = snapshot.blocked === true;
     const newlyBlocked = blocked && !prev?.blocked;
+    // Still rejecting, already told: the routing decision is unchanged, so a
+    // new percentage or band is not news until the provider accepts again.
+    if (blocked && !newlyBlocked) {
+      last.set(key, { band, used: binding.used, blocked });
+      return "";
+    }
     if (band === null && !newlyBlocked) {
       last.set(key, { band: null, used: binding.used, blocked });
       return "";
