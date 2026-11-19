@@ -95,6 +95,50 @@ function readText(file) {
 
 const isGenerated = isGeneratedAgent;
 
+/** The file a path really lands on: through symlinks, or the path itself when new. @param {string} file */
+function physicalPath(file) {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+}
+
+/**
+ * Targets that reach one physical file under another agent file's name: two
+ * symlinks onto one file, or a link onto a sibling agent. Writing both would
+ * leave one agent with the other's configuration while both report success.
+ * An ordinary link onto a file nothing else in `dir` reaches is fine.
+ *
+ * @param {string} dir
+ * @param {string[]} targets  filenames the apply will write
+ * @returns {string[]}  one problem line per shared destination
+ */
+function sharedDestinations(dir, targets) {
+  /** @type {Map<string, Set<string>>} physical path -> agent filenames reaching it */
+  const reach = new Map();
+  /** @param {string} name */
+  const add = (name) => {
+    const real = physicalPath(path.join(dir, name));
+    if (!reach.has(real)) reach.set(real, new Set());
+    reach.get(real)?.add(name);
+  };
+  /** @type {string[]} */
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+  } catch {
+    // No agent dir yet: only the targets themselves can collide.
+  }
+  for (const name of new Set([...names, ...targets])) add(name);
+  const out = [];
+  for (const [real, set] of reach) {
+    if (set.size < 2 || !targets.some((t) => set.has(t))) continue;
+    out.push(`${[...set].sort().join(", ")} all lead to ${real}; each agent needs its own file`);
+  }
+  return out;
+}
+
 /**
  * Ours, but with no model we can read (a truncated or mangled header). One
  * predicate for dump and apply, so the file the dump says it leaves in place is
@@ -221,6 +265,12 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
       plan.push({ role, modelId, entry, filename, content, existing });
     }
   }
+  problems.push(
+    ...sharedDestinations(
+      dir,
+      plan.map((p) => p.filename),
+    ),
+  );
   if (unreadable.length) return refuse("unreadable", unreadable);
   if (damaged.length) return refuse("damaged", damaged);
   if (dangling.length) return refuse("dangling", dangling);

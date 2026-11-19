@@ -16,9 +16,12 @@ import { NOTES_CLOSE, NOTES_OPEN } from "./roster.js";
 // below carries the current skill name for readability.
 const GENERATED_MARKER_PREFIX = "generated-by: opencode-squad";
 export const GENERATED_MARKER = `${GENERATED_MARKER_PREFIX} squad-draft`;
-// Prune detection matches files from before the opencode-orchestrate -> squad
-// rename too, so regenerating cleanly migrates older generated agents.
-const GENERATED_MARKER_DETECT = "generated-by: opencode-";
+// Detection matches files from before the opencode-orchestrate -> squad
+// rename too, so regenerating cleanly migrates older generated agents. The two
+// markers this plugin has ever written: "opencode-squad" and, before
+// the rename, "opencode-orchestrate". Another generator's "opencode-<x>" is not
+// ours.
+const GENERATED_MARKER_DETECT = "generated-by: opencode-(?:squad|orchestrate)(?=[ \\t\\r\\n]|$)";
 // Every version of agentMarkdown has written the marker as the first line of
 // the frontmatter, so that is the only place it counts: a hand-authored agent
 // whose prompt quotes the marker is still the user's. No closing fence is

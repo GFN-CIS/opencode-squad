@@ -223,7 +223,68 @@ test("a generated file saved with CRLF line endings is still ours", () => {
   expect(readSquad(agentDir).roster.grunts).toHaveProperty("a/b");
 });
 
+test("another generator's opencode-* marker does not make a file ours", () => {
+  const other = [
+    "---",
+    "# generated-by: opencode-other-tool",
+    "model: a/b",
+    "---",
+    "Their prompt.",
+    "",
+  ].join("\n");
+  const target = path.join(agentDir, "grunt-a-b.md");
+  fs.writeFileSync(target, other);
+  expect(readSquad(agentDir).roster).toEqual({ grunts: {}, drills: {} });
+  expect(syncDescriptions({ dir: agentDir, describe: () => "new description" })).toEqual([]);
+  const result = applySquad({ roster: { grunts: { "a/b": {} }, drills: {} }, dir: agentDir });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(fs.readFileSync(target, "utf8")).toBe(other);
+});
+
+test("a file with the pre-rename opencode-orchestrate marker is still ours", () => {
+  const { filename, content } = agentMarkdown("grunt", "a/b", {});
+  const legacy = content.replace(
+    /generated-by: opencode-squad[^\n]*/,
+    "generated-by: opencode-orchestrate generating-model-workers",
+  );
+  fs.writeFileSync(path.join(agentDir, filename), legacy);
+  expect(readSquad(agentDir).roster.grunts).toHaveProperty("a/b");
+});
+
 // #52
+
+test("two agent paths linked to one file refuse the apply and change nothing", () => {
+  const shared = path.join(root, "dotfiles", "a-b.md");
+  fs.mkdirSync(path.dirname(shared), { recursive: true });
+  const { content } = agentMarkdown("grunt", "a/b", {});
+  fs.writeFileSync(shared, content);
+  fs.symlinkSync(shared, path.join(agentDir, "grunt-a-b.md"));
+  fs.symlinkSync(shared, path.join(agentDir, "drill-a-b.md"));
+  const result = applySquad({
+    roster: { grunts: { "a/b": { variant: "low" } }, drills: { "a/b": { variant: "high" } } },
+    dir: agentDir,
+  });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(result.ok ? [] : result.problems).toEqual([
+    `drill-a-b.md, grunt-a-b.md all lead to ${fs.realpathSync(shared)}; each agent needs its own file`,
+  ]);
+  expect(fs.readFileSync(shared, "utf8")).toBe(content);
+});
+
+test("a symlink to a file nothing else reaches is still written through", () => {
+  const own = path.join(root, "dotfiles", "grunt-a-b.md");
+  fs.mkdirSync(path.dirname(own), { recursive: true });
+  fs.writeFileSync(own, agentMarkdown("grunt", "a/b", {}).content);
+  const link = path.join(agentDir, "grunt-a-b.md");
+  fs.symlinkSync(own, link);
+  const result = applySquad({
+    roster: { grunts: { "a/b": { variant: "low" } }, drills: {} },
+    dir: agentDir,
+  });
+  expect(result.ok).toBe(true);
+  expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+  expect(fs.readFileSync(own, "utf8")).toMatch(/low/);
+});
 
 test("a dangling symlink at a planned destination refuses the apply and keeps the link", () => {
   const link = path.join(agentDir, "grunt-a-b.md");
