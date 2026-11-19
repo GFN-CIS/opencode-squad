@@ -40,6 +40,20 @@ const legacy = (role, model, extra = "") =>
     "",
   ].join("\n");
 
+/** A file generated before the role-prompt fence existed: the prompt inline. */
+const preFence = (model) =>
+  [
+    "---",
+    "# generated-by: opencode-orchestrate generating-model-workers",
+    'description: "stale description"',
+    "mode: subagent",
+    `model: ${model}`,
+    "---",
+    "",
+    "You are a worker. (An old inlined prompt.)",
+    "",
+  ].join("\n");
+
 const isTitleRequest = (request) => (request.tools ?? []).length === 0;
 const toolName = (t) => t.name ?? t.function?.name ?? "";
 const callTool = (id, name, input) => TestLLM.tool(id, name, input);
@@ -133,7 +147,7 @@ test("the squad is registered from squad.json: dispatch, drill policy, legacy ag
           // A legacy agent the roster no longer has.
           "drill-old-m.md": legacy("drill", "old/m"),
           // Generated before the role-prompt fence existed: no fence at all.
-          "worker-old-w.md": legacy("grunt", "old/w").replace(/<!--[^\n]*-->\n?/g, ""),
+          "worker-old-w.md": preFence("old/w"),
         };
         for (const dir of [
           path.join(project, "agent"),
