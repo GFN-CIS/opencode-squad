@@ -136,6 +136,16 @@ test("a damaged legacy file blocks the import rather than dropping that agent", 
   expect(fs.existsSync(storeFile)).toBe(false);
 });
 
+test("legacy files whose models map to one agent id block the import (#90)", () => {
+  const agentDir = path.join(configDir, "agent");
+  fs.writeFileSync(path.join(agentDir, "grunt-p-m-1.md"), legacyFile("p/m-1"));
+  fs.writeFileSync(path.join(agentDir, "grunt-p-m-1-copy.md"), legacyFile("p/m.1"));
+  const r = importLegacySquad();
+  expect(r.imported).toBe(0);
+  expect(r.problems).toEqual([expect.stringContaining("grunt-p-m-1")]);
+  expect(fs.existsSync(storeFile)).toBe(false);
+});
+
 test("no legacy squad, no import: squad.json is not created empty", () => {
   expect(importLegacySquad()).toEqual({ imported: 0, problems: [] });
   expect(fs.existsSync(storeFile)).toBe(false);

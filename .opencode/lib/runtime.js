@@ -10,6 +10,7 @@ import { metricsDir, readMetrics, refreshMetrics } from "../../src/metrics-cache
 import { buildModelData, modelsChanged, readModelDataFile } from "../../src/model-data.js";
 import { opencodeConfigDir, opencodeDataDir } from "../../src/paths.js";
 import { createPromptLoader } from "../../src/prompt-inject.js";
+import { rosterCollisions } from "../../src/squad-agents.js";
 import { defaultAgentDir, readLegacySquad } from "../../src/squad-apply.js";
 import { defaultStoreFile, readStore, writeStore } from "../../src/squad-store.js";
 import { describeAgent } from "../../src/workers.js";
@@ -229,6 +230,15 @@ export function importLegacySquad() {
         console.warn(`[opencode-squad] legacy squad not imported — ${p}`);
       }
       return { imported: 0, problems: legacy.problems };
+    }
+    // Two files whose models map to one agent id: importing both would
+    // register only one of them (#90).
+    const clashes = rosterCollisions(legacy.roster).map(
+      (c) => `${c.entries.join(" and ")} map to the same agent id ${c.id}; delete one of the files`,
+    );
+    if (clashes.length) {
+      for (const p of clashes) console.warn(`[opencode-squad] legacy squad not imported — ${p}`);
+      return { imported: 0, problems: clashes };
     }
     const count =
       Object.keys(legacy.roster.grunts).length + Object.keys(legacy.roster.drills).length;

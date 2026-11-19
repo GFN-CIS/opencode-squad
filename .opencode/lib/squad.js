@@ -769,6 +769,19 @@ export default {
           }
           const valid = /** @type {SquadPatchInput} */ (raw);
           const roster = { grunts: valid.grunts ?? {}, drills: valid.drills ?? {} };
+          // Two model ids with one agent id would leave one entry unregistered
+          // while the report counts both (#90).
+          const collisions = rosterCollisions(roster);
+          if (collisions.length) {
+            return {
+              content: `Roster is invalid:\n${collisions
+                .map(
+                  (c) =>
+                    `  - ${c.entries.join(" and ")} map to the same agent id ${c.id}; keep one of them`,
+                )
+                .join("\n")}`,
+            };
+          }
           const variantErrors = validateVariants(roster, await getVariantMap());
           if (variantErrors.length) {
             return {

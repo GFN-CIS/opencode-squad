@@ -428,6 +428,40 @@ test("squad_patch validates its input with the same schema it advertises", async
   }
 });
 
+test("squad_patch refuses model ids that would register one agent (#90)", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { tools, dispose } = await setupHost({ directory });
+  try {
+    const out = (
+      await tools
+        .get("squad_patch")
+        .execute({ grunts: { "p/m-1": {}, "p/m.1": {} } }, { agent: "build" })
+    ).content;
+    expect(out).toContain("Roster is invalid");
+    expect(out).toContain("grunt p/m-1 and grunt p/m.1 map to the same agent id grunt-p-m-1");
+    expect(readStore(defaultStoreFile()).state).toBe("missing");
+  } finally {
+    dispose();
+  }
+});
+
+test("a stored roster with colliding ids registers neither and says so in the dump (#90)", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { writeStore } = await import("../src/squad-store.js");
+  writeStore(defaultStoreFile(), { grunts: { "p/m-1": {}, "p/m.1": {}, "q/r": {} }, drills: {} });
+  const { tools, registered, firstRequest, dispose } = await setupHost({ directory });
+  try {
+    await firstRequest();
+    expect(registered().map((a) => a.id)).toEqual(["grunt-q-r"]);
+    const dump = (await tools.get("squad_dump").execute({}, { agent: "build" })).content;
+    expect(dump).toContain("grunt p/m-1 and grunt p/m.1 map to the same agent id grunt-p-m-1");
+  } finally {
+    dispose();
+  }
+});
+
 const ALLOW_ALL = { action: "*", resource: "*", effect: "allow" };
 const drillTools = () => ({ read: {}, shell: {}, edit: {}, write: {}, execute: {} });
 
