@@ -458,7 +458,7 @@ A provider that sends no quota data gets no note and no claim.
 
 ### Not polluting the context
 
-The note is steered into the subagent's orchestrator session as a synthetic message. It stays **silent** unless the binding window crosses a band: 60%, 80% or 95%. Inside the top band it repeats only after a further 2-point climb. A flat threshold would repeat the same figure on every model call for the rest of the session. Band transitions carry the same information in far fewer tokens.
+The note is steered into the subagent's orchestrator session as a synthetic message. It stays **silent** unless the binding window crosses a band: 60%, 80% or 95%. Inside the top band it repeats only after a further 2-point climb. A rejection is the exception: when the provider reports `rejected`, the note goes out at any utilization, once per change from allowed to rejected. A flat threshold would repeat the same figure on every model call for the rest of the session. Band transitions carry the same information in far fewer tokens.
 
 ```
 [QUOTA] anthropic: 5h 83% (binding), 7d 6% used. The 5h window resets in 2h 25m.

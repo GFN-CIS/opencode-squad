@@ -170,7 +170,8 @@ export function formatQuotaClause(providerID, snapshot, opts = {}) {
   const bindingWindow =
     snapshot.windows.find((w) => w.label === snapshot.binding) ?? snapshot.windows[0];
   const band = bandOf(bindingWindow.used);
-  if (!shouldReport(opts.previousBand ?? null, band)) return "";
+  // A rejection is news at any utilization: the provider has stopped serving.
+  if (!snapshot.blocked && !shouldReport(opts.previousBand ?? null, band)) return "";
 
   const now = opts.now ?? 0;
   const parts = snapshot.windows.map(
@@ -187,7 +188,7 @@ export function formatQuotaClause(providerID, snapshot, opts = {}) {
   }
   if (snapshot.creditsExhausted) clause += " Credits are exhausted on this plan.";
   if (snapshot.blocked) clause += " The provider is currently REJECTING requests.";
-  if (band === QUOTA_BANDS.length - 1) {
+  if (band === QUOTA_BANDS.length - 1 || snapshot.blocked) {
     clause += " Route further work to a different provider unless it must run here.";
   }
   return clause;
@@ -203,13 +204,16 @@ export const TOP_BAND_STEP = 0.02;
  * whoever is being told (the orchestrator session) and the provider: each
  * orchestrator hears about a provider on a band change, and in the top band
  * again only once it has climbed by TOP_BAND_STEP. Falling below the first
- * band resets, so the next climb is reported afresh.
+ * band resets, so the next climb is reported afresh. A rejection is reported
+ * on its own: the first one seen, and every allowed-to-rejected transition,
+ * whatever the band; repeated rejections stay quiet until the provider has
+ * accepted again.
  *
  * @returns {(key: string, providerID: string, headers: Record<string, string>, now: number) => string}
  *   the clause to deliver, or "" when there is nothing new to say
  */
 export function createQuotaReporter() {
-  /** @type {Map<string, {band: number|null, used: number}>} */
+  /** @type {Map<string, {band: number|null, used: number, blocked: boolean}>} */
   const last = new Map();
   return (key, providerID, headers, now) => {
     const snapshot = parseQuotaHeaders(headers);
@@ -218,18 +222,24 @@ export function createQuotaReporter() {
       snapshot.windows.find((w) => w.label === snapshot.binding) ?? snapshot.windows[0];
     const band = bandOf(binding.used);
     const prev = last.get(key);
-    if (band === null) {
-      last.set(key, { band: null, used: binding.used });
+    const blocked = snapshot.blocked === true;
+    const newlyBlocked = blocked && !prev?.blocked;
+    if (band === null && !newlyBlocked) {
+      last.set(key, { band: null, used: binding.used, blocked });
       return "";
     }
     const top = band === QUOTA_BANDS.length - 1;
     const changed = prev?.band !== band;
-    if (!changed && !(top && binding.used - (prev?.used ?? 0) >= TOP_BAND_STEP)) return "";
+    if (!newlyBlocked && !changed && !(top && binding.used - (prev?.used ?? 0) >= TOP_BAND_STEP)) {
+      // Keep the rejection flag current so a later rejection is news again.
+      if (prev && prev.blocked !== blocked) last.set(key, { ...prev, blocked });
+      return "";
+    }
     const clause = formatQuotaClause(providerID, snapshot, {
       previousBand: changed ? (prev?.band ?? null) : null,
       now,
     });
-    if (clause) last.set(key, { band, used: binding.used });
+    if (clause) last.set(key, { band, used: binding.used, blocked });
     return clause;
   };
 }
