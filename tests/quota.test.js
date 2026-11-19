@@ -1,10 +1,12 @@
 import { expect, test } from "vitest";
 import {
   bandOf,
+  createQuotaReporter,
   formatQuotaClause,
   parseQuotaHeaders,
   QUOTA_BANDS,
   shouldReport,
+  TOP_BAND_STEP,
   windowLabel,
 } from "../src/quota.js";
 
@@ -183,4 +185,34 @@ test("formatQuotaClause makes no claim without a snapshot", () => {
   for (const snapshot of [null, undefined, {}, { windows: [] }]) {
     expect(formatQuotaClause("anthropic", snapshot)).toBe("");
   }
+});
+
+/** Anthropic headers with the 5h window at `used` (synthetic values). */
+const anthropicAt = (used) => ({
+  ...ANTHROPIC_200,
+  "anthropic-ratelimit-unified-5h-utilization": String(used),
+});
+
+test("the reporter speaks on band changes, and in the top band only after a real climb", () => {
+  const report = createQuotaReporter();
+  const say = (used, key = "orch|anthropic") => report(key, "anthropic", anthropicAt(used), 0);
+  expect(say(0.4)).toBe("");
+  expect(say(0.61)).toMatch(/^\[QUOTA\] anthropic: 5h 61% \(binding\)/);
+  expect(say(0.7)).toBe(""); // same band
+  expect(say(0.81)).toMatch(/5h 81%/);
+  expect(say(0.96)).toMatch(/Route further work to a different provider/);
+  expect(say(0.96 + TOP_BAND_STEP / 2)).toBe(""); // top band, barely moved
+  expect(say(0.96 + TOP_BAND_STEP)).toMatch(/5h 98%/);
+  // A window reset drops below the first band; the next climb is news again.
+  expect(say(0.1)).toBe("");
+  expect(say(0.65)).toMatch(/5h 65%/);
+  // Each orchestrator hears for itself.
+  expect(say(0.66, "other|anthropic")).toMatch(/5h 66%/);
+});
+
+test("the reporter says nothing for a response without quota headers", () => {
+  const report = createQuotaReporter();
+  expect(report("orch|zai", "zai", ZAI_200, 0)).toBe("");
+  // What the Codex OAuth path sends on OpenCode 2.1.3: no quota headers.
+  expect(report("orch|openai", "openai", { "x-codex-turn-state": "opaque" }, 0)).toBe("");
 });
