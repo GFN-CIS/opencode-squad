@@ -210,13 +210,17 @@ export function evaluateRetry(state, status, config, lastStatusCode, now) {
 /** @param {number} seconds */
 function humanizeSeconds(seconds) {
   const s = Math.max(0, Math.round(seconds));
-  const days = Math.floor(s / 86_400);
-  const hours = Math.floor((s % 86_400) / 3_600);
-  const minutes = Math.ceil((s % 3_600) / 60);
+  // Under a minute the exact seconds are shown: rounding 15 s up to "1m"
+  // overstated a short silence fourfold.
+  if (s < 60) return s > 0 ? `${s}s` : "less than a second";
+  // Round up to whole minutes once, then split, so 7199 s reads "2h", not "1h 60m".
+  const total = Math.ceil(s / 60);
+  const days = Math.floor(total / 1_440);
+  const hours = Math.floor((total % 1_440) / 60);
+  const minutes = total % 60;
   if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
   if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  if (minutes > 0) return `${minutes}m`;
-  return "less than a minute";
+  return `${minutes}m`;
 }
 
 /**
