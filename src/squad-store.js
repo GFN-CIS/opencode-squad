@@ -124,7 +124,6 @@ export const LOCK_OLD_MS = 30_000;
 export function withStoreLock(file, fn) {
   const lock = `${file}.lock`;
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const token = crypto.randomUUID();
   let fd;
   try {
     fd = fs.openSync(lock, "wx");
@@ -133,17 +132,15 @@ export function withStoreLock(file, fn) {
     return { busy: true, holder: lockHolder(lock) };
   }
   try {
-    fs.writeSync(fd, JSON.stringify({ pid: process.pid, host: os.hostname(), token }));
-    fs.closeSync(fd);
-    fd = undefined;
+    fs.writeSync(fd, JSON.stringify({ pid: process.pid, host: os.hostname() }));
     return { busy: false, value: fn() };
   } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-    try {
-      if (JSON.parse(fs.readFileSync(lock, "utf8"))?.token === token) fs.rmSync(lock);
-    } catch {
-      // Gone already, or not ours: leave it.
-    }
+    // Ours is the file this descriptor holds. Still linked means still at the
+    // lock path (nobody renames it); unlinked means someone removed ours, and
+    // whatever is at the path now is not ours to remove.
+    const linked = fs.fstatSync(fd).nlink > 0;
+    fs.closeSync(fd);
+    if (linked) fs.rmSync(lock, { force: true });
   }
 }
 
@@ -152,29 +149,36 @@ export function withStoreLock(file, fn) {
  */
 
 /**
- * Who holds a lock, as far as its file says.
+ * Who holds a lock, as far as its file says: read through one descriptor, so
+ * the age and the owner are of the same file.
  *
  * @param {string} lock
  * @returns {LockHolder | null}  null when it vanished meanwhile
  */
 function lockHolder(lock) {
-  let ageMs;
+  let fd;
   try {
-    ageMs = Date.now() - fs.statSync(lock).mtimeMs;
+    fd = fs.openSync(lock, "r");
   } catch {
     return null;
   }
-  let owner = {};
   try {
-    owner = JSON.parse(fs.readFileSync(lock, "utf8")) ?? {};
-  } catch {
-    // Being written, or not ours to read: age alone.
+    const ageMs = Date.now() - fs.fstatSync(fd).mtimeMs;
+    /** @type {{pid?: unknown, host?: unknown}} */
+    let owner = {};
+    try {
+      owner = JSON.parse(fs.readFileSync(fd, "utf8")) ?? {};
+    } catch {
+      // Being written: age alone.
+    }
+    return {
+      pid: typeof owner.pid === "number" ? owner.pid : null,
+      host: typeof owner.host === "string" ? owner.host : null,
+      ageMs,
+    };
+  } finally {
+    fs.closeSync(fd);
   }
-  return {
-    pid: typeof owner.pid === "number" ? owner.pid : null,
-    host: typeof owner.host === "string" ? owner.host : null,
-    ageMs,
-  };
 }
 
 /**
