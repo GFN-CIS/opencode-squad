@@ -33,8 +33,8 @@ import { formatInventory, hasSquad } from "../../src/inventory.js";
 import {
   formatDetail,
   formatSummary,
-  llmbenchIdFor,
   lookup,
+  resolveLlmbIdentity,
   squadRoles,
   superindexOf,
 } from "../../src/metrics.js";
@@ -432,8 +432,9 @@ export default {
           if (full === true) {
             const parts = await Promise.all(
               wanted.slice(0, MAX_FULL_MODELS).map(async (id) => {
-                // Several llmbenchmark ids may match: then none is fetched.
-                const llmb = llmbenchIdFor(id, data);
+                // The same llmbenchmark identity the summary attributes scores to;
+                // several ids may match: then none is fetched.
+                const llmb = resolveLlmbIdentity(id, data);
                 const detail =
                   llmb && "id" in llmb
                     ? await fetchDetail({
