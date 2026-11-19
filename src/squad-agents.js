@@ -2,42 +2,79 @@
 // from the roster in squad.json (src/squad-store.js), instead of writing
 // agent files (#85).
 //
-// Two transforms, because of how the host orders them (verified on 2.1.3;
-// see #85). Agent transforms run in registration order, and a plugin's
+// The ordering the host imposes (verified on 2.1.3; see #85, #87, #88):
+// agent transforms run in registration order, and a plugin's transform
 // registered during setup runs BEFORE the built-in config-agent plugin, which
-// then (a) appends the user's global permission rules to every agent that
-// exists and (b) applies agent files, whose fields override ours.
+// then appends the user's global permission rules to every agent that exists
+// and applies agent files and config entries on top.
 //
-//   early  (registered in setup): creates each agent, so it exists from the
-//          first turn and the config plugin gives it the user's global rules.
-//   late   (registered on the first request, then reload): runs after the
-//          config plugin, on every later reload too. It hides legacy
-//          generated agents that are no longer in the roster, sets every field
-//          again (so a same-id legacy file cannot leak steps, color or rules
-//          into ours) and re-appends the role's rules LAST. With the host's
-//          last-match permission evaluation that gives the order a file agent
-//          gets: base, global, own. The host then filters the child's tool
-//          catalog by them: a drill sees read-only tools only.
+//   early  (setup): creates one throwaway probe agent and nothing else. The
+//          config plugin appends the user's global rules to it, which is the
+//          only exact way to learn them. No squad id is touched here, so a
+//          user's agent holding a squad id never sees a squad field (#88).
+//   late   (registered before the first request selects an agent, then
+//          reload): runs after the config plugin. It reads the global rules
+//          off the probe and removes it, then builds each squad agent from a
+//          fresh default: base, global rules, role rules LAST. With the host's
+//          last-match evaluation the role decides: a drill stays read-only
+//          under a global allow-all, and the host hides its denied tools.
 //
-// Which agents are ours: one registered from the roster, or one an earlier
-// version generated as a file in the global agent dir (marker-verified at
-// start). A roster id an agent of anyone else already holds (no squad:prompt
-// fence, not a verified legacy file) is left alone and reported: the user's
-// agent wins, and squad_patch refuses that id.
+// Until the late transform runs, squad agents do not exist: a request for one
+// fails as an unknown agent instead of running with the wrong rules (#87).
+//
+// Which agents are ours: one built from the roster, or one that an earlier
+// version generated as a file in the global agent dir, when the live agent at
+// that id IS that file (same prompt and model). Any other agent at a squad id
+// belongs to the user and is left exactly as the host built it.
 
 import { findPromptFence, placeholderBody, wrapPrompt } from "./prompt-inject.js";
 import { NOTES_CLOSE, NOTES_OPEN, ROLE_KEYS } from "./roster.js";
 import { roleRules, slugForModel, squadRoleOf } from "./workers.js";
 
+/** The throwaway agent the early transform creates for the late one to read. */
+export const PROBE_ID = "opencode-squad-probe";
+/** Marks where the probe's own rules end and the global ones begin. */
+const PROBE_MARK = Object.freeze({ action: "opencode-squad-probe", resource: "*", effect: "deny" });
+
 /**
+ * @typedef {{action: string, resource: string, effect: string}} Rule
  * @typedef {{id: string, role: "grunt"|"drill", modelId: string, description: string,
  *   system: string, model: {id: string, providerID: string, variant?: string},
- *   steps?: number, permissions: Array<{action: string, resource: string, effect: string}>}} AgentSpec
+ *   steps?: number, permissions: Rule[]}} AgentSpec
+ * @typedef {{system: string, modelId: string}} LegacyAgent
+ *   a generated file from the global agent dir, as the host would load it
  */
 
 /**
+ * Roster entries whose model ids map to the same agent id (`p/m-1` and
+ * `p/m.1` are both `grunt-p-m-1`). Either one would silently replace the
+ * other, so neither is registered and squad_patch refuses the roster (#90).
+ *
+ * @param {{grunts?: Record<string, any>, drills?: Record<string, any>}} roster
+ * @returns {Array<{id: string, entries: string[]}>}  entries as "role model"
+ */
+export function rosterCollisions(roster) {
+  /** @type {Map<string, string[]>} */
+  const byId = new Map();
+  for (const [key, role] of Object.entries(ROLE_KEYS)) {
+    const map = /** @type {Record<string, unknown> | undefined} */ (
+      /** @type {any} */ (roster)?.[key]
+    );
+    for (const modelId of Object.keys(map ?? {})) {
+      const id = slugForModel(modelId, role);
+      byId.set(id, [...(byId.get(id) ?? []), `${role} ${modelId}`]);
+    }
+  }
+  return [...byId]
+    .filter(([, entries]) => entries.length > 1)
+    .map(([id, entries]) => ({ id, entries }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
  * The agents a roster asks for. A disabled entry stays in the roster (its
- * settings survive) but is not registered.
+ * settings survive) but is not registered; nor is an entry whose agent id
+ * collides with another's (rosterCollisions).
  *
  * @param {{grunts?: Record<string, any>, drills?: Record<string, any>}} roster
  * @param {{describe: (role: "grunt"|"drill", modelId: string) => string,
@@ -47,6 +84,7 @@ import { roleRules, slugForModel, squadRoleOf } from "./workers.js";
  * @returns {AgentSpec[]}
  */
 export function agentSpecs(roster, { describe, prompt }) {
+  const clashing = new Set(rosterCollisions(roster).map((c) => c.id));
   /** @type {AgentSpec[]} */
   const specs = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
@@ -55,12 +93,14 @@ export function agentSpecs(roster, { describe, prompt }) {
     )?.[key];
     for (const [modelId, entry] of Object.entries(map ?? {})) {
       if (entry?.disable) continue;
+      const id = slugForModel(modelId, role);
+      if (clashing.has(id)) continue;
       const slash = modelId.indexOf("/");
       const variant = typeof entry?.variant === "string" ? entry.variant.trim() : "";
       const notes = typeof entry?.notes === "string" ? entry.notes.trim() : "";
       const body = wrapPrompt(role, prompt(role) ?? placeholderBody(role));
       specs.push({
-        id: slugForModel(modelId, role),
+        id,
         role,
         modelId,
         description: describe(role, modelId),
@@ -78,54 +118,101 @@ export function agentSpecs(roster, { describe, prompt }) {
   return specs;
 }
 
-/**
- * Set every field the squad owns. Fields a legacy file could carry and the
- * roster does not (color, steps) are cleared, not inherited.
- *
- * @param {any} agent  the host's mutable agent
- * @param {AgentSpec} spec
- */
-function shape(agent, spec) {
-  agent.mode = "subagent";
-  agent.hidden = true;
-  agent.description = spec.description;
-  agent.system = spec.system;
-  agent.model = { ...spec.model };
-  delete agent.color;
-  if (spec.steps === undefined) delete agent.steps;
-  else agent.steps = spec.steps;
-  if (!Array.isArray(agent.permissions)) agent.permissions = [];
-  agent.permissions.push(...spec.permissions.map((r) => ({ ...r })));
-}
-
 /** Whether an agent's system prompt is one this plugin generated. @param {unknown} system */
 export function isSquadSystem(system) {
   return typeof system === "string" && findPromptFence(system) !== null;
 }
 
 /**
+ * The early transform: the probe, nothing else. A primary agent cannot be
+ * dispatched by the subagent tool, a hidden one is never selected, and its
+ * own rules deny everything, so it cannot run in the moment it exists.
+ *
  * @param {{update: (id: string, f: (agent: any) => void) => void}} editor
- * @param {AgentSpec[]} specs
  */
-export function earlyTransform(editor, specs) {
-  for (const spec of specs) editor.update(spec.id, (agent) => shape(agent, spec));
+export function earlyTransform(editor) {
+  editor.update(PROBE_ID, (agent) => {
+    agent.mode = "primary";
+    agent.hidden = true;
+    agent.description = "opencode-squad internal probe; removed before any request";
+    agent.system = "";
+    if (!Array.isArray(agent.permissions)) agent.permissions = [];
+    agent.permissions.push({ action: "*", resource: "*", effect: "deny" }, { ...PROBE_MARK });
+  });
+}
+
+/**
+ * The user's global rules, as the config plugin appended them to the probe.
+ *
+ * @param {any} probe
+ * @returns {Rule[]}
+ */
+function globalRules(probe) {
+  const rules = Array.isArray(probe?.permissions) ? probe.permissions : [];
+  const mark = rules.findLastIndex(
+    (/** @type {any} */ r) =>
+      r?.action === PROBE_MARK.action &&
+      r?.resource === PROBE_MARK.resource &&
+      r?.effect === PROBE_MARK.effect,
+  );
+  return mark === -1 ? [] : rules.slice(mark + 1).map((/** @type {Rule} */ r) => ({ ...r }));
+}
+
+/**
+ * Whether the live agent at an id is exactly the legacy file there: the host
+ * loads agents from several config dirs, and another one may hold the id
+ * (#88). Verifying the file proves we own the file, not the id.
+ *
+ * @param {any} agent
+ * @param {LegacyAgent | undefined} file
+ */
+function isLegacyFile(agent, file) {
+  if (!file || !agent) return false;
+  const model = agent.model ? `${agent.model.providerID}/${agent.model.id}` : "";
+  const system = String(agent.system ?? "")
+    .replaceAll("\r\n", "\n")
+    .trim();
+  return system === file.system && model === file.modelId;
+}
+
+/**
+ * @param {any} agent  a fresh default from the host's editor
+ * @param {AgentSpec} spec
+ * @param {Rule[]} globals
+ */
+function build(agent, spec, globals) {
+  agent.mode = "subagent";
+  agent.hidden = true;
+  agent.description = spec.description;
+  agent.system = spec.system;
+  agent.model = { ...spec.model };
+  if (spec.steps !== undefined) agent.steps = spec.steps;
+  if (!Array.isArray(agent.permissions)) agent.permissions = [];
+  agent.permissions.push(
+    ...globals.map((r) => ({ ...r })),
+    ...spec.permissions.map((r) => ({ ...r })),
+  );
 }
 
 /**
  * @param {{list: () => readonly any[], get: (id: string) => any, update: (id: string, f: (agent: any) => void) => void, remove: (id: string) => void}} editor
  * @param {AgentSpec[]} specs
- * @param {Set<string>} [legacy]  agent ids of the generated files an earlier
- *   version wrote to the global agent dir, verified by their marker
- *   (src/squad-apply.js readLegacySquad). Files from before the role-prompt
- *   fence, and every `worker-*`, are only recognisable this way: the marker is
- *   a YAML comment the host never exposes.
- * @returns {{foreign: string[], hidden: string[], stray: string[]}}
- *   foreign: roster ids a hand-authored agent already holds (left alone);
+ * @param {Map<string, LegacyAgent>} [legacy]  the generated files an earlier
+ *   version wrote to the global agent dir, by agent id, verified by their
+ *   marker (src/squad-apply.js readLegacySquad). Files from before the
+ *   role-prompt fence, and every `worker-*`, are only recognisable this way:
+ *   the marker is a YAML comment the host never exposes.
+ * @returns {{foreign: string[], hidden: string[], stray: string[], kept: string[]}}
+ *   foreign: roster ids another agent already holds (left alone);
  *   hidden: legacy generated agents removed because the roster no longer has them;
  *   stray: generated-looking agents from elsewhere (a project's own agent dir),
- *          left alone because this plugin did not verify them as its own
+ *          left alone because this plugin did not verify them as its own;
+ *   kept: ids of legacy files the roster dropped, where another agent the
+ *         host loaded holds the id (left alone)
  */
-export function lateTransform(editor, specs, legacy = new Set()) {
+export function lateTransform(editor, specs, legacy = new Map()) {
+  const globals = globalRules(editor.get(PROBE_ID));
+  editor.remove(PROBE_ID);
   const wanted = new Map(specs.map((s) => [s.id, s]));
   /** @type {string[]} */
   const foreign = [];
@@ -133,23 +220,95 @@ export function lateTransform(editor, specs, legacy = new Set()) {
   const hidden = [];
   /** @type {string[]} */
   const stray = [];
+  /** @type {string[]} */
+  const kept = [];
   for (const agent of [...editor.list()]) {
     const id = String(agent?.id ?? "");
     if (wanted.has(id)) continue;
     if (legacy.has(id)) {
-      editor.remove(id);
-      hidden.push(id);
+      if (isLegacyFile(agent, legacy.get(id))) {
+        editor.remove(id);
+        hidden.push(id);
+      } else {
+        kept.push(id);
+      }
     } else if (squadRoleOf(id) !== null && isSquadSystem(agent?.system)) {
       stray.push(id);
     }
   }
   for (const spec of specs) {
     const current = editor.get(spec.id);
-    if (current && !isSquadSystem(current.system) && !legacy.has(spec.id)) {
-      foreign.push(spec.id);
-      continue;
+    if (current) {
+      if (!isLegacyFile(current, legacy.get(spec.id))) {
+        foreign.push(spec.id);
+        continue;
+      }
+      // Our own old file: rebuilt from scratch, so none of its fields leak.
+      editor.remove(spec.id);
     }
-    editor.update(spec.id, (agent) => shape(agent, spec));
+    editor.update(spec.id, (agent) => build(agent, spec, globals));
   }
-  return { foreign: foreign.sort(), hidden: hidden.sort(), stray: stray.sort() };
+  return {
+    foreign: foreign.sort(),
+    hidden: hidden.sort(),
+    stray: stray.sort(),
+    kept: kept.sort(),
+  };
+}
+
+/**
+ * Whether a live squad agent still ends with its role's rules. Something that
+ * appends rules after the late transform (the config plugin re-registered
+ * behind it when the host reloaded plugins) would put the user's global rules
+ * last again; the plugin then moves its late transform back to the end.
+ *
+ * @param {any} agent
+ * @param {"grunt"|"drill"} role
+ */
+export function endsWithRoleRules(agent, role) {
+  const rules = roleRules(role);
+  const live = Array.isArray(agent?.permissions) ? agent.permissions : [];
+  if (live.length < rules.length) return false;
+  const tail = live.slice(-rules.length);
+  return rules.every(
+    (r, i) =>
+      tail[i]?.action === r.action &&
+      tail[i]?.resource === r.resource &&
+      tail[i]?.effect === r.effect,
+  );
+}
+
+/**
+ * The host's wildcard match (`*` any run, `?` one char; a trailing ` *`
+ * also matches the bare command), as OpenCode 2.1.3 evaluates rules.
+ *
+ * @param {string} input
+ * @param {string} pattern
+ */
+function wildcard(input, pattern) {
+  let re = pattern
+    .replaceAll("\\", "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  if (re.endsWith(" .*")) re = `${re.slice(0, -3)}( .*)?`;
+  return new RegExp(`^${re}$`, "s").test(input.replaceAll("\\", "/"));
+}
+
+/**
+ * The tools of one request that the agent's rules leave usable, by the
+ * host's own test: a tool is gone when the last rule for its permission
+ * action denies every resource.
+ *
+ * @param {string[]} names  the request's tool names
+ * @param {Rule[]} rules  the agent's live rules
+ * @param {Map<string, string>} [actionOf]  tool name -> its permission action
+ * @returns {string[]}  names to drop
+ */
+export function deniedTools(names, rules, actionOf = new Map()) {
+  return names.filter((name) => {
+    const action = actionOf.get(name) ?? name;
+    const rule = rules.findLast((r) => wildcard(action, r.action));
+    return rule?.resource === "*" && rule.effect === "deny";
+  });
 }

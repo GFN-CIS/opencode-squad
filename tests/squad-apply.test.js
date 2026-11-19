@@ -116,6 +116,15 @@ test("readLegacySquad imports generated files only, worker- as a grunt", () => {
   });
   expect(out.files).toEqual(["drill-a-one.md", "grunt-a-one.md", "worker-a-two.md"]);
   expect(out.problems).toEqual([]);
+  // Each as the host would load it: the body is the prompt, the model without
+  // its variant, for telling this file from another agent at the id (#88).
+  expect(out.agents.map((a) => [a.id, a.modelId])).toEqual([
+    ["drill-a-one", "a/one"],
+    ["grunt-a-one", "a/one"],
+    ["worker-a-two", "a/two"],
+  ]);
+  const body = fs.readFileSync(path.join(dir, "grunt-a-one.md"), "utf8").split(/^---$/m)[2].trim();
+  expect(out.agents[1].system).toBe(body);
 });
 
 test("readLegacySquad reads CRLF files and keeps notes", () => {
@@ -153,5 +162,6 @@ test("a missing agent dir is an empty legacy squad", () => {
     roster: { grunts: {}, drills: {} },
     problems: [],
     files: [],
+    agents: [],
   });
 });

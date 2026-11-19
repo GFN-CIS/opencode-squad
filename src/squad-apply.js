@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
+import { readFrontmatter } from "./frontmatter.js";
 import { opencodeConfigDir } from "./paths.js";
 import { buildRoster, diffRoster, parseAgentFile } from "./roster.js";
 import { isGeneratedAgent } from "./workers.js";
@@ -33,19 +33,25 @@ export function defaultAgentDir() {
  * would look like a squad the user chose.
  *
  * @param {string} dir
- * @returns {{roster: Record<string, Record<string, any>>, problems: string[], files: string[]}}
+ * @returns {{roster: Record<string, Record<string, any>>, problems: string[], files: string[],
+ *   agents: Array<{id: string, system: string, modelId: string}>}}
+ *   agents: each file as the host would load it (its prompt is the body,
+ *   trimmed), so the plugin can tell whether the live agent at that id is
+ *   this file or another agent the host loaded from elsewhere (#88)
  */
 export function readLegacySquad(dir) {
   const parsed = [];
   /** @type {string[]} */
   const files = [];
+  /** @type {Array<{id: string, system: string, modelId: string}>} */
+  const agents = [];
   /** @type {string[]} */
   const problems = [];
   let names = [];
   try {
     names = fs.readdirSync(dir).sort();
   } catch {
-    return { roster: buildRoster([]).roster, problems, files };
+    return { roster: buildRoster([]).roster, problems, files, agents };
   }
   for (const name of names) {
     const m = GENERATED_FILE_RE.exec(name);
@@ -67,9 +73,14 @@ export function readLegacySquad(dir) {
     // Legacy `worker-` files predate the grunt/drill split: the executor.
     parsed.push({ role: m[1] === "worker" ? "grunt" : m[1], modelId, entry });
     files.push(name);
+    agents.push({
+      id: name.replace(/\.md$/, ""),
+      system: readFrontmatter(text).body.replaceAll("\r\n", "\n").trim(),
+      modelId,
+    });
   }
   const { roster, conflicts } = buildRoster(parsed);
-  return { roster, problems: [...problems, ...conflicts], files };
+  return { roster, problems: [...problems, ...conflicts], files, agents };
 }
 
 /**

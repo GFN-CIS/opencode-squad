@@ -60,9 +60,13 @@ import {
 } from "../../src/session-status.js";
 import {
   agentSpecs,
+  deniedTools,
   earlyTransform,
+  endsWithRoleRules,
   isSquadSystem,
   lateTransform,
+  PROBE_ID,
+  rosterCollisions,
 } from "../../src/squad-agents.js";
 import {
   defaultAgentDir,
@@ -92,7 +96,7 @@ import {
   SQUAD_SESSION_INPUT,
 } from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
-import { slugForModel } from "../../src/workers.js";
+import { roleRules, slugForModel, squadRoleOf } from "../../src/workers.js";
 import {
   ensureGlobalModelDataFresh,
   getMetrics,
@@ -233,13 +237,12 @@ export default {
       foreign: /** @type {string[]} */ ([]),
       hidden: /** @type {string[]} */ ([]),
       stray: /** @type {string[]} */ ([]),
+      kept: /** @type {string[]} */ ([]),
     };
     // The agents earlier versions generated as files in the global agent dir,
     // verified by their marker once, at start: the only way to know a
     // pre-fence file or a worker-* is ours (src/squad-agents.js lateTransform).
-    const legacyIds = new Set(
-      readLegacySquad(defaultAgentDir()).files.map((f) => f.replace(/\.md$/, "")),
-    );
+    const legacyAgents = new Map(readLegacySquad(defaultAgentDir()).agents.map((a) => [a.id, a]));
     /**
      * The roster as it stands. Without squad.json yet (its import was blocked),
      * the squad still exists as files: that is the roster an apply diffs
@@ -278,9 +281,9 @@ export default {
     };
     await ctx.agent.transform((editor) => {
       try {
-        earlyTransform(editor, specsNow() ?? []);
+        earlyTransform(editor);
       } catch {
-        // A broken roster must not take the host's agent list down with it.
+        // The late transform then finds no probe and adds no global rules.
       }
     });
     /** What squad_dump and squad_patch say about the squad beyond its roster. */
@@ -290,6 +293,21 @@ export default {
         notes.push(
           `${id}: a hand-authored agent holds this id, so the squad's entry is not registered`,
         );
+      }
+      for (const id of lateReport.kept) {
+        notes.push(
+          `${id}: an agent file from an earlier version has this id, but the agent OpenCode ` +
+            "loaded here is another one (a project's own?), so it is left as is",
+        );
+      }
+      const store = readStore(storeFile);
+      if (store.state === "ok") {
+        for (const c of rosterCollisions(store.roster)) {
+          notes.push(
+            `${c.entries.join(" and ")} map to the same agent id ${c.id}, so neither is ` +
+              "registered; keep one of them",
+          );
+        }
       }
       for (const id of lateReport.stray) {
         notes.push(
@@ -311,28 +329,96 @@ export default {
       return notes;
     };
 
-    let lateRegistered = false;
-    /** @param {boolean} [force] reload even if squad.json looks unchanged */
-    const syncSquadAgents = async (force = false) => {
-      if (!lateRegistered) {
-        lateRegistered = true;
-        await ctx.agent.transform((editor) => {
-          try {
-            // An unreadable squad.json registers nothing and hides nothing:
-            // legacy agent files, if any, keep working until it is fixed.
-            const specs = specsNow();
-            if (specs) lateReport = lateTransform(editor, specs, legacyIds);
-          } catch {
-            // As above.
-          }
-        });
-        force = true;
+    /** @param {any} editor */
+    const runLate = (editor) => {
+      try {
+        // An unreadable squad.json registers nothing and hides nothing:
+        // legacy agent files, if any, keep working until it is fixed.
+        const specs = specsNow();
+        if (specs) lateReport = lateTransform(editor, specs, legacyAgents);
+        else editor.remove(PROBE_ID);
+      } catch {
+        // A broken roster must not take the host's agent list down with it.
       }
-      const sig = storeSignature(storeFile);
-      if (!force && sig === storeSig) return;
-      storeSig = sig;
-      await ctx.agent.reload();
-      agentsPromise = undefined;
+    };
+    /** The late transform's registration; re-registering moves it to the end. */
+    let late = /** @type {{dispose?: () => Promise<unknown>} | null} */ (null);
+    /** tool name -> the permission action it is checked under (`write` -> `edit`) */
+    const toolActions = new Map();
+    let toolsRecorded = false;
+    /** @param {any} editor */
+    const recordTools = (editor) => {
+      if (typeof editor?.list !== "function") return;
+      toolActions.clear();
+      for (const tool of editor.list()) {
+        if (tool?.name) toolActions.set(tool.name, tool.options?.permission ?? tool.name);
+      }
+    };
+    /** Live squad agents (ours, not a user's at a squad id) and their roles. */
+    const liveSquad = async () => {
+      const agents = unwrap(await ctx.agent.list().catch(() => null)) ?? [];
+      return (Array.isArray(agents) ? agents : []).flatMap((a) => {
+        const role = squadRoleOf(a?.id);
+        return role && isSquadSystem(a?.system) && !lateReport.foreign.includes(a.id)
+          ? [{ agent: a, role }]
+          : [];
+      });
+    };
+    let syncing = Promise.resolve();
+    /**
+     * Make sure the late transform is registered after the config plugin's
+     * and the agents match squad.json. Serialised: hooks of parallel sessions
+     * call it at once.
+     *
+     * @param {{force?: boolean, reposition?: boolean}} [opts]
+     *   force: reload even if squad.json looks unchanged;
+     *   reposition: register the late transform again, at the end
+     */
+    const syncSquadAgents = ({ force = false, reposition = false } = {}) => {
+      const run = syncing.then(async () => {
+        if (!late || reposition) {
+          // Old one out first: two of them would see each other's agents.
+          await late?.dispose?.();
+          late = await ctx.agent.transform(runLate);
+          force = true;
+        }
+        if (!toolsRecorded) {
+          toolsRecorded = true;
+          await ctx.tool.transform(recordTools);
+        }
+        const sig = storeSignature(storeFile);
+        if (!force && sig === storeSig) return;
+        storeSig = sig;
+        await ctx.agent.reload();
+        agentsPromise = undefined;
+      });
+      syncing = run.catch(() => {});
+      return run;
+    };
+    /**
+     * A squad agent's request offers only the tools its rules leave usable.
+     * The host builds a request's tool catalog before this hook runs, from the
+     * agent as it was then; if the role's rules were not last (the late
+     * transform moved behind the config plugin's), it is put back and the
+     * catalog cut to what the role allows (#87).
+     *
+     * @param {{agent?: string, tools?: Record<string, unknown>}} event
+     */
+    const enforceRoleTools = async (event) => {
+      const role = squadRoleOf(event.agent);
+      if (!role || !event.tools) return;
+      let live = (await liveSquad()).find((s) => s.agent.id === event.agent);
+      if (!live) return;
+      if (!endsWithRoleRules(live.agent, role)) {
+        await syncSquadAgents({ reposition: true });
+        live = (await liveSquad()).find((s) => s.agent.id === event.agent) ?? live;
+      }
+      const names = Object.keys(event.tools);
+      const drop = new Set([
+        ...deniedTools(names, live.agent.permissions ?? [], toolActions),
+        ...deniedTools(names, roleRules(role), toolActions),
+      ]);
+      for (const name of drop) delete event.tools[name];
     };
 
     // --- skills ---
@@ -349,13 +435,30 @@ export default {
 
     // --- per-request transforms ---
 
-    await ctx.session.hook("context", async (event) => {
+    // Before the host selects the agent for a prompted turn (a subagent's
+    // child session included): squad agents exist from the late transform
+    // only, so it must be in place before the first request is built (#87).
+    await ctx.session.hook("prompt", async () => {
       try {
-        // Before the bootstrap: its inventory lists the squad. Also picks up
-        // a squad.json another OpenCode process changed.
         await syncSquadAgents();
       } catch {
         // The squad stays as last registered.
+      }
+    });
+
+    await ctx.session.hook("context", async (event) => {
+      try {
+        // Before the bootstrap: its inventory lists the squad. Also picks up
+        // a squad.json another OpenCode process changed, and covers a turn
+        // that resumed without a prompt.
+        await syncSquadAgents();
+      } catch {
+        // The squad stays as last registered.
+      }
+      try {
+        await enforceRoleTools(event);
+      } catch {
+        // The host's runtime check still applies the agent's rules.
       }
       try {
         applySystemPartsTransform(event.system, loadRolePrompt);
@@ -726,7 +829,7 @@ export default {
           });
           if (result.ok) {
             writeStore(storeFile, roster);
-            await syncSquadAgents(true);
+            await syncSquadAgents({ force: true });
           }
           return {
             content: formatPatchReport(result, { store: storeFile, roster, notes: squadNotes() }),
@@ -954,10 +1057,24 @@ export default {
       stopSilenceWatch(sessionID);
     };
 
+    // After the host (re)activates plugins: the late transform registered at
+    // once, so squad agents exist before the first request, and moved back
+    // to the end if the config plugin's transform was re-registered after it.
+    const onPluginsUpdated = async () => {
+      const reposition =
+        late !== null && (await liveSquad()).some((s) => !endsWithRoleRules(s.agent, s.role));
+      await syncSquadAgents({ reposition });
+    };
+
     const events = new AbortController();
-    if (guardConfig.enabled) {
+    if (typeof ctx.event?.subscribe === "function") {
       void (async () => {
         for await (const event of ctx.event.subscribe({ signal: events.signal })) {
+          if (event?.type === "plugin.updated") {
+            void onPluginsUpdated().catch(() => {});
+            continue;
+          }
+          if (!guardConfig.enabled) continue;
           const data = /** @type {Record<string, unknown> | undefined} */ (event?.data);
           const sessionID = data?.sessionID;
           if (typeof sessionID !== "string") continue;

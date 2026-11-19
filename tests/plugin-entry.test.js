@@ -67,10 +67,16 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
  *
  * @param {{directory: string} & Record<string, unknown>} host
  */
-async function setupHost({ directory, agent, ...over }) {
+async function setupHost({ directory, agent, globals = [], ...over }) {
   const tools = new Map();
   /** Agent transforms in registration order, as the host keeps them. */
   const transforms = [];
+  /** @param {(editor: any) => void} run */
+  const register = (run) => {
+    const entry = { run };
+    transforms.push(entry);
+    return { dispose: async () => transforms.splice(transforms.indexOf(entry), 1) };
+  };
   /** @type {Map<string, (input: any) => unknown>} */
   const hooks = new Map();
   const dispose = await plugin.setup({
@@ -85,19 +91,33 @@ async function setupHost({ directory, agent, ...over }) {
     model: { list: async () => [] },
     tool: {
       hook: async () => {},
-      transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
+      transform: async (callback) =>
+        callback({
+          add: (tool) => tools.set(tool.name, tool),
+          // The host's built-in tools, as a tool transform lists them.
+          list: () => [
+            { name: "read" },
+            { name: "shell" },
+            { name: "edit", options: { permission: "edit" } },
+            { name: "write", options: { permission: "edit" } },
+          ],
+        }),
     },
     agent: {
       list: async () => registered(),
-      transform: async (callback) => {
-        transforms.push(callback);
-        return { dispose: async () => {} };
-      },
+      transform: async (callback) => register(callback),
       reload: async () => {},
       ...agent,
     },
     ...over,
   });
+  // The config-agent plugin registers after every package plugin's setup: the
+  // user's global rules go to every agent that exists by then.
+  /** @param {any} editor */
+  const configRun = (editor) => {
+    for (const a of editor.list()) a.permissions.push(...globals.map((r) => ({ ...r })));
+  };
+  let config = register(configRun);
   /** The agent list the host would build: every transform over a fresh editor. */
   function registered() {
     const map = new Map();
@@ -112,12 +132,20 @@ async function setupHost({ directory, agent, ...over }) {
         map.set(id, a);
       },
     };
-    for (const t of transforms) t(editor);
+    for (const t of transforms) t.run(editor);
     return [...map.values()];
   }
   /** The first request: registers the late transform. */
-  const firstRequest = () => hooks.get("context")?.({ agent: "build", system: [] });
-  return { tools, dispose, registered, firstRequest };
+  const firstRequest = async () => {
+    await hooks.get("prompt")?.({ sessionID: "s" });
+    await hooks.get("context")?.({ agent: "build", system: [] });
+  };
+  /** The host re-activated plugins: the config plugin's transform is re-registered last. */
+  const reorderConfig = async () => {
+    await config.dispose();
+    config = register(configRun);
+  };
+  return { tools, dispose, registered, firstRequest, hooks, reorderConfig };
 }
 
 const dirs = [];
@@ -395,6 +423,74 @@ test("squad_patch validates its input with the same schema it advertises", async
       roster: { grunts: { "a/b": { variant: "high" } }, drills: {} },
     });
     expect(fs.readdirSync(directory)).toEqual([]);
+  } finally {
+    dispose();
+  }
+});
+
+const ALLOW_ALL = { action: "*", resource: "*", effect: "allow" };
+const drillTools = () => ({ read: {}, shell: {}, edit: {}, write: {}, execute: {} });
+
+test("no squad agent exists before the late transform; the prompt hook puts it in place (#87)", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { writeStore } = await import("../src/squad-store.js");
+  writeStore(defaultStoreFile(), { grunts: {}, drills: { "a/b": {} } });
+  const { registered, hooks, dispose } = await setupHost({ directory, globals: [ALLOW_ALL] });
+  try {
+    // Only the probe: a request for the drill fails as an unknown agent.
+    expect(registered().map((a) => a.id)).toEqual(["opencode-squad-probe"]);
+    await hooks.get("prompt")({ sessionID: "s" });
+    const drill = registered().find((a) => a.id === "drill-a-b");
+    expect(registered().map((a) => a.id)).toEqual(["drill-a-b"]);
+    expect(drill.permissions).toEqual([ALLOW_ALL, ...roleRules("drill")]);
+    const event = { agent: "drill-a-b", system: [], tools: drillTools() };
+    await hooks.get("context")(event);
+    expect(Object.keys(event.tools)).toEqual(["read", "shell"]);
+  } finally {
+    dispose();
+  }
+});
+
+test("the config plugin re-registered behind the late transform is caught on the next request", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { writeStore } = await import("../src/squad-store.js");
+  writeStore(defaultStoreFile(), { grunts: {}, drills: { "a/b": {} } });
+  const { registered, hooks, reorderConfig, dispose } = await setupHost({
+    directory,
+    globals: [ALLOW_ALL],
+  });
+  const drill = () => registered().find((a) => a.id === "drill-a-b");
+  try {
+    await hooks.get("prompt")({ sessionID: "s" });
+    // The host reloaded plugins from one before the config plugin onward.
+    await reorderConfig();
+    expect(drill().permissions.at(-1)).toEqual(ALLOW_ALL);
+    // The catalog was built from that agent; the hook cuts it to the role's
+    // tools and moves the late transform back to the end.
+    const event = { agent: "drill-a-b", system: [], tools: drillTools() };
+    await hooks.get("context")(event);
+    expect(Object.keys(event.tools)).toEqual(["read", "shell"]);
+    expect(drill().permissions.slice(-roleRules("drill").length)).toEqual(roleRules("drill"));
+  } finally {
+    dispose();
+  }
+});
+
+test("a user's agent at a squad id is not policed by the squad's rules", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { writeStore } = await import("../src/squad-store.js");
+  writeStore(defaultStoreFile(), { grunts: {}, drills: { "a/b": {} } });
+  const { hooks, dispose } = await setupHost({
+    directory,
+    agent: { list: async () => [{ id: "drill-a-b", system: "mine", permissions: [ALLOW_ALL] }] },
+  });
+  try {
+    const event = { agent: "drill-a-b", system: [], tools: drillTools() };
+    await hooks.get("context")(event);
+    expect(Object.keys(event.tools)).toEqual(Object.keys(drillTools()));
   } finally {
     dispose();
   }
