@@ -4,6 +4,8 @@
 // whole conversation. Kept lightweight: heavy PDCA logic lives in the skill.
 
 export const BOOTSTRAP_MARKER = "<ORCHESTRATE_BOOTSTRAP>";
+// The closing tag follows the marker, so renaming one cannot orphan the other.
+const BOOTSTRAP_END = `</${BOOTSTRAP_MARKER.slice(1)}`;
 
 /**
  * @param {string} inventoryMarkdown
@@ -103,5 +105,5 @@ high-risk confirm-before-apply gate.
 
 ## Available subagents
 ${inventoryMarkdown}
-</ORCHESTRATE_BOOTSTRAP>`;
+${BOOTSTRAP_END}`;
 }

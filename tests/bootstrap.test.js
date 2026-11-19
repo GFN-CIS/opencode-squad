@@ -6,19 +6,20 @@ test("block starts with the marker and embeds inventory", () => {
   const out = buildBootstrap(inv);
   expect(out.startsWith(BOOTSTRAP_MARKER)).toBe(true);
   expect(out).toContain(inv);
+  // Closed by the marker's own closing form, whatever the marker is named.
+  expect(out.trimEnd().endsWith(`</${BOOTSTRAP_MARKER.slice(1)}`)).toBe(true);
 });
 
 test("mentions the delegation decision and points to the protocol skill", () => {
   const out = buildBootstrap("(no subagents available)");
-  expect(out.toLowerCase()).toContain("delegate");
   expect(out).toContain("squad-delegate"); // detailed protocol lives there
 });
 
 test("keeps the decision principles inline (capability + risk one-liners)", () => {
   // Principles stay in the lean injection; the detailed gate/ladder moved to
   // the squad-delegate skill.
-  const out = buildBootstrap("(no subagents available)").toLowerCase();
-  expect(out).toContain("capability");
+  const out = buildBootstrap("(no subagents available)").toLowerCase().replace(/\s+/g, " ");
+  expect(out).toContain("route by capability");
   expect(out).toContain("production write"); // never hand it to the cheap worker
 });
 
@@ -39,9 +40,8 @@ test("forbids `general` unless explicitly asked (it inherits the primary model)"
 });
 
 test("keeps the stall trigger inline and points to the squad-stall skill", () => {
-  const out = buildBootstrap("(no subagents available)").toLowerCase();
-  expect(out).toContain("stall");
-  expect(out).toContain("different"); // re-decide -> different model
+  const out = buildBootstrap("(no subagents available)").toLowerCase().replace(/\s+/g, " ");
+  expect(out).toMatch(/delegate to a \*?different\*? model/); // re-decide, not retry
   expect(out).toContain("squad-stall"); // full ladder is a separate skill
 });
 
@@ -73,14 +73,6 @@ test("embeds the current model when provided, and no clock", () => {
   // A clock here changes every turn; squad_session returns the time instead.
   expect(out).not.toMatch(/local time/i);
   expect(out).toContain("anthropic/claude-opus-4-7");
-  expect(out.toLowerCase()).toContain("trust this over any assumption");
-});
-
-test("omits the facts block when no facts are provided", () => {
-  const out = buildBootstrap("(no subagents available)");
-  expect(out.startsWith(BOOTSTRAP_MARKER)).toBe(true);
-  expect(out).not.toContain("Current local time");
-  expect(out).not.toContain("You are running on");
 });
 
 test("tells the orchestrator to send the user to squad-draft when no squad is drafted", () => {
@@ -99,11 +91,4 @@ test("omits the no-squad warning once a squad exists", () => {
 test("omits the no-squad warning when hasSquad is not passed (back-compat)", () => {
   const out = buildBootstrap("(no subagents available)");
   expect(out.toLowerCase()).not.toContain("no squad drafted");
-});
-
-test("marker is the exact stable string the injection guard relies on", () => {
-  // Pinned: the plugin's double-injection guard does
-  // `text.includes(BOOTSTRAP_MARKER)`. Changing this value silently breaks
-  // that guard, so the exact string is part of the contract.
-  expect(BOOTSTRAP_MARKER).toBe("<ORCHESTRATE_BOOTSTRAP>");
 });

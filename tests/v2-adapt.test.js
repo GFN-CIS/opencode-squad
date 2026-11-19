@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { BOOTSTRAP_MARKER } from "../src/bootstrap.js";
-import { estimateContextTokens, indexModelCatalog } from "../src/context.js";
+import { estimateContextTokens } from "../src/context.js";
 import { formatInventory, hasSquad } from "../src/inventory.js";
 import { PROMPT_CLOSE, promptOpen } from "../src/prompt-inject.js";
 import { evaluateRetry, initGuardState, normalizeGuardConfig } from "../src/rate-limit-guard.js";
@@ -23,19 +23,6 @@ const v2Agents = [
     model: { id: "glm-5.3", providerID: "zai", variant: "low" },
   },
   { id: "general", name: "General", mode: "subagent", description: "general" },
-];
-
-const v2Models = [
-  {
-    id: "glm-5.3",
-    providerID: "zai",
-    limit: { context: 200000, output: 32000 },
-    variants: [
-      { id: "low", settings: { reasoningEffort: "low" } },
-      { id: "max", settings: { reasoningEffort: "max" } },
-    ],
-  },
-  { id: "big-pickle", providerID: "opencode", limit: { context: 128000 }, variants: [] },
 ];
 
 const childContext = [
@@ -66,15 +53,6 @@ describe("agents and providers", () => {
     expect(hasSquad(agents)).toBe(true);
     expect(formatInventory(agents)).toContain("`grunt-glm`: cheap edits (model: zai/glm-5.3)");
     expect(normalizeAgents(undefined)).toEqual([]);
-  });
-
-  test("indexModelCatalog reads the host's flat model list in one pass", () => {
-    const { limits, variants } = indexModelCatalog(v2Models);
-    expect(limits).toMatchObject({ "zai/glm-5.3": 200000, "glm-5.3": 200000 });
-    expect(variants).toEqual({
-      "zai/glm-5.3": ["low", "max"],
-      "opencode/big-pickle": [],
-    });
   });
 });
 

@@ -586,33 +586,36 @@ describe("distinct exact ids that normalize alike stay apart (#54)", () => {
 });
 
 describe("a SuperIndex cache from an earlier format (#54)", () => {
-  // What the previous indexSuperIndex wrote: provider/basename keys where the
-  // first of two colliding raw ids won, and no format marker on the block.
-  const DASH = {
-    id: "p/m-1",
-    score: 60,
-    rank: 9,
-    status: null,
-    confidence: null,
-    priceIn: 1,
-    priceOut: 2,
-    context: 100_000,
-  };
-  const old = { superindex: { fetchedAt: 0, index: { "p/m-1": DASH, "m-1": DASH } } };
-
-  test("serves no price or context from it, in either view", () => {
-    const out = formatSummary({ models: [{ id: "p/m.1" }], data: old, now: 0 });
-    const l = out.split("\n").find((x) => x.startsWith("- p/m.1")) ?? "";
-    expect(l).not.toMatch(/\$\d/);
-    expect(l).not.toContain("100k");
-    expect(out).toContain("withheld");
-    const text = formatDetail("p/m.1", null, lookup("p/m.1", superindexOf(old))?.entry ?? null);
-    expect(text).not.toMatch(/\$\d/);
-    expect(text).not.toContain("100k");
-  });
-
-  test("the catalog's context limit still shows", () => {
-    const out = formatSummary({ models: [{ id: "p/m.1", context: 128_000 }], data: old, now: 0 });
+  test("gives no model its score, price or context, says why, and keeps the catalog's limit", () => {
+    // What the previous indexSuperIndex wrote: provider/basename keys where the
+    // first of two colliding raw ids won, and no format marker on the block.
+    const DASH = {
+      id: "p/m-1",
+      score: 77,
+      rank: 3,
+      status: null,
+      confidence: null,
+      priceIn: 1,
+      priceOut: 2,
+      context: 100_000,
+    };
+    const old = { superindex: { fetchedAt: 0, index: { "p/m-1": DASH, "m-1": DASH } } };
+    // p/m-1 is the exact key of the old row; p/m.1 reached it through the basename.
+    const out = formatSummary({
+      models: [{ id: "p/m-1" }, { id: "p/m.1", context: 128_000 }],
+      data: old,
+      now: 0,
+    });
+    for (const id of ["p/m-1", "p/m.1"]) {
+      const l = out.split("\n").find((x) => x.startsWith(`- ${id}`)) ?? "";
+      expect(l).not.toMatch(/SI 77/);
+      expect(l).not.toMatch(/\$\d/);
+      expect(l).not.toContain("100k");
+      const text = formatDetail(id, null, lookup(id, superindexOf(old))?.entry ?? null);
+      expect(text).not.toMatch(/77|\$\d|100k/);
+    }
+    expect(out).toMatch(/SuperIndex data predates exact-id matching/);
+    // The host catalog's own context limit is not SuperIndex data and still shows.
     expect(out).toContain("ctx 128k");
   });
 
@@ -782,29 +785,6 @@ test("a pooled earlier-format slice gives no model its values, even when the id 
     now: 0,
   });
   expect(out).not.toMatch(/0\.1|0\.9/);
-});
-
-test("an earlier-format SuperIndex block gives no model its score either (#54)", () => {
-  const old = {
-    superindex: {
-      fetchedAt: 0,
-      index: {
-        "m-1": {
-          id: "p/m-1",
-          score: 77,
-          rank: 3,
-          status: null,
-          confidence: null,
-          priceIn: 1,
-          priceOut: 2,
-          context: 1000,
-        },
-      },
-    },
-  };
-  const out = formatSummary({ models: [{ id: "p/m.1" }], data: old, now: 0 });
-  expect(out).not.toMatch(/SI 77/);
-  expect(out).toMatch(/SuperIndex data predates exact-id matching/);
 });
 
 describe("one llmbenchmark identity per model, shared by every slice and both views (#54)", () => {
