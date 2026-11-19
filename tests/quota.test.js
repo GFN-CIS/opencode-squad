@@ -216,3 +216,29 @@ test("the reporter says nothing for a response without quota headers", () => {
   // What the Codex OAuth path sends on OpenCode 2.1.3: no quota headers.
   expect(report("orch|openai", "openai", { "x-codex-turn-state": "opaque" }, 0)).toBe("");
 });
+
+/** Anthropic headers at `used` with the given unified status (synthetic values). */
+const anthropicStatus = (used, status) => ({
+  ...anthropicAt(used),
+  "anthropic-ratelimit-unified-status": status,
+});
+
+test("the reporter announces a rejection at any utilization, once per allowed-to-rejected transition", () => {
+  const report = createQuotaReporter();
+  const say = (used, status) =>
+    report("orch|anthropic", "anthropic", anthropicStatus(used, status), 0);
+  // Same band, allowed -> rejected: still news.
+  expect(say(0.81, "allowed")).toMatch(/5h 81%/);
+  expect(say(0.82, "rejected")).toMatch(/REJECTING requests\. Route further work/);
+  // Repeated rejections stay quiet.
+  expect(say(0.83, "rejected")).toBe("");
+  // Accepted again, then rejected again: news again.
+  expect(say(0.83, "allowed")).toBe("");
+  expect(say(0.84, "rejected")).toMatch(/REJECTING/);
+
+  // The very first observation being a rejection, below every band.
+  const fresh = createQuotaReporter();
+  const first = fresh("orch|anthropic", "anthropic", anthropicStatus(0.5, "rejected"), 0);
+  expect(first).toMatch(/^\[QUOTA\] anthropic: 5h 50% \(binding\).*REJECTING/);
+  expect(fresh("orch|anthropic", "anthropic", anthropicStatus(0.5, "rejected"), 0)).toBe("");
+});

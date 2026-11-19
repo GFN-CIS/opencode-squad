@@ -208,7 +208,8 @@ the flat-rate option when both would do.
 
 **Provider quota.** When a grunt's or drill's model calls show its provider's
 rate-limit window at 60%, 80% or 95% used, a `[QUOTA]` note arrives in your
-turn, once per band. At 95% it repeats as the figure climbs. It names the binding window and when it
+turn, once per band. At 95% it repeats as the figure climbs. A note saying the
+provider is REJECTING requests comes at any figure: route away from it now. It names the binding window and when it
 resets. Below 95%, treat it as a tie-breaker: between comparably fit candidates,
 prefer one on another provider. At 95%, route new work elsewhere unless it must
 run there: the next 429 stops the task midway, after you have paid for it. No
