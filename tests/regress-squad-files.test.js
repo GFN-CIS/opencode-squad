@@ -342,6 +342,37 @@ test("a symlinked subdirectory is walked like OpenCode walks it", () => {
   );
 });
 
+test("an agents/ directory link onto agent/ makes a second name for every file", () => {
+  const { filename, content } = addAgent("grunt", "a/b");
+  const agents = path.join(path.dirname(agentDir), "agents");
+  fs.mkdirSync(agents);
+  fs.symlinkSync("../agent", path.join(agents, "team"));
+  const line = `../agents/team/${filename}, ${filename} all lead to ${fs.realpathSync(path.join(agentDir, filename))}; each agent needs its own file`;
+  expect(readSquad(agentDir).conflicts).toContain(line);
+  expect(syncDescriptions({ dir: agentDir, describe: () => "new" })).toEqual([]);
+  const result = applySquad({
+    roster: { grunts: { "a/b": { variant: "low" } }, drills: {} },
+    dir: agentDir,
+  });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(fs.readFileSync(path.join(agentDir, filename), "utf8")).toBe(content);
+});
+
+test("a directory link back to the agent root is a gap, not a skipped path", () => {
+  const { filename, content } = addAgent("grunt", "a/b");
+  fs.symlinkSync(".", path.join(agentDir, "self"));
+  expect(readSquad(agentDir).conflicts.join("\n")).toMatch(
+    /self \(links back to a directory above it\)/,
+  );
+  expect(syncDescriptions({ dir: agentDir, describe: () => "new" })).toEqual([]);
+  const result = applySquad({
+    roster: { grunts: { "a/b": { variant: "low" } }, drills: {} },
+    dir: agentDir,
+  });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(fs.readFileSync(path.join(agentDir, filename), "utf8")).toBe(content);
+});
+
 test("a symlink to a file nothing else reaches is still written through", () => {
   const own = path.join(root, "dotfiles", "grunt-a-b.md");
   fs.mkdirSync(path.dirname(own), { recursive: true });
