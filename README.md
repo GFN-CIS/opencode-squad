@@ -577,7 +577,10 @@ npm run coverage  # vitest + @vitest/coverage-v8, scoped to src/**; CI-gated at 
 npm run lint      # biome check — formatting + lint
 npm run lint:fix  # biome check --write
 npm run knip      # unused files/exports/dependencies
+npm run test:integration  # the plugin inside the real OpenCode 2 host, offline (Node >= 24)
 ```
+
+`tests-integration/` boots the embedded OpenCode 2.1.3 host (`@opencode/sdk`), loads this repository as a plugin from disk, and replaces the model with `TestLLM` from `@opencode/ai/testing`. No credentials and no network: HOME and the XDG dirs point into a temp directory, and every outbound fetch fails. It checks that the plugin loads and puts its bootstrap in the system prompt, that a scripted tool call reaches `squad_session`, and that a subagent whose model stream hangs is interrupted with one guard note to its orchestrator. All `@opencode/*` dev packages are pinned to one exact release, so the host and the plugin types come from the same build.
 
 Coverage is scoped to `src/**` on purpose — that's the decision-logic layer separated from `.opencode/lib/squad.js`'s session/tool hook plumbing. Package-entry tests additionally check registration and native agent generation.
 

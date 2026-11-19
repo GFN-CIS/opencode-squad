@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["tests/**/*.test.js", "scripts/*.mjs"],
-  "project": ["src/**/*.js", ".opencode/lib/**/*.js", "scripts/**/*.mjs"]
+  "entry": ["tests/**/*.test.js", "tests-integration/**/*.js", "scripts/*.mjs"],
+  "project": ["src/**/*.js", ".opencode/lib/**/*.js", "scripts/**/*.mjs"],
+  "ignoreDependencies": ["@opencode/util"]
 }
