@@ -7,12 +7,19 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { parse } from "yaml";
 import { ensureGlobalModelDataFresh } from "../.opencode/lib/runtime.js";
 import { readFrontmatter } from "../src/frontmatter.js";
 import { parseAgentFile } from "../src/roster.js";
-import { applySquad, formatApplyReport, readSquad, syncDescriptions } from "../src/squad-apply.js";
+import {
+  AGENT_SOURCES,
+  applySquad,
+  formatApplyReport,
+  readSquad,
+  syncDescriptions,
+} from "../src/squad-apply.js";
 import { parseSkillFile } from "../src/v2/skills.js";
 import { agentMarkdown } from "../src/workers.js";
 
@@ -371,6 +378,51 @@ test("a directory link back to the agent root is a gap, not a skipped path", () 
   });
   expect(result.ok ? null : result.refusal).toBe("collision");
   expect(fs.readFileSync(path.join(agentDir, filename), "utf8")).toBe(content);
+});
+
+test("a primary-agent alias in mode/ shares the file; one in mode/sub/ is never loaded", () => {
+  const { filename, content } = addAgent("grunt", "a/b");
+  const mode = path.join(path.dirname(agentDir), "mode");
+  fs.mkdirSync(path.join(mode, "sub"), { recursive: true });
+  fs.symlinkSync(path.join(agentDir, filename), path.join(mode, "sub", "deep.md"));
+  // Not loadable (mode/ is read top level only): no conflict yet.
+  expect(readSquad(agentDir).conflicts).toEqual([]);
+  fs.symlinkSync(path.join(agentDir, filename), path.join(mode, "review.md"));
+  const line = `../mode/review.md, ${filename} all lead to ${fs.realpathSync(path.join(agentDir, filename))}; each agent needs its own file`;
+  expect(readSquad(agentDir).conflicts).toContain(line);
+  expect(syncDescriptions({ dir: agentDir, describe: () => "new" })).toEqual([]);
+  const result = applySquad({
+    roster: { grunts: { "a/b": { variant: "low" } }, drills: {} },
+    dir: agentDir,
+  });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(fs.readFileSync(path.join(agentDir, filename), "utf8")).toBe(content);
+});
+
+test("the agent sources match the installed OpenCode loader", () => {
+  // Read the pinned loader's own list, so an OpenCode bump that adds or
+  // changes a source fails here.
+  const dist = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "node_modules",
+    "@opencode",
+    "core",
+    "dist",
+    "chunks",
+  );
+  const loader = fs
+    .readdirSync(dist)
+    .map((f) => fs.readFileSync(path.join(dist, f), "utf8"))
+    .find((t) => t.includes("var legacySources"));
+  expect(loader, "OpenCode config-agent loader not found").toBeDefined();
+  const patterns = [...(loader ?? "").matchAll(/pattern: "([^"]+)"/g)].map((m) => m[1]);
+  const ours = [];
+  for (const deep of [true, false]) {
+    const names = AGENT_SOURCES.filter((s) => s.deep === deep).map((s) => s.name);
+    ours.push(`{${names.join(",")}}/${deep ? "**/" : ""}*.md`);
+  }
+  expect(patterns).toEqual(ours);
 });
 
 test("a symlink to a file nothing else reaches is still written through", () => {

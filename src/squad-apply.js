@@ -107,12 +107,27 @@ function physicalPath(file) {
 }
 
 /**
- * Every agent file name OpenCode could load next to `dir`. OpenCode reads
- * every .md file below both `agent` and `agents` of a config dir, recursively
- * and through directory links, and names each by its path: a file reached
- * through a second root or a linked directory is a second agent name for the
- * same file. Names are relative to `dir` (a sibling root's start with
- * `../agents/`).
+ * The directories OpenCode's config-agent loader reads agent Markdown from
+ * (OpenCode 2.1.3, config/plugin/agent.ts `legacySources`): `deep` ones
+ * recursively, the others top level only. tests/regress-squad-files.test.js
+ * compares this with the installed loader, so an OpenCode bump that changes
+ * them fails there instead of here.
+ */
+export const AGENT_SOURCES = [
+  { name: "agent", deep: true },
+  { name: "agents", deep: true },
+  { name: "mode", deep: false },
+  { name: "modes", deep: false },
+];
+
+/**
+ * Every agent file name OpenCode could load next to `dir`. The pinned
+ * OpenCode 2.1.3 config-agent loader scans a config dir for
+ * every .md below `agent/` and `agents/` (subagents, recursive) and the .md
+ * files directly in `mode/` and `modes/` (primary agents, top level only), following links, and names each by its
+ * path: a file reached through another root or a linked directory is another
+ * agent name for the same file. Names are relative to `dir` (a sibling
+ * root's start with `../agents/`, `../mode/`, ...).
  *
  * Linked directories are followed as OpenCode follows them, so every alias
  * path is listed. A link back into a directory already on the current path
@@ -128,17 +143,19 @@ function listAgentFiles(dir) {
   const names = [];
   /** @type {string[]} */
   const unlisted = [];
+  // Only when `dir` is one of the sources is its parent a config dir with
+  // siblings to check.
   const base = path.basename(dir);
-  const roots =
-    base === "agent" || base === "agents"
-      ? [dir, path.join(path.dirname(dir), base === "agent" ? "agents" : "agent")]
-      : [dir];
+  const roots = AGENT_SOURCES.some((s) => s.name === base)
+    ? AGENT_SOURCES.map((s) => ({ abs: path.join(path.dirname(dir), s.name), deep: s.deep }))
+    : [{ abs: dir, deep: true }];
   /**
    * @param {string} abs
    * @param {Set<string>} ancestors  real paths of the directories above
    * @param {boolean} isRoot
+   * @param {boolean} deep  descend into subdirectories (agent roots) or not (mode roots)
    */
-  const walk = (abs, ancestors, isRoot) => {
+  const walk = (abs, ancestors, isRoot, deep) => {
     /** @type {fs.Dirent[]} */
     let entries;
     let real;
@@ -166,12 +183,13 @@ function listAgentFiles(dir) {
           isDir = false; // dangling: a file name at most
         }
       }
-      if (isDir) walk(child, below, false);
-      else if (ent.name.endsWith(".md"))
+      if (isDir) {
+        if (deep) walk(child, below, false, true);
+      } else if (ent.name.endsWith(".md"))
         names.push(path.relative(dir, child).split(path.sep).join("/"));
     }
   };
-  for (const root of roots) walk(root, new Set(), true);
+  for (const root of roots) walk(root.abs, new Set(), true, root.deep);
   return { names, unlisted };
 }
 
