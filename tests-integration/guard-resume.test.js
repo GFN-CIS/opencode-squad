@@ -7,7 +7,6 @@
 import { Effect } from "effect";
 import { expect, test } from "vitest";
 import { model, PLUGIN_DIR, TestLLM, withHost } from "./host.js";
-import { blockedFetches } from "./setup.js";
 
 /** The host's first call titles the session and carries no tools. */
 const isTitleRequest = (request) => (request.tools ?? []).length === 0;
@@ -120,7 +119,3 @@ test("a child resumed by session id after a completed run is interrupted when it
     }),
   );
 }, 90_000);
-
-test("nothing reached the network", () => {
-  expect(blockedFetches.filter((u) => /\/v1\/(messages|chat|responses)/.test(u))).toEqual([]);
-});

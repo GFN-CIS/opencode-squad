@@ -5,7 +5,6 @@
 import { Effect } from "effect";
 import { expect, test } from "vitest";
 import { model, PLUGIN_DIR, promptAndWait, TestLLM, withHost } from "./host.js";
-import { blockedFetches } from "./setup.js";
 
 /** The host's first call titles the session and carries no tools. */
 const isTitleRequest = (request) => (request.tools ?? []).length === 0;
@@ -122,9 +121,3 @@ test("a subagent whose model stream hangs is interrupted, and its orchestrator t
     }),
   );
 }, 90_000);
-
-test("nothing reached the network", () => {
-  // Metric refreshes and local model-server probes are attempted and blocked;
-  // none of them may be a model call.
-  expect(blockedFetches.filter((u) => /\/v1\/(messages|chat|responses)/.test(u))).toEqual([]);
-});

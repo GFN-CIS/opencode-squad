@@ -6,7 +6,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll } from "vitest";
+import { afterAll, expect } from "vitest";
+import { unexpectedRequests } from "./network.js";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "squad-it-"));
 for (const [key, dir] of [
@@ -24,16 +25,22 @@ for (const [key, dir] of [
 // squad_session prints local times; pin the zone so output is stable.
 process.env.TZ = "UTC";
 
-/** URLs the host or the plugin tried to reach; the in-process host is allowed. */
-export const blockedFetches = [];
+/** Requests the host or the plugin tried to send; the in-process host is allowed. */
+const blockedFetches = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   if (new URL(url).host === "opencode.local") return realFetch(input, init);
-  blockedFetches.push(url);
+  const method = (
+    init?.method ?? (typeof input === "object" && "method" in input ? input.method : "GET")
+  ).toUpperCase();
+  blockedFetches.push({ url, method });
   throw new Error(`network blocked in integration tests: ${url}`);
 };
 
+// Every file, whatever it tests: nothing but the expected background GETs
+// may have tried to leave, so no model call bypassed TestLLM.
 afterAll(() => {
   fs.rmSync(root, { recursive: true, force: true });
+  expect(unexpectedRequests(blockedFetches)).toEqual([]);
 });
