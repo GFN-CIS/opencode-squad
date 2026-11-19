@@ -46,7 +46,9 @@ const DEFAULT_BUCKETS = [
  *
  * Pairs are skipped when they can't speak to TTL:
  *   - a model or provider switch between the two (the cache could never hit);
- *   - a compaction turn (`summary`), which deliberately rewrites the prefix;
+ *   - a compaction turn (`summary`) on either side: it rewrites the prefix, so
+ *     neither the pair ending on it nor the pair starting from it says
+ *     anything about cache expiry;
  *   - too small a prefix to be cached at all;
  *   - a negative gap (clock skew / out-of-order rows).
  *
@@ -63,7 +65,7 @@ export function collectSamples(messages, sessionID) {
     const prev = messages[i - 1];
     const cur = messages[i];
     if (!prev || !cur) continue;
-    if (cur.summary) continue;
+    if (cur.summary || prev.summary) continue;
     if (!cur.providerID || prev.providerID !== cur.providerID) continue;
     if (prev.modelID !== cur.modelID) continue;
     const total = prev.total || 0;
