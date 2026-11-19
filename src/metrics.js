@@ -14,7 +14,9 @@
 // provider/model id is exactly the requested one (case aside) wins over any
 // normalized match, so two ids that differ only by punctuation stay apart.
 // A normalized match that several rows share keeps only the facts they all
-// agree on and names the candidates.
+// agree on and names the candidates. llmbenchmark identity is decided once
+// per model over the whole source (resolveLlmbIdentity) and shared by every
+// metric and by both views.
 
 import { formatContextSize } from "./context.js";
 import { squadRoleOf } from "./workers.js";
@@ -389,25 +391,86 @@ function currentRows(scores, metric) {
 }
 
 /**
- * The llmbenchmark id whose full detail the full view fetches for an
- * opencode id: from the model-id list, else from any metric's score rows,
- * both only when written in the current format (an older one may hand back
- * another model's id). `candidates`: several ids match and none is picked.
+ * @typedef {{id: string, key: string} | {candidates: string[], key: string}} LlmbIdentity
+ *   key: the basename key the match was made on (modelKey of the id when exact)
+ */
+
+/**
+ * The one llmbenchmark model an opencode id stands for, decided once over the
+ * whole source — the model-id list and every metric's score rows, both only
+ * when written in the current format (an older one may hand back another
+ * model's id) — and shared by every metric of the summary and by the full
+ * view. All the ids the source holds are pooled into one index and looked up
+ * once, so an exact id in any slice wins everywhere, and a basename or alias
+ * match counts only when it names a single id across the whole source; one
+ * that names several returns them all as `candidates`. Slice order does not
+ * matter.
  *
  * @param {string} id  opencode id
  * @param {MetricsData|null|undefined} data
- * @returns {{id: string} | {candidates: string[]} | null}
+ * @returns {LlmbIdentity | null}
  */
-export function llmbenchIdFor(id, data) {
+export function resolveLlmbIdentity(id, data) {
   const lists = [
     data?.ids?.format === LLMBENCH_FORMAT ? data.ids.index : undefined,
     ...Object.keys(data?.scores?.byMetric ?? {}).map((m) => currentRows(data?.scores, m)),
   ];
+  /** @type {Map<string, {id: string}>} */
+  const ids = new Map();
   for (const index of lists) {
-    const hit = index ? lookup(id, index)?.entry : undefined;
-    if (hit) return hit.candidates ? { candidates: hit.candidates } : { id: hit.id };
+    for (const [k, e] of Object.entries(index ?? {})) {
+      // Raw-id keys hold one id each; normalized keys only repeat them.
+      // The lowest spelling of an id wins, whatever the slice order.
+      if (k.startsWith("=") && typeof e?.id === "string") {
+        const seen = ids.get(k);
+        if (!seen || e.id < seen.id) ids.set(k, { id: e.id });
+      }
+    }
   }
-  return null;
+  const hit = lookup(id, indexModelIds([...ids.values()]));
+  if (!hit) return null;
+  return hit.entry.candidates
+    ? { candidates: hit.entry.candidates, key: hit.key }
+    : { id: hit.entry.id, key: hit.key };
+}
+
+/**
+ * What one metric's slice holds for a resolved identity. A current-format
+ * slice is read by the identity's raw id only: a different id it holds is
+ * another model and contributes nothing. An ambiguous identity shows as
+ * ambiguous wherever a slice holds any of its candidates. A slice of an
+ * earlier format (no raw-id keys, flagged in the header) counts only when
+ * its basename match is the identity's id — or, when no identity could be
+ * established from current data, when every earlier-format slice that
+ * matches agrees on one id (`legacyId`).
+ *
+ * @param {string} id  opencode id
+ * @param {Record<string, ScoreEntry>|undefined} slice
+ * @param {boolean} current  the slice is at LLMBENCH_FORMAT
+ * @param {LlmbIdentity|null} identity
+ * @param {string|null} legacyId
+ * @returns {{key: string, entry: ScoreEntry} | null}
+ */
+function sliceHit(id, slice, current, identity, legacyId) {
+  if (!slice) return null;
+  if (current) {
+    if (!identity) return null;
+    if ("id" in identity) {
+      const e = slice[exactKey(identity.id)];
+      return e ? { key: identity.key, entry: e } : null;
+    }
+    const held = identity.candidates.some((c) => Object.hasOwn(slice, exactKey(c)));
+    return held
+      ? {
+          key: identity.key,
+          entry: { id: identity.candidates[0], values: [], candidates: identity.candidates },
+        }
+      : null;
+  }
+  const hit = lookup(id, slice);
+  if (!hit || hit.entry.candidates) return null;
+  const want = identity && "id" in identity ? identity.id : identity ? null : legacyId;
+  return want && hit.entry.id.toLowerCase() === want.toLowerCase() ? hit : null;
 }
 
 /** @param {unknown} v */
@@ -625,7 +688,25 @@ export function formatSummary({
   for (const m of [...models].sort((a, b) => a.id.localeCompare(b.id))) {
     const note = notes?.[m.id];
     const s = lookup(m.id, si ?? {});
-    const hits = KEY_METRICS.map(({ metric }) => lookup(m.id, byMetric[metric]));
+    // One llmbenchmark identity for every metric (#54); earlier-format
+    // slices may only agree with it.
+    const identity = resolveLlmbIdentity(m.id, data);
+    const legacyIds = new Set(
+      KEY_METRICS.filter(({ metric }) => byMetric[metric] && !currentRows(data?.scores, metric))
+        .map(({ metric }) => lookup(m.id, byMetric[metric])?.entry)
+        .filter((e) => e && !e.candidates)
+        .map((e) => e?.id.toLowerCase()),
+    );
+    const legacyId = legacyIds.size === 1 ? ([...legacyIds][0] ?? null) : null;
+    const hits = KEY_METRICS.map(({ metric }) =>
+      sliceHit(
+        m.id,
+        byMetric[metric],
+        Boolean(currentRows(data?.scores, metric)),
+        identity,
+        legacyId,
+      ),
+    );
     const rules = ownerRules(m.id, { note, providers: plans });
     const info = rules.length ? rules.join(" / ") : null;
     const role = roles[m.id]?.length ? ` [${roles[m.id].join("+")}]` : "";
@@ -701,7 +782,7 @@ export function formatSummary({
  * @param {SiEntry | null} si  matched row, from lookup(id, superindexOf(data))
  * @param {BillingContext & {context?: number|null, llmbCandidates?: string[]}} [opts]
  *   context: opencode catalog limit; llmbCandidates: llmbenchmark ids that all
- *   match (see llmbenchIdFor), none fetched; the rest is how the model is paid
+ *   match (see resolveLlmbIdentity), none fetched; the rest is how the model is paid
  *   for, as the summary has it
  * @returns {string}
  */

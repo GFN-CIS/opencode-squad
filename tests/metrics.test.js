@@ -16,10 +16,10 @@ import {
   KEY_METRICS,
   keyCandidates,
   LLMBENCH_FORMAT,
-  llmbenchIdFor,
   lookup,
   ownerRules,
   providerEntry,
+  resolveLlmbIdentity,
   SUPERINDEX_FORMAT,
   squadRoles,
   superindexOf,
@@ -724,9 +724,9 @@ describe("distinct llmbenchmark ids that normalize alike stay apart (#54)", () =
   test("the model-id list keeps them apart too, and the full view names the candidates", () => {
     const index = indexModelIds([{ id: "p/m.1" }, { id: "p/m-1" }]);
     const data = { ids: { fetchedAt: 0, format: LLMBENCH_FORMAT, index } };
-    expect(llmbenchIdFor("p/m.1", data)).toEqual({ id: "p/m.1" });
-    expect(llmbenchIdFor("p/m-1", data)).toEqual({ id: "p/m-1" });
-    expect(llmbenchIdFor("p/m_1", data)).toEqual({ candidates: ["p/m-1", "p/m.1"] });
+    expect(resolveLlmbIdentity("p/m.1", data)).toMatchObject({ id: "p/m.1" });
+    expect(resolveLlmbIdentity("p/m-1", data)).toMatchObject({ id: "p/m-1" });
+    expect(resolveLlmbIdentity("p/m_1", data)).toMatchObject({ candidates: ["p/m-1", "p/m.1"] });
     const text = formatDetail("p/m_1", null, null, { llmbCandidates: ["p/m-1", "p/m.1"] });
     expect(text).toContain("ambiguous");
     expect(text).toContain("p/m-1, p/m.1");
@@ -734,12 +734,12 @@ describe("distinct llmbenchmark ids that normalize alike stay apart (#54)", () =
 
   test("an old-format id list is not trusted; current score rows still resolve the id", () => {
     const old = { ids: { fetchedAt: 0, index: { "m-1": "p/m-1" } } };
-    expect(llmbenchIdFor("p/m.1", old)).toBeNull();
+    expect(resolveLlmbIdentity("p/m.1", old)).toBeNull();
     const withScores = {
       ...old,
       scores: { formatByMetric: { [TB]: LLMBENCH_FORMAT }, byMetric: { [TB]: orders[0][1] } },
     };
-    expect(llmbenchIdFor("p/m.1", withScores)).toEqual({ id: "p/m.1" });
+    expect(resolveLlmbIdentity("p/m.1", withScores)).toMatchObject({ id: "p/m.1" });
   });
 
   test("score rows from an earlier cache format are shown, but flagged", () => {
@@ -752,7 +752,101 @@ describe("distinct llmbenchmark ids that normalize alike stay apart (#54)", () =
     });
     expect(out).toContain("TerminalBench4 0.5");
     expect(out).toMatch(/llmbenchmark rows for TerminalBench4 predate exact-id matching/);
-    expect(llmbenchIdFor("p/m-1", { scores: { byMetric: { [TB]: legacy } } })).toBeNull();
+    expect(resolveLlmbIdentity("p/m-1", { scores: { byMetric: { [TB]: legacy } } })).toBeNull();
+  });
+});
+
+describe("one llmbenchmark identity per model, shared by every slice and both views (#54)", () => {
+  const TB = "tbench_4_0_accuracy";
+  const APEX = "epoch_apex_agents";
+  const tbRows = indexScoreRows([{ modelId: "p/m", value: 0.7 }]);
+  const apexRows = indexScoreRows([{ modelId: "other/m", value: 0.2 }]);
+  /** Slices in the order given: Object.keys walks insertion order. */
+  const dataOf = (slices, ids) => ({
+    scores: {
+      fetchedAtByMetric: Object.fromEntries(slices.map(([m]) => [m, 0])),
+      formatByMetric: Object.fromEntries(slices.map(([m]) => [m, LLMBENCH_FORMAT])),
+      byMetric: Object.fromEntries(slices),
+    },
+    ...(ids ? { ids: { fetchedAt: 0, format: LLMBENCH_FORMAT, index: indexModelIds(ids) } } : {}),
+  });
+  const line = (data, id) =>
+    formatSummary({ models: [{ id }], data, now: 0 })
+      .split("\n")
+      .find((l) => l.startsWith(`- ${id}:`)) ?? "";
+  const cases = [];
+  for (const [order, slices] of [
+    [
+      "TerminalBench first",
+      [
+        [TB, tbRows],
+        [APEX, apexRows],
+      ],
+    ],
+    [
+      "APEX-Agents first",
+      [
+        [APEX, apexRows],
+        [TB, tbRows],
+      ],
+    ],
+  ]) {
+    cases.push([`${order}, model list holds only other/m`, dataOf(slices, [{ id: "other/m" }])]);
+    cases.push([`${order}, model list missing`, dataOf(slices, null)]);
+  }
+
+  for (const [name, data] of cases) {
+    test(`an exact id in any slice wins everywhere (${name})`, () => {
+      expect(resolveLlmbIdentity("p/m", data)).toMatchObject({ id: "p/m" });
+      const l = line(data, "p/m");
+      expect(l).toContain("TerminalBench4 0.7");
+      // other/m is another model: its APEX-Agents score is not p/m's.
+      expect(l).not.toContain("APEX-Agents");
+      expect(l).not.toContain("0.2");
+      expect(l).not.toContain("(data for");
+    });
+
+    test(`other/m keeps its own score and no one else's (${name})`, () => {
+      expect(resolveLlmbIdentity("other/m", data)).toMatchObject({ id: "other/m" });
+      const l = line(data, "other/m");
+      expect(l).toContain("APEX-Agents 0.2");
+      expect(l).not.toContain("TerminalBench4");
+    });
+
+    test(`an alias matching two ids across slices names both, pools neither (${name})`, () => {
+      expect(resolveLlmbIdentity("q/m", data)).toMatchObject({ candidates: ["other/m", "p/m"] });
+      const l = line(data, "q/m");
+      expect(l).toContain("TerminalBench4 ambiguous (other/m, p/m)");
+      expect(l).toContain("APEX-Agents ambiguous (other/m, p/m)");
+      expect(l).not.toMatch(/0\.[27]/);
+    });
+  }
+
+  test("an alias that names one id across the whole source still resolves", () => {
+    const data = dataOf(
+      [
+        [TB, indexScoreRows([{ modelId: "z-ai/glm-5.3", value: 0.5 }])],
+        [APEX, indexScoreRows([{ modelId: "z-ai/glm-5.3", value: 0.3 }])],
+      ],
+      [{ id: "z-ai/glm-5.3" }],
+    );
+    expect(resolveLlmbIdentity("zai-coding-plan/glm-5.3", data)).toMatchObject({
+      id: "z-ai/glm-5.3",
+    });
+    const l = line(data, "zai-coding-plan/glm-5.3");
+    expect(l).toContain("TerminalBench4 0.5");
+    expect(l).toContain("APEX-Agents 0.3");
+  });
+
+  test("an alias unique in one slice but not in the source is ambiguous everywhere", () => {
+    const data = dataOf(
+      [[TB, indexScoreRows([{ modelId: "a/m", value: 0.4 }])]],
+      [{ id: "a/m" }, { id: "b/m" }],
+    );
+    expect(resolveLlmbIdentity("q/m", data)).toMatchObject({ candidates: ["a/m", "b/m"] });
+    const l = line(data, "q/m");
+    expect(l).toContain("TerminalBench4 ambiguous (a/m, b/m)");
+    expect(l).not.toContain("0.4");
   });
 });
 

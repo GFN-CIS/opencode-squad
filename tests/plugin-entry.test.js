@@ -46,7 +46,8 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
     syncGlobalSquadDescriptions: () => [],
     squadDescriber: () => (role, id) => `${role} on ${id}. Owner rule: no secrets.`,
     startMetricsRefresh: () => {},
-    getMetrics: async () => data,
+    // A test may swap in its own cache contents.
+    getMetrics: async () => globalThis.__squadMetricsData ?? data,
     loadModelSettings: () => ({
       models: {},
       providers: { "zai-coding-plan": "GLM Coding Pro" },
@@ -194,6 +195,48 @@ test("squad_metrics renders the asked models, squad roles and full detail", asyn
   } finally {
     dispose();
     vi.unstubAllGlobals();
+  }
+});
+
+test("squad_metrics full view fetches the same llmbenchmark id the summary attributes (#54)", async () => {
+  const { indexModelIds, indexScoreRows, LLMBENCH_FORMAT } = await import("../src/metrics.js");
+  const TB = "tbench_4_0_accuracy";
+  const APEX = "epoch_apex_agents";
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  // The APEX-Agents slice comes first and holds only another model's id.
+  globalThis.__squadMetricsData = {
+    scores: {
+      fetchedAtByMetric: { [APEX]: Date.now(), [TB]: Date.now() },
+      formatByMetric: { [APEX]: LLMBENCH_FORMAT, [TB]: LLMBENCH_FORMAT },
+      byMetric: {
+        [APEX]: indexScoreRows([{ modelId: "other/m", value: 0.2 }]),
+        [TB]: indexScoreRows([{ modelId: "p/m", value: 0.7 }]),
+      },
+    },
+    ids: {
+      fetchedAt: Date.now(),
+      format: LLMBENCH_FORMAT,
+      index: indexModelIds([{ id: "other/m" }]),
+    },
+  };
+  const fetched = [];
+  vi.stubGlobal("fetch", async (url) => {
+    fetched.push(String(url));
+    return { ok: true, status: 200, text: async () => JSON.stringify({ id: "p/m", scores: [] }) };
+  });
+  const { tools, dispose } = await setupHost({ directory, agent: { list: async () => [] } });
+  try {
+    const metrics = tools.get("squad_metrics");
+    const summary = (await metrics.execute({ models: ["p/m"] }, { agent: "build" })).content;
+    expect(summary).toContain("TerminalBench4 0.7");
+    expect(summary).not.toContain("APEX-Agents 0.2");
+    await metrics.execute({ models: ["p/m"], full: true }, { agent: "build" });
+    expect(fetched).toEqual(["https://api.llmbenchmark.ai/v1/models/p%2Fm"]);
+  } finally {
+    dispose();
+    vi.unstubAllGlobals();
+    delete globalThis.__squadMetricsData;
   }
 });
 
