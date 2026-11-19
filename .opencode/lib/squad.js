@@ -78,7 +78,7 @@ import {
   defaultStoreFile,
   NO_STORE_REVISION,
   readStore,
-  storeSignature,
+  storeRevision,
   withStoreLock,
   writeStore,
 } from "../../src/squad-store.js";
@@ -238,7 +238,9 @@ export default {
     // src/squad-agents.js for why there are two transforms.
 
     const storeFile = defaultStoreFile();
-    let storeSig = storeSignature(storeFile);
+    // What the agents were last built from: squad.json's content revision.
+    // Size and mtime can match for different contents (#92).
+    let storeSig = storeRevision(storeFile);
     /** From the late transform: hand-authored holders of roster ids, legacy agents hidden, stray ones left. */
     let lateReport = {
       built: /** @type {string[]} */ ([]),
@@ -416,7 +418,7 @@ export default {
           toolsRecorded = true;
           await ctx.tool.transform(recordTools);
         }
-        const sig = storeSignature(storeFile);
+        const sig = storeRevision(storeFile);
         if (!force && sig === storeSig) return;
         storeSig = sig;
         await ctx.agent.reload();

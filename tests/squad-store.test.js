@@ -10,7 +10,6 @@ import {
   NO_STORE_REVISION,
   readStore,
   storeRevision,
-  storeSignature,
   withStoreLock,
   writeStore,
 } from "../src/squad-store.js";
@@ -27,7 +26,7 @@ afterEach(() => {
 
 test("a missing file is no squad, not an error", () => {
   expect(readStore(file)).toEqual({ state: "missing" });
-  expect(storeSignature(file)).toBe("-");
+  expect(storeRevision(file)).toBe(NO_STORE_REVISION);
 });
 
 test("write then read round-trips, keys sorted, with the format version", () => {
@@ -44,7 +43,6 @@ test("write then read round-trips, keys sorted, with the format version", () => 
     roster: { grunts: { "a/b": {}, "z/b": { variant: "high" } }, drills: {} },
     revision: storeRevision(file),
   });
-  expect(storeSignature(file)).not.toBe("-");
 });
 
 test("the revision is of the bytes: any edit changes it, none means no file (#89)", () => {

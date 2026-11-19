@@ -4,6 +4,8 @@
 //        offers only the drill's tools and enforces its rules;
 //   #88  an agent the user wrote keeps its whole effective definition when the
 //        roster asks for its id, or when a verified legacy file shares its id.
+//   #92  a roster replaced with equal size and mtime still takes effect on
+//        the next request;
 //   #91  an unreadable model_data.json never registers a squad agent whose
 //        description silently lacks the owner's rules.
 // Run: npm run test:integration   (Node >= 24)
@@ -178,4 +180,33 @@ test("#91: with model_data.json unreadable, the live description says the owner 
   } finally {
     await fs.rm(path.join(configDir(), "model_data.json"), { force: true });
   }
+}, 120_000);
+
+test("#92: an equal-size roster with the old mtime still takes effect on the next request", async () => {
+  await writeRoster({ grunts: { "p/m": { variant: "low" } } });
+  // A whole second, so it can be put back exactly.
+  const stamp = new Date("2026-01-01T00:00:00Z");
+  await fs.utimes(storeFile(), stamp, stamp);
+  const live = await withHost(
+    (h) =>
+      Effect.gen(function* () {
+        yield* h.llm.serve((request) =>
+          isTitleRequest(request) ? TestLLM.text("Title", "title") : TestLLM.text("ok", "answer"),
+        );
+        yield* oneTurn(h);
+        const before = (yield* liveAgent(h, "grunt-p-m"))?.model?.variant;
+        // Another process swaps in an equally long roster, and the
+        // timestamp ends up where it was.
+        yield* Effect.promise(async () => {
+          const text = (await fs.readFile(storeFile(), "utf8")).replace('"low"', '"max"');
+          await fs.writeFile(`${storeFile()}.tmp`, text);
+          await fs.rename(`${storeFile()}.tmp`, storeFile());
+          await fs.utimes(storeFile(), stamp, stamp);
+        });
+        yield* oneTurn(h);
+        return { before, after: (yield* liveAgent(h, "grunt-p-m"))?.model?.variant };
+      }),
+    GLOBAL_ALLOW,
+  );
+  expect(live).toEqual({ before: "low", after: "max" });
 }, 120_000);

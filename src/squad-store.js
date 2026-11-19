@@ -146,21 +146,6 @@ export function withStoreLock(file, fn) {
 }
 
 /**
- * The file's change signature: other OpenCode processes write it too (the
- * desktop service and a CLI share one config dir).
- *
- * @param {string} file
- */
-export function storeSignature(file) {
-  try {
-    const st = fs.statSync(file);
-    return `${st.mtimeMs}:${st.size}`;
-  } catch {
-    return "-";
-  }
-}
-
-/**
  * @param {{grunts?: Record<string, any>, drills?: Record<string, any>}} roster
  * @returns {Roster}
  */
