@@ -70,11 +70,11 @@ The inventory carries **no benchmarks and no prices** on purpose. The bootstrap 
 ```
 - zai-coding-plan/glm-5.3 [grunt+drill]: SI 80.6 #19 · ctx 1M · subscription: GLM Coding Pro · TerminalBench4 0.418 · APEX-Agents 0.566 · FrontierSWE 0.302 · ValsIndex 0.599
 - anthropic/claude-sonnet-5-5 [grunt+drill]: SI 85.2 #7 · ctx 1M · $2/$10 · TerminalBench4 0.618 · APEX-Agents 0.755 · FrontierSWE 0.619 · LiveBench-coding 0.772 · ValsIndex 0.708
-- openai/gpt-6.1-terra-fast: ctx 1.1M · same benchmarks as openai/gpt-6.1-terra
+- openai/gpt-6.1-terra-fast: ctx 1.1M · tier price unknown · same benchmarks as openai/gpt-6.1-terra
 - opencode/iceman-free: free · no benchmark data
 ```
 
-A tier with another model's scores shows only its own context, plan and rules next to `same benchmarks as`. The list price is left out there, since it was read from the other model's row. A model with no benchmarks still shows its context, plan and rules. Only models with nothing at all to show share the trailing `no benchmark data:` line.
+A tier with another model's scores shows only its own context, plan and rules next to `same benchmarks as`. A tier (`-fast`, `-ultrafast`, `-highspeed`, `-free`) never shows its base model's list price — whether it is asked for alone or together with the base — because the tier is billed on its own; only a SuperIndex row of the tier itself gives it a price. Dated snapshots and `-latest`/`-preview` aliases keep the base price. It says `tier price unknown` instead, so silence is not read as "no dearer than the base"; in `full: true` output such a tier also names whose row it is (`row of <base>`). A model with no benchmarks still shows its context, plan and rules. Only models with nothing at all to show share the trailing `no benchmark data:` line.
 
 `squad_metrics({models: ["a/b", "c/d"], full: true})` (up to 6) returns **every** metric the sources hold for those models, grouped by source and the setting it was measured at — for a close call the summary does not settle.
 

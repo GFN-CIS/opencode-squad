@@ -251,8 +251,65 @@ describe("formatSummary", () => {
       now,
     });
     expect(text).toContain(
-      "- openai/gpt-6.1-terra-fast [grunt]: ctx 1.1M · same benchmarks as openai/gpt-6.1-terra",
+      "- openai/gpt-6.1-terra-fast [grunt]: ctx 1.1M · tier price unknown · same benchmarks as openai/gpt-6.1-terra",
     );
+  });
+
+  describe("a tier never shows its base model's price (#34)", () => {
+    // Only the base model x/b has a priced row.
+    const PRICED = {
+      superindex: {
+        fetchedAt: 0,
+        index: indexSuperIndex({
+          models: [
+            { id: "x/b", si_score: 70, rank: 5, price_in: 5, price_out: 20 },
+            { id: "x/c", si_score: 60, rank: 9, price_in: 1, price_out: 4 },
+            { id: "x/c-fast", si_score: 60, rank: 9, price_in: 3, price_out: 12 },
+          ],
+        }),
+      },
+    };
+    const summary = (ids) =>
+      formatSummary({ models: ids.map((id) => ({ id })), data: PRICED, now }).split("\n");
+    const lineOf = (lines, id) => lines.find((l) => l.startsWith(`- ${id}:`)) ?? "";
+
+    test("asked alone, the tier shows the shared row but not its price", () => {
+      const fast = lineOf(summary(["x/b-fast"]), "x/b-fast");
+      expect(fast).toContain("SI 70 #5");
+      expect(fast).toContain("(data for b)");
+      expect(fast).not.toContain("$5/$20");
+      expect(fast).toContain("tier price unknown");
+    });
+
+    test("asked with the base model, the base keeps its price and the tier does not", () => {
+      const lines = summary(["x/b", "x/b-fast"]);
+      expect(lineOf(lines, "x/b")).toContain("$5/$20");
+      expect(lineOf(lines, "x/b-fast")).toBe(
+        "- x/b-fast: tier price unknown · same benchmarks as x/b",
+      );
+    });
+
+    test("a tier with its own priced row shows its own price", () => {
+      expect(lineOf(summary(["x/c-fast"]), "x/c-fast")).toContain("$3/$12");
+      expect(lineOf(summary(["x/c", "x/c-fast"]), "x/c-fast")).toContain("$3/$12");
+    });
+
+    test("a dated or -latest alias of the same model keeps the price", () => {
+      expect(lineOf(summary(["x/b-20260101"]), "x/b-20260101")).toContain("$5/$20");
+      const lines = summary(["x/b", "x/b-latest"]);
+      expect(lineOf(lines, "x/b-latest")).toBe("- x/b-latest: $5/$20 · same benchmarks as x/b");
+    });
+
+    test("the full detail names the base row and keeps its price off the tier", () => {
+      const row = lookup("x/b-fast", PRICED.superindex.index)?.entry ?? null;
+      const text = formatDetail("x/b-fast", null, row);
+      expect(text).toContain("SuperIndex (row of x/b): 70 (#5)");
+      expect(text).toContain("tier price unknown");
+      expect(text).not.toContain("$5/$20");
+      const own = formatDetail("x/b", null, lookup("x/b", PRICED.superindex.index)?.entry ?? null);
+      expect(own).toContain("SuperIndex: 70 (#5)");
+      expect(own).toContain("$5/$20 per 1M");
+    });
   });
 
   test("a free tier with shared scores stays free, with its own context limit (#34)", () => {

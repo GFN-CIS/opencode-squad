@@ -33,16 +33,12 @@ export const KEY_METRICS = [
 // free tier returns nulls for most sub-benchmarks.
 const EXCLUDED_SOURCES = new Set(["aa-api", "artificialanalysis"]);
 
-// Serving-speed and pricing-tier suffixes that name the same weights.
-const SAME_MODEL_SUFFIXES = [
-  /-ultrafast$/,
-  /-highspeed$/,
-  /-fast$/,
-  /-free$/,
-  /-latest$/,
-  /-preview$/,
-  /-\d{8}$/,
-];
+// Serving-speed and pricing tiers: same weights, but billed on their own.
+const TIER_SUFFIXES = [/-ultrafast$/, /-highspeed$/, /-fast$/, /-free$/];
+// Aliases and snapshots of one model at one price.
+const SAME_PRICE_SUFFIXES = [/-latest$/, /-preview$/, /-\d{8}$/];
+// Suffixes that name the same weights.
+const SAME_MODEL_SUFFIXES = [...TIER_SUFFIXES, ...SAME_PRICE_SUFFIXES];
 
 /** @param {string} id  "provider/model" or bare "model" */
 function modelKey(id) {
@@ -59,9 +55,10 @@ function modelKey(id) {
  * same weights are stripped — `glm-5.3` never matches `glm-5.3-flash`.
  *
  * @param {string} id
+ * @param {RegExp[]} [suffixes]  suffixes that may be stripped
  * @returns {string[]}
  */
-export function keyCandidates(id) {
+export function keyCandidates(id, suffixes = SAME_MODEL_SUFFIXES) {
   /** @type {string[]} */
   const out = [];
   /** @param {string} k */
@@ -73,7 +70,7 @@ export function keyCandidates(id) {
   let k = base;
   for (let changed = true; changed; ) {
     changed = false;
-    for (const re of SAME_MODEL_SUFFIXES) {
+    for (const re of suffixes) {
       if (re.test(k)) {
         k = k.replace(re, "");
         add(k);
@@ -103,6 +100,18 @@ export function lookup(id, index) {
     if (Object.hasOwn(index, key)) return { key, entry: index[key] };
   }
   return null;
+}
+
+/**
+ * Whether a row found under `key` lists this id's own price. A tier
+ * (`-fast`, `-free`, ...) that fell back to its base model's row shares its
+ * benchmarks, not its price — the base price would pass for the tier's.
+ *
+ * @param {string} id  opencode id
+ * @param {string} key  modelKey of the matched row
+ */
+function ownsPrice(id, key) {
+  return keyCandidates(id, SAME_PRICE_SUFFIXES).includes(key);
 }
 
 /** @param {unknown} v */
@@ -332,10 +341,20 @@ export function formatSummary({
     const billing = billingFor(m.id, { note, plans, authTypes });
     if (!billing.api) own.push(`subscription: ${billing.plan ?? "plan not set"}`);
     else if (/-free$/.test(modelKey(m.id))) own.push("free");
-    // A list price read off another model's row is that model's price.
+    // A list price read off another tier's row is that tier's price, whether
+    // or not that model is in this request.
     const price =
-      billing.api && !/-free$/.test(modelKey(m.id)) && s?.entry.priceIn != null
+      billing.api &&
+      !/-free$/.test(modelKey(m.id)) &&
+      s &&
+      ownsPrice(m.id, s.key) &&
+      s.entry.priceIn != null
         ? `$${s.entry.priceIn}/$${s.entry.priceOut ?? "?"}`
+        : null;
+    // Silence would read as "no dearer than the base": say it is unknown.
+    const tierUnknown =
+      billing.api && !/-free$/.test(modelKey(m.id)) && s && !ownsPrice(m.id, s.key)
+        ? "tier price unknown"
         : null;
     const rule = info ? [`owner rule: ${info}`] : [];
 
@@ -348,7 +367,7 @@ export function formatSummary({
     const signature = `${provider}|${s?.key ?? ""}|${hits.map((h) => h?.key ?? "").join("|")}`;
     const same = firstBySignature.get(signature);
     if (same) {
-      const shared = [...own, ...(s?.key === modelKey(m.id) && price ? [price] : [])];
+      const shared = [...own, ...(price ? [price] : tierUnknown ? [tierUnknown] : [])];
       lines.push(
         `- ${m.id}${role}: ${[...shared, `same benchmarks as ${same}`, ...rule].join(" · ")}`,
       );
@@ -364,7 +383,7 @@ export function formatSummary({
       // Unranked scores rest on too few benchmarks to compare with ranked ones.
       else parts.push(`SI ${e.score} (provisional, conf ${e.confidence ?? "?"}%)`);
     }
-    parts.push(...own, ...(price ? [price] : []));
+    parts.push(...own, ...(price ? [price] : tierUnknown ? [tierUnknown] : []));
     hits.forEach((h, i) => {
       if (h) parts.push(`${KEY_METRICS[i].label} ${fmtValues(h.entry.values)}`);
     });
@@ -390,10 +409,19 @@ export function formatSummary({
 export function formatDetail(id, detail, si) {
   const head = [`## ${id}`];
   if (si) {
+    const own = ownsPrice(id, modelKey(si.id));
+    // A tier read off its base model's row: say whose row it is and keep the
+    // base price off the tier.
+    const price = own
+      ? `$${si.priceIn ?? "?"}/$${si.priceOut ?? "?"} per 1M`
+      : /-free$/.test(modelKey(id))
+        ? "free"
+        : "tier price unknown";
     head.push(
-      `SuperIndex: ${si.score ?? "unscored"}${si.rank !== null ? ` (#${si.rank})` : ""}, ` +
+      `SuperIndex${own ? "" : ` (row of ${si.id})`}: ` +
+        `${si.score ?? "unscored"}${si.rank !== null ? ` (#${si.rank})` : ""}, ` +
         `status ${si.status ?? "?"}, confidence ${si.confidence ?? "?"}%, ` +
-        `$${si.priceIn ?? "?"}/$${si.priceOut ?? "?"} per 1M, ctx ${si.context ? formatContextSize(si.context) : "?"}`,
+        `${price}, ctx ${si.context ? formatContextSize(si.context) : "?"}`,
     );
   }
   const scores = Array.isArray(detail?.scores) ? detail.scores : [];
