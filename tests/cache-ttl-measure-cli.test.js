@@ -154,6 +154,39 @@ test("a compaction large enough to sample is never paired with the turn after it
   expect(JSON.parse(r.stdout).samples).toBe(1);
 }, 30_000);
 
+test("a turn interrupted before it reported usage is not counted as a cache miss", () => {
+  const { file, db } = makeDb(V2_SCHEMA);
+  db.prepare("insert into session_v2 (id) values (?)").run("ses_1");
+  const add = db.prepare(
+    "insert into session_message (id, session_id, type, seq, time_created, data) values (?, 'ses_1', ?, ?, ?, ?)",
+  );
+  const T0 = 1_800_000_000_000;
+  const model = { id: "model-x", providerID: "prov" };
+  add.run(
+    "m0",
+    "assistant",
+    0,
+    T0,
+    JSON.stringify({
+      time: { created: T0 },
+      model,
+      tokens: { input: 9_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    }),
+  );
+  // Persisted as OpenCode 2.1.3 does for an interrupted step: no tokens at all.
+  add.run(
+    "m1",
+    "assistant",
+    1,
+    T0 + 60_000,
+    JSON.stringify({ time: { created: T0 + 60_000 }, model, finish: "error" }),
+  );
+  db.close();
+  const r = run(["--db", file, "--json"]);
+  expect(r.status).toBe(1);
+  expect(r.stderr).toMatch(/No usable samples/);
+}, 30_000);
+
 test("where OpenCode 1 tables remain beside OpenCode 2 ones, only OpenCode 2 is read", () => {
   const { file, db } = makeDb(
     `${V2_SCHEMA} create table session (id text); create table message (session_id text, data text, time_created integer);`,

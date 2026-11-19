@@ -49,10 +49,12 @@ const DEFAULT_BUCKETS = [
  *   - a compaction turn (`summary`) on either side: it rewrites the prefix, so
  *     neither the pair ending on it nor the pair starting from it says
  *     anything about cache expiry;
+ *   - a turn that reported no usage (`noUsage`, e.g. interrupted before the
+ *     provider sent it) on either side: no cache read is not a miss;
  *   - too small a prefix to be cached at all;
  *   - a negative gap (clock skew / out-of-order rows).
  *
- * @param {Array<{time:number, total:number, cacheRead:number, providerID?:string, modelID?:string, summary?:boolean}>} messages
+ * @param {Array<{time:number, total:number, cacheRead:number, providerID?:string, modelID?:string, summary?:boolean, noUsage?:boolean}>} messages
  *   assistant messages, ordered oldest-first
  * @param {string} [sessionID]  carried through so callers can count distinct sessions
  * @returns {Array<{gapSeconds:number, ratio:number, hit:boolean, providerID:string, modelID:string, sessionID?:string}>}
@@ -66,6 +68,7 @@ export function collectSamples(messages, sessionID) {
     const cur = messages[i];
     if (!prev || !cur) continue;
     if (cur.summary || prev.summary) continue;
+    if (cur.noUsage || prev.noUsage) continue;
     if (!cur.providerID || prev.providerID !== cur.providerID) continue;
     if (prev.modelID !== cur.modelID) continue;
     const total = prev.total || 0;
