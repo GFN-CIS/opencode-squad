@@ -19,10 +19,14 @@ The squad is edited through two tools, `squad_dump` and `squad_patch`. The
 roster they speak is one map per role, keyed by model id:
 
 ```json
-{ "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high" },
+{ "revision": "3f9c0a1b2c4d5e6f",
+  "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high" },
               "openai/gpt-5.6-luna": {} },
   "drills": { "anthropic/claude-opus-5": { "variant": "max" } } }
 ```
+
+`revision` identifies the roster you were shown; keep it when you send the
+document back.
 
 An agent exists if it appears in a role map, and `{}` is a valid entry meaning
 "this model, role defaults". Per-agent fields: `variant`, `notes`, `steps`,
@@ -78,7 +82,9 @@ job. (If they hand you an explicit list, honor it.)
    context and rankings stay out — sarge reads them live from `squad_metrics`;
    a frozen copy goes stale (a GLM grunt kept advertising "(60/75/84)" long
    after its source re-scored it at half that). `squad_patch` refuses a
-   `description`.
+   `description`. If `model_data.json` cannot be read, the dump and the patch
+   report say so; tell the user, because descriptions then keep older rules or
+   say the rules are unknown.
 
    **If the user states a routing rule**, write it into
    `~/.config/opencode/model_data.json` yourself — their words, one line, keep
@@ -161,7 +167,15 @@ job. (If they hand you an explicit list, honor it.)
    their edits. Do not apply before they confirm.
 
 6. **Apply with `squad_patch`**, passing the COMPLETE intended squad — the
-   document you got from `squad_dump` with your edits folded in.
+   document you got from `squad_dump` with your edits folded in, its
+   `revision` included.
+
+   - **A stale revision is refused.** If another session or OpenCode process
+     patched the squad since your dump, nothing is written. Call `squad_dump`
+     again, fold the same edits into what it prints now, and patch with its
+     revision; never copy the old revision onto a new dump.
+   - Two model ids that map to one agent id (`p/m-1` and `p/m.1`) are refused:
+     keep one of them.
 
    - **Deletions are refused by default.** Any agent present now and absent from
      your roster is a deletion, including dropping a drill from a model that
@@ -173,7 +187,8 @@ job. (If they hand you an explicit list, honor it.)
      stops being dispatchable but keeps its settings.
    - There is one squad for every project; `directory` is no longer accepted.
    - Hand-authored agents are never dumped or changed. One that already holds a
-     squad id wins: that entry is not registered, and `squad_patch` refuses it.
+     squad id wins: that entry is not registered, and `squad_patch` refuses to
+     add or change it.
 
 7. **Report** the applied diff (`+added / -removed / ~changed / =unchanged`),
    echo the variants that were written — opencode ignores an unrecognized one

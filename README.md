@@ -117,7 +117,7 @@ The global file is refreshed at opencode startup: new squad models get an empty 
 
 ## Changing subagent models
 
-Use `squad-draft` (or `squad_dump` + `squad_patch`) to add or retune the per-model agents. The squad is one roster for every project; an `agents` entry in a project's `opencode.json` no longer overrides a squad agent, because the plugin registers those agents itself and sets every field. There are no generic fallback grunt/drill agents.
+Use `squad-draft` (or `squad_dump` + `squad_patch`) to add or retune the per-model agents. The squad is one roster for every project. An `agents` entry in an `opencode.json`, or an agent file, at a squad agent's id is your own agent from then on: it wins, exactly as you wrote it, and that squad entry is not registered. There are no generic fallback grunt/drill agents.
 
 ---
 
@@ -132,9 +132,9 @@ openai/gpt-5.5  →  grunt-openai-gpt-5-5   (executor: edit/shell)
 
 Each squad agent shares the bundled grunt/drill prompt and permissions, differs only in `model`, and is `hidden` (dispatched via `subagent`, not in the `@`-menu). They appear in the orchestrator's inventory **with their models and capability summary**, which makes routing concrete. A `squad_patch` applies to the next dispatch, without a restart, and another OpenCode process sharing the config dir picks the change up on its next request. The role prompt comes from `prompts/<role>.md` and is refreshed on every request, so editing it takes effect immediately. Hand-authored agents are never touched.
 
-**Upgrading from file-based squads (before #85).** On first start the plugin imports the generated `grunt-*`/`drill-*`/`worker-*` files from `~/.config/opencode/agent/` into `squad.json`, once. The files are left in place: the plugin's agents take over their ids, and generated agents the roster no longer has are hidden. `squad_dump` lists the leftovers, and you may delete them. If a generated file cannot be read, nothing is imported and `squad_dump` says which file to fix.
+**Upgrading from file-based squads (before #85).** On first start the plugin imports the generated `grunt-*`/`drill-*`/`worker-*` files from `~/.config/opencode/agent/` into `squad.json`, once. The files are left in place: where the agent OpenCode loaded at an id is that very file (same prompt and model), the plugin's agent takes the id over, and generated agents the roster no longer has are hidden. If another agent holds the id, say a project's own file, it is left alone and `squad_dump` says so. `squad_dump` lists the leftovers, and you may delete them. If a generated file cannot be read, nothing is imported and `squad_dump` says which file to fix.
 
-**Drill permissions.** The plugin appends each role's permission rules after your global `permissions`, so with OpenCode's last-match evaluation a drill stays read-only even when your global config allows everything. The host then hides from a drill every tool its rules deny.
+**Drill permissions.** Each squad agent gets your global `permissions` first and its role's rules last, so with OpenCode's last-match evaluation a drill stays read-only even when your global config allows everything, and the host hides from it every tool its rules deny. To get that order the plugin builds the squad's agents after OpenCode's own config has been applied; until then they do not exist, so an early request for one fails instead of running with the wrong rules. Each request a squad agent makes is checked once more: if the role's rules are no longer last, they are put back and the request's tools are cut to what the role allows.
 
 There is no bundled fallback agent — if no `grunt-*`/`drill-*` exists yet, the orchestrator tells you to run `squad-draft` instead of inventing a subagent or quietly doing the work itself.
 
@@ -314,7 +314,7 @@ So the roster is data you edit, exposed as two plugin tools:
 | tool | what it does |
 | --- | --- |
 | `squad_dump` | returns the current roster from `squad.json` as JSON |
-| `squad_patch` | writes a roster back — `grunts` / `drills`, plus `allow_remove`; refuses a `description` (generated, see below), a roster wrapped in an extra key, and the removed `directory` argument |
+| `squad_patch` | writes a roster back — `grunts` / `drills`, the `revision` the dump printed, plus `allow_remove`; refuses a stale `revision`, a `description` (generated, see below), model ids that map to one agent id, a roster wrapped in an extra key, and the removed `directory` argument |
 | `squad_metrics` | benchmarks, prices, context and billing for the `models` given; `full: true` for every metric of up to 6 — see [Model metrics](#model-metrics-squad_metrics) |
 
 A third tool covers the other half of reuse:
@@ -365,7 +365,7 @@ Per-agent fields, and why these and not the rest of opencode's agent schema:
 | `steps` | cap on agentic iterations before opencode forces a text response |
 | `disable` | park an agent without deleting it — the soft alternative to a removal |
 
-**Descriptions are generated, not drafted.** An agent's `description` is the line the orchestrator reads when it picks whom to dispatch, so it carries exactly what you own and nothing that goes stale: the role, your `info` for that model as `Owner rule: …`, and the provider's plan (`Billing: subscription (Max 5x).`). The plugin builds it from the global `model_data.json` whenever it registers the agents: at start and after every `squad_patch`. So editing `info` or a plan needs a restart, not a re-draft. A `model_data.json` that does not parse is never overwritten: startup leaves it as it is and logs its path and the parse position, `squad_patch` refuses until it is fixed, and `squad_metrics` lists it as ignored. Benchmarks, prices and rankings never go in: hand-written ones went stale within a week, and an orchestrator asked to "refresh descriptions" invented them.
+**Descriptions are generated, not drafted.** An agent's `description` is the line the orchestrator reads when it picks whom to dispatch, so it carries exactly what you own and nothing that goes stale: the role, your `info` for that model as `Owner rule: …`, and the provider's plan (`Billing: subscription (Max 5x).`). The plugin builds it from the global `model_data.json` whenever it registers the agents: at start and after every `squad_patch`. So editing `info` or a plan needs a restart, not a re-draft. A `model_data.json` that does not parse is never overwritten: startup leaves it as it is and logs its path and the parse position, and `squad_metrics` lists it as ignored. Its owner rules are never silently dropped from a description: the plugin keeps the ones it last read for as long as it runs, and with none read yet each squad agent's description says the owner's rules are unknown. `squad_dump` and the `squad_patch` report name the file until it is fixed. Benchmarks, prices and rankings never go in: hand-written ones went stale within a week, and an orchestrator asked to "refresh descriptions" invented them.
 
 Deliberately **not** exposed: `permission` (a drill's read-only contract is a
 safety property, not a preference), `mode`/`hidden`/`color` (ours), and
@@ -377,13 +377,18 @@ path that wiped a squad; keeping it as a second entry point would have meant a
 second copy of the deletion guard, and the copy that drifted would be the one
 that deletes agents.
 
-Two properties make the flow safe, and neither is optional:
+Three properties make the flow safe, and none is optional:
 
 1. **The roster has one home.** `squad.json` is the whole squad, and only the
    plugin writes it. There are no agent files beside it to drift from it. A file
    that does not parse is never overwritten: nothing new is registered from it,
    `squad_dump` reports it, and `squad_patch` refuses until it is fixed.
-2. **Apply refuses to delete.** Read-modify-write only protects while the caller
+2. **A patch names the roster it edited.** `squad_dump` prints a `revision`, a
+   hash of `squad.json`, and `squad_patch` requires it back. If the roster
+   changed since (another session or OpenCode process patched it), the patch is
+   refused and nothing is written, so two edits of one dump cannot undo each
+   other. The check and the write run under an exclusive `squad.json.lock`.
+3. **Apply refuses to delete.** Read-modify-write only protects while the caller
    actually modifies; one that rebuilds the roster from memory reintroduces the
    wipe in a new wrapper. So deletions are refused and named — nothing at all is
    written, not even the agent that would have been added — until `allow_remove`
@@ -401,7 +406,7 @@ none of that can happen.
 subagent rewriting the squad mid-task is never intended, and the damage outlives
 the session.
 
-Hand-authored agents are never dumped, changed or hidden. One that already holds a squad id (`grunt-<model>`) wins: that squad entry is not registered, `squad_dump` notes it, and `squad_patch` refuses the id.
+Hand-authored agents are never dumped, changed or hidden. One that already holds a squad id (`grunt-<model>`) wins with its whole definition, as OpenCode built it without the squad: that squad entry is not registered, `squad_dump` notes it, and `squad_patch` refuses to add or change that entry.
 
 ---
 
@@ -582,10 +587,11 @@ npm run test:integration  # the plugin inside the real OpenCode 2 host, offline 
 ```
 
 `tests-integration/` boots the embedded OpenCode 2.1.3 host (`@opencode/sdk`), loads this repository as a plugin from disk, and replaces the model with `TestLLM` from `@opencode/ai/testing`. No credentials and no network: HOME and the XDG dirs point into a temp directory, and every outbound fetch fails. It checks that the plugin loads and puts its bootstrap in the system prompt, that a scripted tool call reaches `squad_session`, and that a subagent whose model stream hangs is interrupted with one guard note to its orchestrator. It also checks the squad agents registered from `squad.json`:
-- a drill gets only read-only tools despite a global allow-all, and `rm` is refused;
+- a drill gets only read-only tools despite a global allow-all, and `rm` is refused, from the first request of a session started directly for it;
 - a legacy agent dropped from the roster cannot be dispatched;
 - a `squad_patch` applies to the next dispatch;
-- a hand-authored agent with a squad id keeps its own prompt. All `@opencode/*` dev packages are pinned to one exact release, so the host and the plugin types come from the same build.
+- a hand-authored agent with a squad id, or at the id of a legacy squad file, keeps its whole definition;
+- with `model_data.json` unreadable, a squad agent's description says the owner's rules are unknown. All `@opencode/*` dev packages are pinned to one exact release, so the host and the plugin types come from the same build.
 
 Coverage is scoped to `src/**` on purpose — that's the decision-logic layer separated from `.opencode/lib/squad.js`'s session/tool hook plumbing. Package-entry tests additionally check registration and native agent generation.
 
