@@ -25,12 +25,14 @@ for (const [key, dir] of [
 // squad_session prints local times; pin the zone so output is stable.
 process.env.TZ = "UTC";
 
-/** Requests the host or the plugin tried to send; the in-process host is allowed. */
+/**
+ * Requests the host or the plugin tried to send. No host is exempt: the SDK's
+ * in-process transport goes through `host.fetch`, never the global fetch, so
+ * a global fetch to its "opencode.local" URL is a network call like any other.
+ */
 const blockedFetches = [];
-const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (new URL(url).host === "opencode.local") return realFetch(input, init);
   const method = (
     init?.method ?? (typeof input === "object" && "method" in input ? input.method : "GET")
   ).toUpperCase();
