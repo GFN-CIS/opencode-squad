@@ -1,5 +1,5 @@
 // Suite: the rate-limit guard and model catalog as wired in
-// .opencode/lib/orchestrate-v2.js, driven through plugin.setup with a simulated
+// .opencode/lib/squad.js, driven through plugin.setup with a simulated
 // OpenCode 2 host: an event stream, session.interrupt / synthetic, and
 // model.list. Timers are faked; the silence poll runs every 15 s. Startup
 // file writers, metric refreshes and model_data reads are stubbed at the

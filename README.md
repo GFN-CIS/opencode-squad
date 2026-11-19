@@ -34,7 +34,7 @@ Plugin options (e.g. `rate_limit_guard`) go in the object form:
 }
 ```
 
-The package entry (`index.js`) exports the OpenCode 2 `setup` in `.opencode/lib/orchestrate-v2.js`, backed by decision modules in `src/`:
+The package entry (`index.js`) exports the OpenCode 2 `setup` in `.opencode/lib/squad.js`, backed by decision modules in `src/`:
 
 - The delegation tool is `subagent`. Since OpenCode 2.3 it always runs in the background: its reply is a stub with the child's `sessionID`, and the result arrives later as a `<subagent>` message. Cache status and the empty-result diagnosis therefore come from the `squad_session` tool, not from notes on that reply.
 - The rate-limit guard vetoes the retry through OpenCode 2's `retry` hook instead of aborting the subagent, and steers its explanation into the orchestrator's running turn.
@@ -548,7 +548,7 @@ The orchestrator opens with its verdict, then proceeds:
 
 **Confirm the plugin loaded**
 
-Check the OpenCode log for a line referencing `opencode-squad` (plugin id `orchestrate`). If the plugin fails to load, the log prints the error immediately after startup.
+Check the OpenCode log for a line referencing `opencode-squad` (plugin id `squad`; `orchestrate` before 0.6.0). If the plugin fails to load, the log prints the error immediately after startup.
 
 **Subagents are hidden — that is intentional**
 
@@ -579,7 +579,7 @@ npm run lint:fix  # biome check --write
 npm run knip      # unused files/exports/dependencies
 ```
 
-Coverage is scoped to `src/**` on purpose — that's the decision-logic layer separated from `.opencode/lib/orchestrate-v2.js`'s session/tool hook plumbing. Package-entry tests additionally check registration and native agent generation.
+Coverage is scoped to `src/**` on purpose — that's the decision-logic layer separated from `.opencode/lib/squad.js`'s session/tool hook plumbing. Package-entry tests additionally check registration and native agent generation.
 
 ---
 
