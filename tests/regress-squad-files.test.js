@@ -399,6 +399,35 @@ test("a primary-agent alias in mode/ shares the file; one in mode/sub/ is never 
   expect(fs.readFileSync(path.join(agentDir, filename), "utf8")).toBe(content);
 });
 
+test("pruning a file another loadable agent links to is refused, allow_remove or not", () => {
+  const { filename, content } = addAgent("grunt", "a/b");
+  const mode = path.join(path.dirname(agentDir), "mode");
+  fs.mkdirSync(mode);
+  fs.symlinkSync(path.join(agentDir, filename), path.join(mode, "review.md"));
+  const result = applySquad({
+    roster: { grunts: {}, drills: {} },
+    dir: agentDir,
+    allowRemove: true,
+  });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(result.ok ? [] : result.problems.join("\n")).toMatch(
+    /\.\.\/mode\/review\.md, grunt-a-b\.md all lead to/,
+  );
+  expect(fs.readFileSync(path.join(mode, "review.md"), "utf8")).toBe(content);
+});
+
+test("migrating a legacy worker- file another loadable agent links to is refused", () => {
+  const { content } = addAgent("grunt", "a/b");
+  fs.renameSync(path.join(agentDir, "grunt-a-b.md"), path.join(agentDir, "worker-a-b.md"));
+  const mode = path.join(path.dirname(agentDir), "mode");
+  fs.mkdirSync(mode);
+  fs.symlinkSync(path.join(agentDir, "worker-a-b.md"), path.join(mode, "review.md"));
+  const result = applySquad({ roster: readSquad(agentDir).roster, dir: agentDir });
+  expect(result.ok ? null : result.refusal).toBe("collision");
+  expect(fs.readFileSync(path.join(mode, "review.md"), "utf8")).toBe(content);
+  expect(fs.existsSync(path.join(agentDir, "grunt-a-b.md"))).toBe(false);
+});
+
 test("the agent sources match the installed OpenCode loader", () => {
   // Read the pinned loader's own list, so an OpenCode bump that adds or
   // changes a source fails here.

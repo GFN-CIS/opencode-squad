@@ -363,16 +363,6 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
       plan.push({ role, modelId, entry, filename, content, existing });
     }
   }
-  for (const shared of sharedDestinations(
-    dir,
-    plan.map((p) => p.filename),
-  ))
-    problems.push(shared.line);
-  if (unreadable.length) return refuse("unreadable", unreadable);
-  if (damaged.length) return refuse("damaged", damaged);
-  if (dangling.length) return refuse("dangling", dangling);
-  if (problems.length) return refuse("collision", problems);
-
   /** @type {string[]} */
   const migrate = [];
   /** @type {Array<{file: string, agent: string}>} */
@@ -385,6 +375,27 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
       else duplicates.push({ file: f, agent });
     }
   }
+  /** Files of removed agents that no kept agent takes over: pruned below. */
+  const prune = diff.removed.flatMap((agent) =>
+    (filesByAgent.get(agent) ?? []).filter((f) => !byFile.has(f)),
+  );
+
+  // Every path this apply writes, prunes or migrates away. Unlinking a file
+  // that another loadable name also reaches breaks that agent as surely as
+  // overwriting it, and allow_remove covers the roster entry, not the other
+  // agent: so deletions go through the same check as writes, before anything
+  // changes.
+  for (const shared of sharedDestinations(dir, [
+    ...plan.map((p) => p.filename),
+    ...prune,
+    ...duplicates.map((d) => d.file),
+    ...migrate,
+  ]))
+    problems.push(shared.line);
+  if (unreadable.length) return refuse("unreadable", unreadable);
+  if (damaged.length) return refuse("damaged", damaged);
+  if (dangling.length) return refuse("dangling", dangling);
+  if (problems.length) return refuse("collision", problems);
   if ((diff.removed.length > 0 || duplicates.length > 0) && !allowRemove) {
     return refuse("remove", [
       ...diff.removed,
@@ -418,12 +429,9 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
   }
 
   const pruned = [];
-  for (const agent of diff.removed) {
-    for (const f of filesByAgent.get(agent) ?? []) {
-      if (byFile.has(f)) continue; // now holds a kept agent
-      fs.unlinkSync(path.join(dir, f));
-      pruned.push(f);
-    }
+  for (const f of prune) {
+    fs.unlinkSync(path.join(dir, f));
+    pruned.push(f);
   }
   for (const { file } of duplicates) {
     fs.unlinkSync(path.join(dir, file));
