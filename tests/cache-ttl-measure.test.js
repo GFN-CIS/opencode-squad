@@ -47,6 +47,7 @@ test("collectSamples skips pairs that could never speak to TTL", () => {
     ],
     "negative gap": [msg({ time: 60 * S }), msg({ time: 0 })],
     "missing provider": [msg({ time: 0 }), msg({ time: 60 * S, providerID: undefined })],
+    "no usage reported": [msg({ time: 0 }), msg({ time: 60 * S, noUsage: true })],
   };
   for (const [name, messages] of Object.entries(cases)) {
     expect(collectSamples(messages), name).toHaveLength(0);

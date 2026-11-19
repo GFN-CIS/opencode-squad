@@ -154,6 +154,8 @@ function readSamples(dbFile) {
         }
         messages.push({
           time: m.time?.created ?? 0,
+          // An interrupted turn (finish "error") may persist no usage at all.
+          noUsage: !m.tokens || typeof m.tokens !== "object",
           total: totalTokens(m.tokens),
           cacheRead: m.tokens?.cache?.read ?? 0,
           .../** @type {any} */ (layout.shape)(row, m),
