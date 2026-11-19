@@ -64,7 +64,10 @@ describe("V2 schemas", () => {
       "allow_remove",
       "drills",
       "grunts",
+      "revision",
     ]);
+    // The base the edit was built on is not optional (#89).
+    expect(SQUAD_PATCH_INPUT.required).toEqual(["revision"]);
     expect(SQUAD_PATCH_INPUT.properties.grunts.additionalProperties.properties.steps.type).toBe(
       "integer",
     );

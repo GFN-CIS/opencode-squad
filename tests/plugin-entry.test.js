@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import plugin from "../index.js";
-import { defaultStoreFile, readStore } from "../src/squad-store.js";
+import { defaultStoreFile, readStore, storeRevision } from "../src/squad-store.js";
 import { roleRules } from "../src/workers.js";
 
 // Startup refreshes write global model data and schedule network requests;
@@ -171,9 +171,10 @@ test("package exposes only setup; squad_patch writes squad.json and registers th
     await firstRequest();
     const patch = tools.get("squad_patch");
     // A roster wrapped one level too deep must not read as "delete everything".
-    wrapped = (await patch.execute({ roster: input }, { agent: "build" })).content;
-    scoped = (await patch.execute({ ...input, directory }, { agent: "build" })).content;
-    report = (await patch.execute(input, { agent: "build" })).content;
+    const revision = storeRevision(defaultStoreFile());
+    wrapped = (await patch.execute({ revision, roster: input }, { agent: "build" })).content;
+    scoped = (await patch.execute({ revision, ...input, directory }, { agent: "build" })).content;
+    report = (await patch.execute({ revision, ...input }, { agent: "build" })).content;
   } finally {
     dispose();
   }
@@ -190,7 +191,7 @@ test("package exposes only setup; squad_patch writes squad.json and registers th
   expect(wrapped).toContain("`roster`");
   expect(scoped).toContain("`directory` is no longer supported");
   expect(report).toContain("+2 added");
-  expect(readStore(defaultStoreFile())).toEqual({ state: "ok", roster: input });
+  expect(readStore(defaultStoreFile())).toMatchObject({ state: "ok", roster: input });
   // Nothing written next to the project, and no agent file anywhere.
   expect(fs.readdirSync(directory)).toEqual([]);
   const agents = registered();
@@ -383,7 +384,13 @@ test("squad_patch validates its input with the same schema it advertises", async
   dirs.push(directory);
   const { tools, dispose } = await setupHost({ directory });
   const patch = tools.get("squad_patch");
-  const run = async (input) => (await patch.execute(input, { agent: "build" })).content;
+  const run = async (input) =>
+    (
+      await patch.execute(
+        { revision: storeRevision(defaultStoreFile()), ...input },
+        { agent: "build" },
+      )
+    ).content;
   const stored = () => readStore(defaultStoreFile()).state;
   try {
     // Advertised: the plain JSON Schema subset, no Zod-only keywords.
@@ -418,7 +425,7 @@ test("squad_patch validates its input with the same schema it advertises", async
 
     // A valid one-role roster is written.
     expect(await run({ grunts: { "a/b": { variant: "high" } } })).toContain("+1 added");
-    expect(readStore(defaultStoreFile())).toEqual({
+    expect(readStore(defaultStoreFile())).toMatchObject({
       state: "ok",
       roster: { grunts: { "a/b": { variant: "high" } }, drills: {} },
     });
@@ -436,7 +443,7 @@ test("squad_patch refuses model ids that would register one agent (#90)", async 
     const out = (
       await tools
         .get("squad_patch")
-        .execute({ grunts: { "p/m-1": {}, "p/m.1": {} } }, { agent: "build" })
+        .execute({ revision: "none", grunts: { "p/m-1": {}, "p/m.1": {} } }, { agent: "build" })
     ).content;
     expect(out).toContain("Roster is invalid");
     expect(out).toContain("grunt p/m-1 and grunt p/m.1 map to the same agent id grunt-p-m-1");
@@ -459,6 +466,91 @@ test("a stored roster with colliding ids registers neither and says so in the du
     expect(dump).toContain("grunt p/m-1 and grunt p/m.1 map to the same agent id grunt-p-m-1");
   } finally {
     dispose();
+  }
+});
+
+test("a patch from a stale dump is refused; the change it would revert survives (#89)", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { writeStore } = await import("../src/squad-store.js");
+  writeStore(defaultStoreFile(), { grunts: { "p/a": {} }, drills: {} });
+  const { tools, dispose } = await setupHost({ directory });
+  const patch = (input) => tools.get("squad_patch").execute(input, { agent: "build" });
+  try {
+    const dump = (await tools.get("squad_dump").execute({}, { agent: "build" })).content;
+    const doc = JSON.parse(dump.slice(dump.indexOf("{"), dump.indexOf("\n}") + 2));
+    expect(doc.revision).toBe(storeRevision(defaultStoreFile()));
+    // Two edits of the same dump: notes on p/a, then a new p/b.
+    const notes = await patch({ ...doc, grunts: { "p/a": { notes: "terse" } } });
+    expect(notes.content).toContain("~1 changed");
+    const stale = await patch({ ...doc, grunts: { "p/a": {}, "p/b": {} } });
+    expect(stale.content).toContain("REFUSED: squad.json changed since that squad_dump");
+    expect(readStore(defaultStoreFile()).roster.grunts).toEqual({ "p/a": { notes: "terse" } });
+    // Without a revision there is no base to check against.
+    const { revision: _r, ...bare } = doc;
+    expect((await patch(bare)).content).toContain("pass the `revision` from squad_dump");
+  } finally {
+    dispose();
+  }
+});
+
+test("two patches in flight from one dump: one applies, the other is refused (#89)", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  // Both handlers pause at the host's agent list, after reading their input.
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { tools, dispose } = await setupHost({
+    directory,
+    agent: {
+      list: async () => {
+        await gate;
+        return [];
+      },
+    },
+  });
+  const patch = (input) => tools.get("squad_patch").execute(input, { agent: "build" });
+  try {
+    const revision = storeRevision(defaultStoreFile());
+    const a = patch({ revision, grunts: { "p/a": {} } });
+    const b = patch({ revision, grunts: { "p/b": {} } });
+    release();
+    const out = [(await a).content, (await b).content];
+    expect(out.filter((c) => c.includes("+1 added"))).toHaveLength(1);
+    expect(out.filter((c) => c.includes("REFUSED: squad.json changed"))).toHaveLength(1);
+    expect(Object.keys(readStore(defaultStoreFile()).roster.grunts)).toHaveLength(1);
+  } finally {
+    dispose();
+  }
+});
+
+test("squad.json locked by another process: the patch writes nothing and says so (#89)", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
+  dirs.push(directory);
+  const { tools, dispose } = await setupHost({ directory });
+  const lock = `${defaultStoreFile()}.lock`;
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  fs.writeFileSync(lock, "4242");
+  const patch = () =>
+    tools.get("squad_patch").execute(
+      { revision: storeRevision(defaultStoreFile()), grunts: { "p/a": {} } },
+      {
+        agent: "build",
+      },
+    );
+  try {
+    expect((await patch()).content).toContain("another OpenCode process is writing squad.json");
+    expect(readStore(defaultStoreFile()).state).toBe("missing");
+    // A lock left by a process that died long ago is taken over.
+    const old = new Date(Date.now() - 120_000);
+    fs.utimesSync(lock, old, old);
+    expect((await patch()).content).toContain("+1 added");
+    expect(fs.existsSync(lock)).toBe(false);
+  } finally {
+    dispose();
+    fs.rmSync(lock, { force: true });
   }
 });
 
@@ -556,7 +648,9 @@ test("without squad.json, a legacy squad that cannot be read is unknown, not emp
     expect(dump).toContain("The squad cannot be read, so it is NOT empty");
     expect(dump).toContain("grunt-c-d.md");
     const patch = (
-      await tools.get("squad_patch").execute({ grunts: { "x/y": {} } }, { agent: "build" })
+      await tools
+        .get("squad_patch")
+        .execute({ revision: "none", grunts: { "x/y": {} } }, { agent: "build" })
     ).content;
     expect(patch).toContain("Refused: the current squad cannot be read");
     expect(readStore(defaultStoreFile()).state).toBe("missing");
@@ -576,7 +670,9 @@ test("without squad.json, the legacy squad is what a patch is diffed against", a
     expect(dump).toContain('"a/b"');
     // Rebuilt from memory without the drill: a deletion, refused.
     const patch = (
-      await tools.get("squad_patch").execute({ grunts: { "a/b": {} } }, { agent: "build" })
+      await tools
+        .get("squad_patch")
+        .execute({ revision: "none", grunts: { "a/b": {} } }, { agent: "build" })
     ).content;
     expect(patch).toContain("would DELETE 1 agent(s)");
     expect(patch).toContain("drill a/b");
@@ -597,12 +693,20 @@ test("a hand-authored agent on an unchanged entry is no reason to refuse other c
   });
   try {
     const patch = tools.get("squad_patch");
-    const kept = (await patch.execute({ grunts: { "p/q": {}, "p/r": {} } }, { agent: "build" }))
-      .content;
+    const revision = () => storeRevision(defaultStoreFile());
+    const kept = (
+      await patch.execute(
+        { revision: revision(), grunts: { "p/q": {}, "p/r": {} } },
+        { agent: "build" },
+      )
+    ).content;
     expect(kept).toContain("+1 added");
     // Changing that entry is a new claim on the user's id: refused.
     const changed = (
-      await patch.execute({ grunts: { "p/q": { variant: "high" }, "p/r": {} } }, { agent: "build" })
+      await patch.execute(
+        { revision: revision(), grunts: { "p/q": { variant: "high" }, "p/r": {} } },
+        { agent: "build" },
+      )
     ).content;
     expect(changed).toContain(
       "REFUSED: the roster asks for an agent id that a hand-authored agent",

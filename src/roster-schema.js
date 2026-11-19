@@ -55,6 +55,7 @@ const RosterSchema = z.strictObject({
 
 /** squad_patch's whole input: the roster plus the call's own switches. */
 const SquadPatchInputSchema = RosterSchema.extend({
+  revision: z.string().describe(ARG_DESCRIPTIONS["patch.revision"]),
   allow_remove: z.boolean().describe(ARG_DESCRIPTIONS["patch.allow_remove"]).optional(),
 });
 

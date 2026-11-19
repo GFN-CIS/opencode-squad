@@ -109,7 +109,7 @@ test("the legacy squad is imported once, files left in place, owner notes kept",
   fs.writeFileSync(globalFile, JSON.stringify({ models: { "a/b": { info: "keep me" } } }));
 
   expect(importLegacySquad()).toEqual({ imported: 2, problems: [] });
-  expect(readStore(storeFile)).toEqual({
+  expect(readStore(storeFile)).toMatchObject({
     state: "ok",
     roster: { grunts: { "a/b": { variant: "high" } }, drills: { "c/d": {} } },
   });

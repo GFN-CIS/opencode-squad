@@ -238,7 +238,7 @@ test("a failed model catalog lookup is retried by the next call", async () => {
     expect((await dump.execute({})).content).toContain("could not be read");
     // The next one asks again and checks the variant against the catalog.
     const res = await patch.execute(
-      { grunts: { "a/b": { variant: "ultra" } } },
+      { revision: "none", grunts: { "a/b": { variant: "ultra" } } },
       { agent: "build" },
     );
     expect(res.content).toContain("Roster is invalid");
@@ -266,7 +266,7 @@ test("squad_patch refuses while model_data.json is unreadable, writing nothing",
   try {
     const res = await h.tools
       .get("squad_patch")
-      .execute({ grunts: { "a/b": {} } }, { agent: "build" });
+      .execute({ revision: "none", grunts: { "a/b": {} } }, { agent: "build" });
     expect(res.content).toContain("Refused: model_data.json cannot be read");
     expect(res.content).toContain("invalid JSON at line 3, column 1");
     expect(fs.existsSync(defaultStoreFile())).toBe(false);

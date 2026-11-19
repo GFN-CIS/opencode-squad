@@ -9,6 +9,7 @@ import path from "node:path";
 import { Effect } from "effect";
 import { afterEach, expect, test } from "vitest";
 import { promptOpen } from "../src/prompt-inject.js";
+import { storeRevision } from "../src/squad-store.js";
 import { model, TestLLM, withHost } from "./host.js";
 
 const storeFile = () => path.join(process.env.XDG_CONFIG_HOME ?? "", "opencode", "squad.json");
@@ -69,6 +70,7 @@ const GLOBAL_ALLOW = { permissions: [{ action: "*", resource: "*", effect: "allo
 
 test("the squad is registered from squad.json: dispatch, drill policy, legacy agents, live patch", async () => {
   await writeRoster({ grunts: { "p/m": { variant: "high" } }, drills: { "p/m": {} } });
+  const revision = storeRevision(storeFile());
   const children = {};
   const out = await withHost(
     (h) =>
@@ -114,7 +116,7 @@ test("the squad is registered from squad.json: dispatch, drill policy, legacy ag
           if (turn === 5)
             return code(
               "p-patch",
-              'return await tools.squad_patch({grunts: {"p/m": {variant: "high"}, "p/n": {}}, drills: {"p/m": {}}})',
+              `return await tools.squad_patch({revision: "${revision}", grunts: {"p/m": {variant: "high"}, "p/n": {}}, drills: {"p/m": {}}})`,
             );
           if (turn === 6)
             return callTool("p-new", "subagent", {
@@ -196,6 +198,7 @@ test("the squad is registered from squad.json: dispatch, drill policy, legacy ag
 
 test("a hand-authored agent holding a roster id keeps its own prompt, and squad_patch refuses that id", async () => {
   await writeRoster({ grunts: { "p/q": {} }, drills: {} });
+  const revision = storeRevision(storeFile());
   const children = {};
   const out = await withHost(
     (h) =>
@@ -219,7 +222,7 @@ test("a hand-authored agent holding a roster id keeps its own prompt, and squad_
           if (turn === 3)
             return code(
               "p-patch",
-              'return await tools.squad_patch({grunts: {"p/q": {variant: "high"}}})',
+              `return await tools.squad_patch({revision: "${revision}", grunts: {"p/q": {variant: "high"}}})`,
             );
           return TestLLM.text("parent done", "answer");
         });

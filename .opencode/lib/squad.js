@@ -74,7 +74,14 @@ import {
   planPatch,
   readLegacySquad,
 } from "../../src/squad-apply.js";
-import { defaultStoreFile, readStore, storeSignature, writeStore } from "../../src/squad-store.js";
+import {
+  defaultStoreFile,
+  NO_STORE_REVISION,
+  readStore,
+  storeSignature,
+  withStoreLock,
+  writeStore,
+} from "../../src/squad-store.js";
 import {
   formatVariantLines,
   isSubagentCaller,
@@ -248,11 +255,14 @@ export default {
      * the squad still exists as files: that is the roster an apply diffs
      * against, so rebuilding from an empty dump cannot delete it unguarded.
      *
-     * @returns {{state: "ok", roster: any} | {state: "invalid", problems: string[]}}
+     * @returns {{state: "ok", roster: any, revision: string} | {state: "invalid", problems: string[]}}
+     *   revision: of the bytes the roster was read from; NO_STORE_REVISION
+     *   while there is no squad.json
      */
     const currentSquad = () => {
       const store = readStore(storeFile);
-      if (store.state === "ok") return { state: "ok", roster: store.roster };
+      if (store.state === "ok")
+        return { state: "ok", roster: store.roster, revision: store.revision };
       if (store.state === "invalid") {
         return { state: "invalid", problems: [`${storeFile}: ${store.reason}`] };
       }
@@ -263,7 +273,7 @@ export default {
           problems: legacy.problems.map((p) => path.join(defaultAgentDir(), p)),
         };
       }
-      return { state: "ok", roster: legacy.roster };
+      return { state: "ok", roster: legacy.roster, revision: NO_STORE_REVISION };
     };
     const specsNow = () => {
       const store = readStore(storeFile);
@@ -625,15 +635,18 @@ export default {
             };
           }
           const roster = squad.roster;
+          const { revision } = squad;
           const count = Object.keys(roster.grunts).length + Object.keys(roster.drills).length;
           const notes = squadNotes();
           const note = notes.length ? `\n\nnotes:\n${notes.map((c) => `  ${c}`).join("\n")}` : "";
           const variantLines = formatVariantLines(await getVariantMap(), roster);
           return {
             content:
-              `Squad roster: ${storeFile}\n${JSON.stringify(roster, null, 2)}${note}${variantLines}\n\n` +
+              `Squad roster: ${storeFile}\n${JSON.stringify({ revision, ...roster }, null, 2)}` +
+              `${note}${variantLines}\n\n` +
               "To change the squad, pass this same document back to squad_patch with your " +
-              "edits applied — keeping every agent you were not asked to touch.",
+              "edits applied — its revision included, and every agent you were not asked to " +
+              "touch kept.",
             metadata: { title: `squad: ${count} agent(s)`, store: storeFile, agents: count },
           };
         },
@@ -763,6 +776,16 @@ export default {
                 ". Nothing was written.",
             };
           }
+          // Without the base it was built on, a patch cannot tell an edit from
+          // a revert of someone else's change (#89).
+          if (typeof raw.revision !== "string") {
+            return {
+              content:
+                "Refused: pass the `revision` from squad_dump along with the roster you edited " +
+                "from it. Nothing was written. Call squad_dump, apply your edit to what it " +
+                "prints, and send that document back whole.",
+            };
+          }
           const errors = validatePatchInput(raw);
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
@@ -799,51 +822,72 @@ export default {
                 `written. Ask the user to fix:\n${problems.map((p) => `  - ${p}`).join("\n")}`,
             };
           }
-          // Re-read right before writing: another OpenCode process may have
-          // changed the roster since this one last looked.
-          const squad = currentSquad();
-          if (squad.state === "invalid") {
-            return {
-              content:
-                "Refused: the current squad cannot be read, and writing a roster now could " +
-                "lose it. Nothing was written. Ask the user to fix:\n" +
-                squad.problems.map((p) => `  - ${p}`).join("\n"),
-            };
-          }
-          const current = squad.roster;
-          // A hand-authored agent already holding an id this roster wants.
+          // Every await happens above this line. From here to the write the
+          // handler is synchronous, so no other patch of this process runs in
+          // between, and the lock keeps other OpenCode processes out (#89).
           const agents = unwrap(await ctx.agent.list().catch(() => null)) ?? [];
           const byId = new Map(
             (Array.isArray(agents) ? agents : []).map((a) => [String(a?.id ?? ""), a]),
           );
-          const foreign = [];
-          for (const [key, role] of /** @type {const} */ ([
-            ["grunts", "grunt"],
-            ["drills", "drill"],
-          ])) {
-            for (const [modelId, entry] of Object.entries(roster[key])) {
-              // An entry kept as it was is not a new claim on the id: a user
-              // agent that took it over later is reported, not a reason to
-              // refuse every future patch.
-              const before = current[key]?.[modelId];
-              if (before && JSON.stringify(before) === JSON.stringify(entry)) continue;
-              const id = slugForModel(modelId, role);
-              const agent = byId.get(id);
-              if (agent && !isSquadSystem(agent.system)) {
-                foreign.push({ id, agent: `${role} ${modelId}` });
+          const locked = withStoreLock(storeFile, () => {
+            const squad = currentSquad();
+            if (squad.state === "invalid") {
+              return {
+                refused:
+                  "Refused: the current squad cannot be read, and writing a roster now could " +
+                  "lose it. Nothing was written. Ask the user to fix:\n" +
+                  squad.problems.map((p) => `  - ${p}`).join("\n"),
+              };
+            }
+            const now = squad.revision;
+            if (now !== valid.revision) {
+              return {
+                refused:
+                  "REFUSED: squad.json changed since that squad_dump (revision " +
+                  `${valid.revision}, now ${now}): another session or OpenCode process ` +
+                  "patched it. Nothing was written. Call squad_dump again, apply your edit to " +
+                  "what it prints now, and patch with its revision.",
+              };
+            }
+            const current = squad.roster;
+            // A hand-authored agent already holding an id this roster wants.
+            const foreign = [];
+            for (const [key, role] of /** @type {const} */ ([
+              ["grunts", "grunt"],
+              ["drills", "drill"],
+            ])) {
+              for (const [modelId, entry] of Object.entries(roster[key])) {
+                // An entry kept as it was is not a new claim on the id: a user
+                // agent that took it over later is reported, not a reason to
+                // refuse every future patch.
+                const before = current[key]?.[modelId];
+                if (before && JSON.stringify(before) === JSON.stringify(entry)) continue;
+                const id = slugForModel(modelId, role);
+                const agent = byId.get(id);
+                if (agent && !isSquadSystem(agent.system)) {
+                  foreign.push({ id, agent: `${role} ${modelId}` });
+                }
               }
             }
-          }
-          const result = planPatch({
-            current,
-            next: roster,
-            allowRemove: allowRemove === true,
-            foreign,
+            const result = planPatch({
+              current,
+              next: roster,
+              allowRemove: allowRemove === true,
+              foreign,
+            });
+            if (result.ok) writeStore(storeFile, roster);
+            return { result };
           });
-          if (result.ok) {
-            writeStore(storeFile, roster);
-            await syncSquadAgents({ force: true });
+          if (locked.busy) {
+            return {
+              content:
+                "Refused: another OpenCode process is writing squad.json right now. Nothing " +
+                "was written. Call squad_dump again and retry with its revision.",
+            };
           }
+          if ("refused" in locked.value) return { content: locked.value.refused };
+          const { result } = locked.value;
+          if (result.ok) await syncSquadAgents({ force: true });
           return {
             content: formatPatchReport(result, { store: storeFile, roster, notes: squadNotes() }),
             metadata: { ok: result.ok, ...result.diff },
