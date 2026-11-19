@@ -10,7 +10,8 @@
 //
 // Neither source uses opencode's ids, and they disagree with each other
 // (`zai-coding-plan/glm-5.3` vs `zhipuai/glm-5.3` vs `z-ai/glm-5.3`), so
-// matching ignores the provider and compares the normalized model part.
+// matching compares the normalized model part. A SuperIndex row whose
+// provider/model is exactly the requested id still wins over a shared basename.
 
 import { formatContextSize } from "./context.js";
 import { squadRoleOf } from "./workers.js";
@@ -48,6 +49,12 @@ function modelKey(id) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/** @param {string} id  the provider part, normalized like modelKey; "" for a bare id */
+function providerKey(id) {
+  const s = String(id);
+  return s.includes("/") ? modelKey(s.slice(0, s.indexOf("/"))) : "";
 }
 
 /**
@@ -89,50 +96,88 @@ export function keyCandidates(id, suffixes = SAME_MODEL_SUFFIXES) {
 }
 
 /**
+ * For each candidate key, a row under the id's own provider (`provider/key`,
+ * only SuperIndex is indexed that way) wins over the shared basename.
+ * `key` is always the basename key.
+ *
  * @template T
  * @param {string} id
- * @param {Record<string, T>} index  keyed by modelKey
+ * @param {Record<string, T>} index  keyed by modelKey, optionally also by provider/modelKey
  * @returns {{key: string, entry: T} | null}
  */
 export function lookup(id, index) {
   if (!index) return null;
+  const provider = providerKey(id);
   for (const key of keyCandidates(id)) {
+    const exact = provider ? `${provider}/${key}` : null;
+    if (exact && Object.hasOwn(index, exact)) return { key, entry: index[exact] };
     if (Object.hasOwn(index, key)) return { key, entry: index[key] };
   }
   return null;
 }
 
 /**
- * Whether a row found under `key` lists this id's own price. A tier
+ * Whether a row found under `key` is this id's own serving row. A tier
  * (`-fast`, `-free`, ...) that fell back to its base model's row shares its
- * benchmarks, not its price — the base price would pass for the tier's.
+ * benchmarks, not its price or context limit — the base's would pass for the
+ * tier's.
  *
  * @param {string} id  opencode id
  * @param {string} key  modelKey of the matched row
  */
-function ownsPrice(id, key) {
+function ownsRow(id, key) {
   return keyCandidates(id, SAME_PRICE_SUFFIXES).includes(key);
+}
+
+/**
+ * What a model is served at: its context limit and list price, the same in
+ * the summary and the full view. The catalog's limit comes first; a row's
+ * limit and price count only when the row is the model's own, and a tier on
+ * its base model's row says both are unknown instead of staying silent. A
+ * `-free` tier is free whatever price its row lists.
+ *
+ * @param {string} id  opencode id
+ * @param {SiEntry|null} entry  matched SuperIndex row
+ * @param {number|null} [context]  opencode catalog context limit
+ * @returns {{ctx: string|null, price: string|null, listed: boolean}}
+ */
+function servingFacts(id, entry, context) {
+  const own = entry !== null && ownsRow(id, modelKey(entry.id));
+  const limit = context ?? (own ? entry.context : null);
+  const ctx = limit ? `ctx ${formatContextSize(limit)}` : entry && !own ? "tier ctx unknown" : null;
+  if (/-free$/.test(modelKey(id))) return { ctx, price: "free", listed: false };
+  if (entry && !own) return { ctx, price: "tier price unknown", listed: false };
+  if (entry?.priceIn == null) return { ctx, price: null, listed: false };
+  return { ctx, price: `$${entry.priceIn}/$${entry.priceOut ?? "?"}`, listed: true };
 }
 
 /** @param {unknown} v */
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /**
- * SuperIndex models.json -> compact index keyed by modelKey.
+ * @typedef {{id: string, score: number|null, rank: number|null,
+ *   status: string|null, confidence: number|null, priceIn: number|null,
+ *   priceOut: number|null, context: number|null}} SiEntry
+ */
+
+/**
+ * SuperIndex models.json -> compact index keyed by modelKey, and by
+ * provider/modelKey for an exact match. Rows of several providers sharing a
+ * basename keep their price and context under their own provider only: the
+ * basename entry (the lowest id, so row order does not matter) keeps a price
+ * or context only where all of them agree.
  *
  * @param {any} json
- * @returns {Record<string, {id: string, score: number|null, rank: number|null,
- *   status: string|null, confidence: number|null, priceIn: number|null,
- *   priceOut: number|null, context: number|null}>}
+ * @returns {Record<string, SiEntry>}
  */
 export function indexSuperIndex(json) {
-  /** @type {ReturnType<typeof indexSuperIndex>} */
-  const out = {};
+  /** @type {Map<string, SiEntry[]>} */
+  const byKey = new Map();
   for (const m of Array.isArray(json?.models) ? json.models : []) {
     if (typeof m?.id !== "string") continue;
     const key = modelKey(m.id);
-    if (out[key]) continue;
-    out[key] = {
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)?.push({
       id: m.id,
       score: num(m.si_score),
       rank: num(m.rank),
@@ -141,6 +186,23 @@ export function indexSuperIndex(json) {
       priceIn: num(m.price_in),
       priceOut: num(m.price_out),
       context: num(m.context_window),
+    });
+  }
+  /** @type {Record<string, SiEntry>} */
+  const out = {};
+  for (const [key, rows] of byKey) {
+    rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const r of rows) {
+      const provider = providerKey(r.id);
+      if (provider) out[`${provider}/${key}`] ??= r;
+    }
+    /** @param {"priceIn"|"priceOut"|"context"} f */
+    const agreed = (f) => (rows.every((r) => r[f] === rows[0][f]) ? rows[0][f] : null);
+    out[key] = {
+      ...rows[0],
+      priceIn: agreed("priceIn"),
+      priceOut: agreed("priceOut"),
+      context: agreed("context"),
     };
   }
   return out;
@@ -372,28 +434,14 @@ export function formatSummary({
     const info = rules.length ? rules.join(" / ") : null;
     const role = roles[m.id]?.length ? ` [${roles[m.id].join("+")}]` : "";
 
-    // The model's own facts.
+    // The model's own facts. A list price read off another tier's row is that
+    // tier's price, whether or not that model is in this request.
     const own = [];
-    const ctx = m.context ?? s?.entry.context;
-    if (ctx) own.push(`ctx ${formatContextSize(ctx)}`);
+    const facts = servingFacts(m.id, s?.entry ?? null, m.context);
+    if (facts.ctx) own.push(facts.ctx);
     const billing = billingFor(m.id, { note, plans, authTypes });
     if (!billing.api) own.push(`subscription: ${billing.plan ?? "plan not set"}`);
-    else if (/-free$/.test(modelKey(m.id))) own.push("free");
-    // A list price read off another tier's row is that tier's price, whether
-    // or not that model is in this request.
-    const price =
-      billing.api &&
-      !/-free$/.test(modelKey(m.id)) &&
-      s &&
-      ownsPrice(m.id, s.key) &&
-      s.entry.priceIn != null
-        ? `$${s.entry.priceIn}/$${s.entry.priceOut ?? "?"}`
-        : null;
-    // Silence would read as "no dearer than the base": say it is unknown.
-    const tierUnknown =
-      billing.api && !/-free$/.test(modelKey(m.id)) && s && !ownsPrice(m.id, s.key)
-        ? "tier price unknown"
-        : null;
+    else if (facts.price) own.push(facts.price);
     const rule = info ? [`owner rule: ${info}`] : [];
 
     if (!s && hits.every((h) => h === null)) {
@@ -405,9 +453,8 @@ export function formatSummary({
     const signature = `${provider}|${s?.key ?? ""}|${hits.map((h) => h?.key ?? "").join("|")}`;
     const same = firstBySignature.get(signature);
     if (same) {
-      const shared = [...own, ...(price ? [price] : tierUnknown ? [tierUnknown] : [])];
       lines.push(
-        `- ${m.id}${role}: ${[...shared, `same benchmarks as ${same}`, ...rule].join(" · ")}`,
+        `- ${m.id}${role}: ${[...own, `same benchmarks as ${same}`, ...rule].join(" · ")}`,
       );
       continue;
     }
@@ -421,7 +468,7 @@ export function formatSummary({
       // Unranked scores rest on too few benchmarks to compare with ranked ones.
       else parts.push(`SI ${e.score} (provisional, conf ${e.confidence ?? "?"}%)`);
     }
-    parts.push(...own, ...(price ? [price] : tierUnknown ? [tierUnknown] : []));
+    parts.push(...own);
     hits.forEach((h, i) => {
       if (h) parts.push(`${KEY_METRICS[i].label} ${fmtValues(h.entry.values)}`);
     });
@@ -441,27 +488,25 @@ export function formatSummary({
  *
  * @param {string} id  opencode id as asked
  * @param {any} detail  llmbenchmark /v1/models/{id} body (or null)
- * @param {ReturnType<typeof indexSuperIndex>[string] | null} si
+ * @param {SiEntry | null} si
+ * @param {{context?: number|null}} [opts]  context: opencode catalog limit
  * @returns {string}
  */
-export function formatDetail(id, detail, si) {
+export function formatDetail(id, detail, si, { context = null } = {}) {
   const head = [`## ${id}`];
   if (si) {
-    const own = ownsPrice(id, modelKey(si.id));
-    // A tier read off its base model's row: say whose row it is and keep the
-    // base price off the tier.
-    const price = own
-      ? `$${si.priceIn ?? "?"}/$${si.priceOut ?? "?"} per 1M`
-      : /-free$/.test(modelKey(id))
-        ? "free"
-        : "tier price unknown";
+    // A tier read off its base model's row: say whose row it is.
+    const own = ownsRow(id, modelKey(si.id));
     head.push(
       `SuperIndex${own ? "" : ` (row of ${si.id})`}: ` +
         `${si.score ?? "unscored"}${si.rank !== null ? ` (#${si.rank})` : ""}, ` +
-        `status ${si.status ?? "?"}, confidence ${si.confidence ?? "?"}%, ` +
-        `${price}, ctx ${si.context ? formatContextSize(si.context) : "?"}`,
+        `status ${si.status ?? "?"}, confidence ${si.confidence ?? "?"}%`,
     );
   }
+  // Price and context as the summary shows them, never the base row's for a tier.
+  const facts = servingFacts(id, si, context);
+  const serving = [facts.ctx, facts.listed ? `${facts.price} per 1M` : facts.price].filter(Boolean);
+  if (serving.length) head.push(`Serving: ${serving.join(" · ")}`);
   const scores = Array.isArray(detail?.scores) ? detail.scores : [];
   if (!scores.length) {
     head.push(detail ? "llmbenchmark: no scores." : "llmbenchmark: not found or unavailable.");

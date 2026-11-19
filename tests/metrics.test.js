@@ -272,7 +272,8 @@ describe("formatSummary", () => {
       now,
     });
     expect(text).toContain(
-      "- openai/gpt-6.1-terra-fast [grunt]: ctx 1.1M · tier price unknown · same benchmarks as openai/gpt-6.1-terra",
+      "- openai/gpt-6.1-terra-fast [grunt]: tier ctx unknown · tier price unknown · " +
+        "same benchmarks as openai/gpt-6.1-terra",
     );
   });
 
@@ -306,7 +307,7 @@ describe("formatSummary", () => {
       const lines = summary(["x/b", "x/b-fast"]);
       expect(lineOf(lines, "x/b")).toContain("$5/$20");
       expect(lineOf(lines, "x/b-fast")).toBe(
-        "- x/b-fast: tier price unknown · same benchmarks as x/b",
+        "- x/b-fast: tier ctx unknown · tier price unknown · same benchmarks as x/b",
       );
     });
 
@@ -381,6 +382,116 @@ describe("formatDetail", () => {
 
   test("unavailable detail is said, not hidden", () => {
     expect(formatDetail("a/b", null, null)).toContain("not found or unavailable");
+  });
+});
+
+describe("exact provider/model match wins over a shared basename (#54)", () => {
+  const ONE = {
+    id: "vendor-one/m",
+    si_score: 70,
+    rank: 5,
+    price_in: 3,
+    price_out: 15,
+    context_window: 200_000,
+  };
+  const TWO = {
+    id: "vendor-two/m",
+    si_score: 71,
+    rank: 4,
+    price_in: 9,
+    price_out: 30,
+    context_window: 400_000,
+  };
+  const orders = [
+    ["vendor-one first", indexSuperIndex({ models: [ONE, TWO] })],
+    ["vendor-two first", indexSuperIndex({ models: [TWO, ONE] })],
+  ];
+  const now = 0;
+  const summaryLine = (index, id) =>
+    formatSummary({ models: [{ id }], data: { superindex: { fetchedAt: 0, index } }, now })
+      .split("\n")
+      .find((l) => l.startsWith(`- ${id}:`)) ?? "";
+
+  for (const [name, index] of orders) {
+    test(`the exact row supplies its own price and context (${name})`, () => {
+      expect(lookup("vendor-two/m", index)?.entry.id).toBe("vendor-two/m");
+      expect(lookup("vendor-one/m", index)?.entry.id).toBe("vendor-one/m");
+      const line = summaryLine(index, "vendor-two/m");
+      expect(line).toContain("$9/$30");
+      expect(line).toContain("ctx 400k");
+      expect(line).not.toContain("$3/$15");
+      expect(line).not.toContain("(data for");
+      const full = formatDetail("vendor-two/m", null, lookup("vendor-two/m", index)?.entry ?? null);
+      expect(full).toContain("$9/$30 per 1M");
+      expect(full).toContain("ctx 400k");
+    });
+
+    test(`a third provider gets neither provider's price or context (${name})`, () => {
+      const line = summaryLine(index, "vendor-three/m");
+      expect(line).not.toMatch(/\$\d/);
+      expect(line).not.toContain("ctx 200k");
+      expect(line).not.toContain("ctx 400k");
+      const full = formatDetail(
+        "vendor-three/m",
+        null,
+        lookup("vendor-three/m", index)?.entry ?? null,
+      );
+      expect(full).not.toMatch(/\$\d/);
+    });
+  }
+
+  test("a third provider's result does not depend on row order", () => {
+    const [a, b] = orders.map(([, index]) => summaryLine(index, "vendor-three/m"));
+    expect(a).toBe(b);
+  });
+
+  test("a unique basename still matches across provider names", () => {
+    expect(summaryLine(indexSuperIndex({ models: [ONE] }), "router/m")).toContain("$3/$15");
+  });
+});
+
+describe("a tier's context and billing come from the tier, in both views (#53)", () => {
+  const index = indexSuperIndex({
+    models: [
+      { id: "p/model", si_score: 70, rank: 5, price_in: 1, price_out: 5, context_window: 200_000 },
+      {
+        id: "p/model-free",
+        si_score: 70,
+        rank: 5,
+        price_in: 3,
+        price_out: 10,
+        context_window: 200_000,
+      },
+    ],
+  });
+  const data = { superindex: { fetchedAt: 0, index } };
+  const summaryLine = (id, context) =>
+    formatSummary({ models: [{ id, ...(context ? { context } : {}) }], data, now: 0 })
+      .split("\n")
+      .find((l) => l.startsWith(`- ${id}:`)) ?? "";
+  const full = (id, context) =>
+    formatDetail(id, null, lookup(id, index)?.entry ?? null, { context });
+
+  test("a tier with no context of its own says its limit is unknown", () => {
+    const line = summaryLine("p/model-fast");
+    expect(line).not.toContain("200k");
+    expect(line).toContain("tier ctx unknown");
+    const text = full("p/model-fast");
+    expect(text).not.toContain("200k");
+    expect(text).toContain("tier ctx unknown");
+  });
+
+  test("the catalog's context for the tier is used in both views", () => {
+    expect(summaryLine("p/model-fast", 128_000)).toContain("ctx 128k");
+    expect(full("p/model-fast", 128_000)).toContain("ctx 128k");
+  });
+
+  test("a -free tier is free in both views, even with a priced row of its own", () => {
+    expect(summaryLine("p/model-free")).toContain("free");
+    expect(summaryLine("p/model-free")).not.toContain("$3/$10");
+    const text = full("p/model-free");
+    expect(text).toContain("free");
+    expect(text).not.toContain("$3/$10");
   });
 });
 
