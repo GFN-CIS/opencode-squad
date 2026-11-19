@@ -59,7 +59,8 @@ test("first refresh fetches every source and writes the cache", async () => {
   expect(r).toEqual({ superindex: "updated", scores: "updated", ids: "updated" });
   expect(calls).toHaveLength(2 + KEY_METRICS.length);
   const data = readMetrics(dir);
-  expect(Object.keys(data.superindex.index)).toHaveLength(60);
+  // 60 models, each under its basename and its provider/basename.
+  expect(Object.keys(data.superindex.index).filter((k) => !k.includes("/"))).toHaveLength(60);
   expect(data.scores.byMetric.tbench_4_0_accuracy["m-1"].values[0].value).toBe(0.5);
 });
 
@@ -90,7 +91,8 @@ test("a failed or shrunken source keeps its previous data", async () => {
   expect(r.ids).toMatch(/^failed/);
   expect(r.scores).toMatch(/^failed/);
   const data = readMetrics(dir);
-  expect(Object.keys(data.superindex.index)).toHaveLength(60);
+  // 60 models, each under its basename and its provider/basename.
+  expect(Object.keys(data.superindex.index).filter((k) => !k.includes("/"))).toHaveLength(60);
   expect(data.superindex.fetchedAt).toBe(0); // still stale -> retried next tick
 });
 
@@ -159,6 +161,15 @@ test("a cache file in the old single-timestamp format is read and aged as before
   expect(at.calls.filter((u) => u.includes("/scores?"))).toHaveLength(KEY_METRICS.length);
   const scores = readMetrics(dir).scores;
   for (const { metric } of KEY_METRICS) expect(metricFetchedAt(scores, metric)).toBe(TTL_MS);
+});
+
+test("the shrink guard counts models, not the provider/model keys beside them", async () => {
+  const dir = tmp();
+  // 30 models, 60 index keys: still too few to replace good data.
+  const small = { models: many(30, (i) => ({ id: `p/m-${i}`, si_score: i })) };
+  const { fetch } = stubFetch((url) => (url === SUPERINDEX_URL ? small : 503));
+  const r = await refreshMetrics({ fetch, dir, now: 0 });
+  expect(r.superindex).toBe("failed: only 30 models");
 });
 
 test("fetchDetail caches per model and serves a stale copy when the fetch fails", async () => {

@@ -120,7 +120,9 @@ export async function refreshMetrics({ fetch, dir, now, timeoutMs = FETCH_TIMEOU
       getJson(fetch, SUPERINDEX_URL, timeoutMs)
         .then((json) => {
           const index = indexSuperIndex(json);
-          const n = Object.keys(index).length;
+          // Count models, not keys: a row is indexed by basename and again by
+          // provider/basename, and only basenames are free of "/".
+          const n = Object.keys(index).filter((k) => !k.includes("/")).length;
           if (n < MIN_SUPERINDEX_MODELS) throw new Error(`only ${n} models`);
           next.superindex = { fetchedAt: now, index };
           report.superindex = "updated";

@@ -411,6 +411,7 @@ export default {
           const data = await getMetrics();
           const now = Date.now();
           if (full === true) {
+            const limits = await getLimitMap();
             const parts = await Promise.all(
               wanted.slice(0, MAX_FULL_MODELS).map(async (id) => {
                 const llmbId =
@@ -421,7 +422,14 @@ export default {
                 const detail = llmbId
                   ? await fetchDetail({ fetch: globalThis.fetch, dir: METRICS_DIR, now, llmbId })
                   : null;
-                return formatDetail(id, detail, lookup(id, data?.superindex?.index)?.entry ?? null);
+                return formatDetail(
+                  id,
+                  detail,
+                  lookup(id, data?.superindex?.index)?.entry ?? null,
+                  {
+                    context: limits[id] ?? null,
+                  },
+                );
               }),
             );
             return {
