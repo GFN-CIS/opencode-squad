@@ -70,8 +70,8 @@ test("withStoreLock: exclusive, released after, busy while held, stale taken ove
       throw new Error("boom");
     }),
   ).toThrow("boom");
-  expect(fs.existsSync(lock)).toBe(false);
-  fs.writeFileSync(lock, "1");
+  // Released: an exclusive create succeeds, and stands in for another holder.
+  fs.closeSync(fs.openSync(lock, "wx"));
   expect(withStoreLock(file, () => 1)).toEqual({ busy: true });
   const old = new Date(Date.now() - 60_000);
   fs.utimesSync(lock, old, old);
