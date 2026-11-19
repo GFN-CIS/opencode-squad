@@ -271,6 +271,21 @@ test("two agent paths linked to one file refuse the apply and change nothing", (
   expect(fs.readFileSync(shared, "utf8")).toBe(content);
 });
 
+test("startup description sync leaves a shared destination intact and names it", () => {
+  const shared = path.join(root, "dotfiles", "a-b.md");
+  fs.mkdirSync(path.dirname(shared), { recursive: true });
+  const { content } = agentMarkdown("grunt", "a/b", {});
+  fs.writeFileSync(shared, content);
+  fs.symlinkSync(shared, path.join(agentDir, "grunt-a-b.md"));
+  fs.symlinkSync(shared, path.join(agentDir, "drill-a-b.md"));
+  const line = `drill-a-b.md, grunt-a-b.md all lead to ${fs.realpathSync(shared)}; each agent needs its own file`;
+  expect(syncDescriptions({ dir: agentDir, describe: (role) => `new ${role}` })).toEqual([]);
+  expect(fs.readFileSync(shared, "utf8")).toBe(content);
+  expect(console.warn).toHaveBeenCalledWith(`[squad] description refresh skipped: ${line}`);
+  // squad_dump surfaces it as well.
+  expect(readSquad(agentDir).conflicts).toContain(line);
+});
+
 test("a symlink to a file nothing else reaches is still written through", () => {
   const own = path.join(root, "dotfiles", "grunt-a-b.md");
   fs.mkdirSync(path.dirname(own), { recursive: true });
