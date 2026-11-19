@@ -59,7 +59,7 @@ export function readSquad(dir) {
     }
     if (read.state === "missing" || !isGenerated(read.text)) continue;
     const { modelId, entry } = parseAgentFile(read.text);
-    if (!modelId) {
+    if (isDamaged(read.text)) {
       unreadable.push(
         `${name}: generated file with no readable model (damaged header). It is left as is and blocks the model_data.json refresh: ask the user to repair or delete it`,
       );
@@ -97,10 +97,19 @@ function readText(file) {
 const isGenerated = (text) => text.includes(GENERATED_MARKER_DETECT);
 
 /**
+ * Ours, but with no model we can read (a truncated or mangled header). One
+ * predicate for dump and apply, so the file the dump says it leaves in place is
+ * the file apply refuses to replace: it may hold the user's edits.
+ *
+ * @param {string} text
+ */
+const isDamaged = (text) => isGenerated(text) && !parseAgentFile(text).modelId;
+
+/**
  * @typedef {{role: string, id: string, variant?: string, filename: string, unchanged?: boolean}} WrittenAgent
  * @typedef {{ok: true, diff: ReturnType<typeof diffRoster>, written: WrittenAgent[], pruned: string[],
  *   migrated: string[], refreshed: string[], conflicts: string[], dir: string}} ApplyDone
- * @typedef {{ok: false, refusal: "remove" | "collision" | "unreadable", problems: string[],
+ * @typedef {{ok: false, refusal: "remove" | "collision" | "unreadable" | "damaged", problems: string[],
  *   diff: ReturnType<typeof diffRoster>, written: [], pruned: [], conflicts: string[], dir: string}} ApplyRefused
  */
 
@@ -110,14 +119,17 @@ const isGenerated = (text) => text.includes(GENERATED_MARKER_DETECT);
  * Returns `{ok: false, ...}` rather than throwing when the apply is refused —
  * the refusal is an ordinary outcome the caller reports, not an exception —
  * and every check runs before the first write, so a refused apply leaves the
- * squad exactly as it was. Three refusals:
+ * squad exactly as it was. Four refusals:
  *
  *   remove     — the apply would delete agents and `allowRemove` is not set;
  *   collision  — two roster agents map to one filename (`p/model-1` and
  *                `p/model.1` both slug to `grunt-p-model-1.md`), or the target
  *                file exists and is not ours (hand-authored);
  *   unreadable — a target file exists but cannot be read, so whether it is
- *                ours cannot be established.
+ *                ours cannot be established;
+ *   damaged    — a target file is ours but its header has no readable model
+ *                (the one squad_dump reports and leaves as is), so what it
+ *                held and any edits to it would be lost.
  *
  * Another generated file still claiming a kept agent is handled by name. A
  * legacy `worker-` file is migrated: deleted once the agent's `grunt-` file is
@@ -162,6 +174,8 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
   const problems = [];
   /** @type {string[]} */
   const unreadable = [];
+  /** @type {string[]} */
+  const damaged = [];
   for (const [key, role] of Object.entries(ROLE_KEYS)) {
     for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
       const { filename, content } = agentMarkdown(role, modelId, {
@@ -187,10 +201,17 @@ export function applySquad({ roster, dir, allowRemove = false, describe }) {
         );
         continue;
       }
+      if (existing !== null && isDamaged(existing)) {
+        damaged.push(
+          `${path.join(dir, filename)}: damaged header, no readable model (${agent} targets it)`,
+        );
+        continue;
+      }
       plan.push({ role, modelId, entry, filename, content, existing });
     }
   }
   if (unreadable.length) return refuse("unreadable", unreadable);
+  if (damaged.length) return refuse("damaged", damaged);
   if (problems.length) return refuse("collision", problems);
 
   /** @type {string[]} */
@@ -325,6 +346,18 @@ export function formatApplyReport(result) {
       "",
       "Nothing was written. The file may be the user's own agent: tell the user and",
       "let them fix its permissions or move it. Do not retry until they have.",
+    );
+    return lines.join("\n");
+  }
+  if (!result.ok && result.refusal === "damaged") {
+    lines.push(
+      "",
+      "REFUSED: an agent file this roster would replace has a damaged header, so",
+      "what it held, and any edits made to it, cannot be carried over:",
+      ...result.problems.map((p) => `  - ${p}`),
+      "",
+      "Nothing was written. Ask the user to repair or delete the file. Do not retry",
+      "until they have.",
     );
     return lines.join("\n");
   }

@@ -1,5 +1,5 @@
 // Suite: regressions for unreadable and damaged squad files — #16 (an
-// unreadable apply target), #17 (startup model_data refresh dropping models it
+// unreadable or damaged apply target), #17 (startup model_data refresh dropping models it
 // could not read) and #21 (incomplete headers, model ids that are not plain
 // YAML). Run: npx vitest run tests/regress-squad-files.test.js
 
@@ -152,4 +152,31 @@ test.skipIf(isRoot)("an unreadable file at a planned destination refuses the who
   expect(() => fs.readFileSync(target)).toThrow(/EACCES/);
   fs.chmodSync(target, 0o600);
   expect(fs.readFileSync(target, "utf8")).toBe("---\nmodel: a/b\n---\nMY OWN AGENT\n");
+});
+
+test("a damaged generated file at a planned destination refuses the whole apply", () => {
+  const { filename, content } = addAgent("grunt", "a/b");
+  const target = path.join(agentDir, filename);
+  // Cut off mid-header (marker kept, model line lost), then edited by hand.
+  const damaged = `${content.slice(0, content.indexOf("model:") + 4)}\n# my local edit\n`;
+  fs.writeFileSync(target, damaged);
+  // squad_dump reports this very file as damaged and left in place.
+  expect(readSquad(agentDir).conflicts.join("\n")).toContain(
+    `${filename}: generated file with no readable model`,
+  );
+  const result = applySquad({
+    roster: { grunts: { "a/b": {}, "c/d": {} }, drills: {} },
+    dir: agentDir,
+  });
+  expect(result.ok).toBe(false);
+  expect(result.ok ? null : result.refusal).toBe("damaged");
+  expect(result.ok ? [] : result.problems).toEqual([
+    `${target}: damaged header, no readable model (grunt a/b targets it)`,
+  ]);
+  const report = formatApplyReport(result);
+  expect(report).toMatch(/REFUSED: an agent file this roster would replace has a damaged header/);
+  expect(report).not.toMatch(/DELETE|allow_remove/);
+  // Nothing else was written, and the damaged file keeps its bytes.
+  expect(fs.readdirSync(agentDir)).toEqual([filename]);
+  expect(fs.readFileSync(target, "utf8")).toBe(damaged);
 });
