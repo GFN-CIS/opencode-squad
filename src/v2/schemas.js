@@ -29,9 +29,7 @@ export const SQUAD_SESSION_INPUT = {
 
 export const SQUAD_DUMP_INPUT = {
   type: "object",
-  properties: {
-    directory: { type: "string", description: ARG_DESCRIPTIONS["dump.directory"] },
-  },
+  properties: {},
   additionalProperties: false,
 };
 

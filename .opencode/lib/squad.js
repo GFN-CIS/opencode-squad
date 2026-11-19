@@ -152,7 +152,7 @@ export default {
 
     // --- lazy, process-lifetime lookups ---
 
-    // opencode reloads agent files live, so the list is re-read after a short
+    // The agent list changes at runtime (squad_patch, another process), so it is re-read after a short
     // TTL rather than held for the process lifetime: the startup description
     // sync and squad_patch both land seconds AFTER a first turn may have
     // asked, and the desktop service runs for hours.

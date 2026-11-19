@@ -25,7 +25,7 @@ export const TOOL_DESCRIPTIONS = {
     "in the `subagent` reply and in its <subagent> message. Without sessionIDs: the " +
     "current date and time and your own context size.",
   squad_dump:
-    "Read the current squad roster: every generated agent, grouped as `grunts` and " +
+    "Read the current squad roster: every squad agent, grouped as `grunts` and " +
     "`drills` and keyed by model id, with its per-agent settings. ALWAYS call this " +
     "before squad_patch — the roster is a document you edit, not one you retype. " +
     "Returns JSON.",
@@ -43,7 +43,8 @@ export const TOOL_DESCRIPTIONS = {
     "it is DELETED, so start from squad_dump and edit that. Deleting an agent the user " +
     "did not ask you to delete is refused, not performed. Agent descriptions are not " +
     "yours to write: the plugin builds them from model_data.json (the owner's `info` " +
-    "per model and the provider's plan) on every apply and at startup.",
+    "per model and the provider's plan) whenever it registers the agents. The change " +
+    "applies to the next dispatch; no restart.",
 };
 
 /** Argument descriptions, keyed by argument (agent-entry fields under `agent.*`). */
@@ -66,10 +67,6 @@ export const ARG_DESCRIPTIONS = {
   "session.sessionIDs":
     "The subagent sessions to check — every session you are weighing for reuse, in " +
     "one call. Omit for the current time and your own context.",
-  "dump.directory":
-    "Agent directory to read. Defaults to the global ~/.config/opencode/agent " +
-    "(or $XDG_CONFIG_HOME/opencode/agent). " +
-    "Pass a project's .opencode/agent to scope the squad to one project.",
   "metrics.models":
     "opencode model ids (provider/model) — normally the models of your grunt/drill " +
     "agents, deduplicated.",
@@ -87,9 +84,6 @@ export const ARG_DESCRIPTIONS = {
     "Permit deleting agents present in the current squad but absent from this " +
     "roster. Pass true ONLY when the user asked for that deletion — never to " +
     "get past the refusal.",
-  "patch.directory":
-    "Agent directory to write. Defaults to the global ~/.config/opencode/agent " +
-    "(or $XDG_CONFIG_HOME/opencode/agent).",
 };
 
 /**

@@ -1,19 +1,19 @@
-// Keep a generated agent's role prompt live: swap the body that was frozen
-// into its file at generation time for the one bundled with the plugin RIGHT
-// NOW, on every request, via the session `context` hook.
+// Keep a squad agent's role prompt live: swap the body it was registered with
+// for the one bundled with the plugin RIGHT NOW, on every request, via the
+// session `context` hook.
 //
-// WHY. A generated agent file exists per model, because the `subagent` tool
-// dispatches by agent id and the file is the place a model can be
-// pinned. The role prompt used to be INLINED into each of those files, which
-// made every file a copy: editing the bundled prompt changed nothing for a
-// squad already on disk until someone re-ran squad-draft by hand — a manual
-// step nobody remembers, and the copies drifted silently.
+// WHY. A squad agent exists per model, because the `subagent` tool dispatches
+// by agent id. The plugin registers each with the role prompt it read at
+// registration (src/squad-agents.js); an edit to prompts/<role>.md must still
+// reach a squad registered hours earlier in a long-lived service, without a
+// re-register. Before #85 the agents were files, and the copies in them
+// drifted silently until someone re-ran squad-draft.
 //
 // The context hook supplies SystemPart[]; the adapter applies this string
 // splice to the text part that carries a role fence.
 //
-// The role travels INSIDE the text, in the fence markers written by
-// `agentMarkdown`. A fence is self-describing, needs no
+// The role travels INSIDE the text, in the fence markers the registered
+// system prompt carries. A fence is self-describing, needs no
 // lookup, works for project-scoped agents, and its absence is the correct
 // no-op for sarge and for hand-authored agents.
 //
@@ -54,7 +54,8 @@ export function wrapPrompt(role, body) {
 }
 
 /**
- * What a generated agent file carries INSIDE the fence: not the prompt, a note
+ * What a squad agent is registered with INSIDE the fence when the bundled role
+ * prompt cannot be read: not the prompt, a note
  * saying where the prompt comes from — plus an instruction for the one case
  * where a model ever reads this text, which is the plugin failing to replace
  * it. Kept to a few lines because it is dead weight in every healthy request.
@@ -82,7 +83,7 @@ export function placeholderBody(role) {
 /**
  * Locate the fence in a system prompt.
  *
- * Only the FIRST fence is considered: one agent file carries one role prompt,
+ * Only the FIRST fence is considered: one agent carries one role prompt,
  * and a second one would mean something built a payload we do not understand —
  * in which case doing nothing is the safe reading.
  *
