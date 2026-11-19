@@ -10,7 +10,11 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
+
+// Every test here spawns node; on a loaded machine one spawn took 18 s, far
+// past vitest's 5 s default.
+vi.setConfig({ testTimeout: 30_000 });
 
 const SCRIPT = fileURLToPath(new URL("../scripts/squad-measure-cache-ttl.mjs", import.meta.url));
 
@@ -123,6 +127,31 @@ test("an OpenCode 2 database is read from session_v2/session_message, read-only"
   // The text report names the storage too.
   expect(run(["--db", file]).stdout).toMatch(/\(OpenCode 2 storage\)/);
   // Two child processes: give a loaded CI runner room.
+}, 30_000);
+
+test("a compaction large enough to sample is never paired with the turn after it", () => {
+  const { file, db } = makeDb(V2_SCHEMA);
+  db.prepare("insert into session_v2 (id) values (?)").run("ses_1");
+  const add = db.prepare(
+    "insert into session_message (id, session_id, type, seq, time_created, data) values (?, 'ses_1', ?, ?, ?, ?)",
+  );
+  const T0 = 1_800_000_000_000;
+  const model = { id: "model-x", providerID: "prov" };
+  // Every row is big enough to pass the prefix threshold and on one model.
+  const row = (i) => ({
+    time: { created: T0 + i * 60_000, completed: T0 + i * 60_000 + 5_000 },
+    model,
+    tokens: { input: 20, output: 300, reasoning: 0, cache: { read: 9_000, write: 400 } },
+  });
+  add.run("m0", "assistant", 0, T0, JSON.stringify(row(0)));
+  add.run("c1", "compaction", 1, T0 + 60_000, JSON.stringify({ ...row(1), summary: "…" }));
+  add.run("m2", "assistant", 2, T0 + 120_000, JSON.stringify(row(2)));
+  add.run("m3", "assistant", 3, T0 + 180_000, JSON.stringify(row(3)));
+  db.close();
+  const r = run(["--db", file, "--json"]);
+  expect(r.status).toBe(0);
+  // Only m2 -> m3 shares an unchanged prefix.
+  expect(JSON.parse(r.stdout).samples).toBe(1);
 }, 30_000);
 
 test("where OpenCode 1 tables remain beside OpenCode 2 ones, only OpenCode 2 is read", () => {
