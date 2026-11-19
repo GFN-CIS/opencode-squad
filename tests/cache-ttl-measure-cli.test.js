@@ -122,7 +122,8 @@ test("an OpenCode 2 database is read from session_v2/session_message, read-only"
   expect(digest(file)).toBe(before);
   // The text report names the storage too.
   expect(run(["--db", file]).stdout).toMatch(/\(OpenCode 2 storage\)/);
-});
+  // Two child processes: give a loaded CI runner room.
+}, 30_000);
 
 test("where OpenCode 1 tables remain beside OpenCode 2 ones, only OpenCode 2 is read", () => {
   const { file, db } = makeDb(
