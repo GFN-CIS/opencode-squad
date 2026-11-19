@@ -6,7 +6,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       // Scoped to src/ on purpose: this is the pure decision-logic layer the
-      // codebase deliberately separates from .opencode/lib/orchestrate-v2.js
+      // codebase deliberately separates from .opencode/lib/squad.js
       // (session/tool hook plumbing) — see the module comments in
       // src/rate-limit-guard.js. Unit-testing the plugin file would mean
       // mocking the whole opencode SDK client; that's a distinct, much larger
