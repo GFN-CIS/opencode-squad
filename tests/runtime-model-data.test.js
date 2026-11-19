@@ -1,6 +1,7 @@
-// Suite: .opencode/lib/runtime.js — the model_data.json read layer and the
-// startup regen. XDG_CONFIG_HOME points at a temp dir, so the real global
-// config is never read or written.
+// Suite: .opencode/lib/runtime.js — the model_data.json read layer, the
+// startup regen from squad.json, and the one-time import of a squad that
+// earlier versions wrote as agent files. XDG_CONFIG_HOME points at a temp
+// dir, so the real global config is never read or written.
 // Run: npx vitest run tests/runtime-model-data.test.js
 
 import fs from "node:fs";
@@ -9,21 +10,23 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   ensureGlobalModelDataFresh,
+  importLegacySquad,
   loadModelSettings,
-  syncGlobalSquadDescriptions,
 } from "../.opencode/lib/runtime.js";
-import { agentMarkdown } from "../src/workers.js";
+import { readStore, writeStore } from "../src/squad-store.js";
 
 const originalXdg = process.env.XDG_CONFIG_HOME;
 let root;
 let configDir;
 let globalFile;
+let storeFile;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "squad-runtime-"));
   process.env.XDG_CONFIG_HOME = root;
   configDir = path.join(root, "opencode");
   globalFile = path.join(configDir, "model_data.json");
+  storeFile = path.join(configDir, "squad.json");
   fs.mkdirSync(path.join(configDir, "agent"), { recursive: true });
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -34,14 +37,24 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** @param {string} modelId */
-function addGrunt(modelId) {
-  const { filename, content } = agentMarkdown("grunt", modelId, {});
-  fs.writeFileSync(path.join(configDir, "agent", filename), content);
-}
+/** @param {string[]} ids */
+const squadOf = (...ids) =>
+  writeStore(storeFile, { grunts: Object.fromEntries(ids.map((id) => [id, {}])), drills: {} });
+
+/** A squad file as versions before #85 wrote it. */
+const legacyFile = (model, description = '"old"') =>
+  [
+    "---",
+    "# generated-by: opencode-squad squad-draft",
+    `description: ${description}`,
+    "mode: subagent",
+    `model: ${model}`,
+    "---",
+    "",
+  ].join("\n");
 
 test("an invalid global model_data.json is left byte-for-byte intact at startup", () => {
-  addGrunt("a/b");
+  squadOf("a/b");
   const broken = '{"models": {"a/b": {"info": "SECRET owner rule"}}, "providers": {"a": "Max"},}';
   fs.writeFileSync(globalFile, broken);
   const r = ensureGlobalModelDataFresh();
@@ -52,11 +65,11 @@ test("an invalid global model_data.json is left byte-for-byte intact at startup"
   expect(fs.readFileSync(globalFile, "utf8")).toBe(broken);
   expect(String(console.warn.mock.calls[0][0])).not.toContain("SECRET");
   // No temp file left behind either.
-  expect(fs.readdirSync(configDir).sort()).toEqual(["agent", "model_data.json"]);
+  expect(fs.readdirSync(configDir).sort()).toEqual(["agent", "model_data.json", "squad.json"]);
 });
 
-test("a missing file is generated; a valid one keeps hand-edited fields on refresh", () => {
-  addGrunt("a/b");
+test("a missing file is generated from squad.json; a valid one keeps hand-edited fields", () => {
+  squadOf("a/b");
   expect(ensureGlobalModelDataFresh()).toEqual({ wrote: true });
   const first = JSON.parse(fs.readFileSync(globalFile, "utf8"));
   expect(Object.keys(first.models)).toEqual(["a/b"]);
@@ -64,7 +77,7 @@ test("a missing file is generated; a valid one keeps hand-edited fields on refre
   first.models["a/b"].info = "no secrets";
   first.providers = { a: "Max 5x" };
   fs.writeFileSync(globalFile, JSON.stringify(first));
-  addGrunt("c/d");
+  squadOf("a/b", "c/d");
   expect(ensureGlobalModelDataFresh()).toEqual({ wrote: true });
   const second = JSON.parse(fs.readFileSync(globalFile, "utf8"));
   expect(second.models["a/b"].info).toBe("no secrets");
@@ -73,41 +86,59 @@ test("a missing file is generated; a valid one keeps hand-edited fields on refre
   expect(ensureGlobalModelDataFresh()).toEqual({ wrote: false }); // unchanged -> no write
 });
 
-test("a squad file that cannot be read keeps model_data untouched", () => {
-  addGrunt("a/b");
+test("an unreadable squad.json keeps model_data untouched; none at all is no squad", () => {
   fs.writeFileSync(globalFile, JSON.stringify({ models: { "a/b": { info: "keep me" } } }));
   const before = fs.readFileSync(globalFile, "utf8");
-  // Unreadable as a file (a directory under that name): its model is unknown.
-  fs.mkdirSync(path.join(configDir, "agent", "grunt-c-d.md"));
+  expect(ensureGlobalModelDataFresh()).toEqual({ wrote: false });
+  fs.writeFileSync(storeFile, "{broken");
   const r = ensureGlobalModelDataFresh();
   expect(r.wrote).toBe(false);
-  expect(r.problem).toContain("grunt-c-d.md");
+  expect(r.problem).toContain(storeFile);
   expect(fs.readFileSync(globalFile, "utf8")).toBe(before);
 });
 
-test("a pre-0.4.1 agent with an unquoted description keeps its model entry", () => {
-  const legacy = [
-    "---",
-    "# generated-by: opencode-squad squad-draft",
-    "description: Per-model grunt. Owner rule: no secrets.",
-    "mode: subagent",
-    "model: a/b#high",
-    "---",
-    "",
-  ].join("\n");
-  fs.writeFileSync(path.join(configDir, "agent", "grunt-a-b.md"), legacy);
+test("the legacy squad is imported once, files left in place, owner notes kept", () => {
+  const agentDir = path.join(configDir, "agent");
+  // A pre-0.4.1 header: description unquoted, not valid YAML.
+  fs.writeFileSync(
+    path.join(agentDir, "grunt-a-b.md"),
+    legacyFile("a/b#high", "Per-model grunt. Owner rule: no secrets."),
+  );
+  fs.writeFileSync(path.join(agentDir, "drill-c-d.md"), legacyFile("c/d"));
+  const files = fs.readdirSync(agentDir).sort();
   fs.writeFileSync(globalFile, JSON.stringify({ models: { "a/b": { info: "keep me" } } }));
+
+  expect(importLegacySquad()).toEqual({ imported: 2, problems: [] });
+  expect(readStore(storeFile)).toEqual({
+    state: "ok",
+    roster: { grunts: { "a/b": { variant: "high" } }, drills: { "c/d": {} } },
+  });
+  expect(fs.readdirSync(agentDir).sort()).toEqual(files);
   ensureGlobalModelDataFresh();
   expect(JSON.parse(fs.readFileSync(globalFile, "utf8")).models["a/b"].info).toBe("keep me");
+
+  // Once squad.json exists it is the squad: no second import.
+  fs.writeFileSync(path.join(agentDir, "grunt-e-f.md"), legacyFile("e/f"));
+  expect(importLegacySquad()).toEqual({ imported: 0, problems: [] });
+  expect(readStore(storeFile).roster?.grunts).not.toHaveProperty("e/f");
 });
 
-test("description sync is skipped while the global file is unreadable", () => {
-  addGrunt("a/b");
-  fs.writeFileSync(globalFile, "{not json");
-  const file = path.join(configDir, "agent", "grunt-a-b.md");
-  const before = fs.readFileSync(file, "utf8");
-  expect(syncGlobalSquadDescriptions()).toEqual([]);
-  expect(fs.readFileSync(file, "utf8")).toBe(before);
+test("a damaged legacy file blocks the import rather than dropping that agent", () => {
+  const agentDir = path.join(configDir, "agent");
+  fs.writeFileSync(path.join(agentDir, "grunt-a-b.md"), legacyFile("a/b"));
+  fs.writeFileSync(
+    path.join(agentDir, "grunt-c-d.md"),
+    "---\n# generated-by: opencode-squad x\ndesc",
+  );
+  const r = importLegacySquad();
+  expect(r.imported).toBe(0);
+  expect(r.problems).toEqual([expect.stringContaining("grunt-c-d.md")]);
+  expect(fs.existsSync(storeFile)).toBe(false);
+});
+
+test("no legacy squad, no import: squad.json is not created empty", () => {
+  expect(importLegacySquad()).toEqual({ imported: 0, problems: [] });
+  expect(fs.existsSync(storeFile)).toBe(false);
 });
 
 test("models and providers come from one read: project over global by key, global-only for null", () => {

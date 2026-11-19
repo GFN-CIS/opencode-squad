@@ -57,11 +57,18 @@ import {
   sessionFacts,
 } from "../../src/session-status.js";
 import {
-  applySquad,
+  agentSpecs,
+  earlyTransform,
+  isSquadSystem,
+  lateTransform,
+} from "../../src/squad-agents.js";
+import {
   defaultAgentDir,
-  formatApplyReport,
-  readSquad,
+  formatPatchReport,
+  planPatch,
+  readLegacySquad,
 } from "../../src/squad-apply.js";
+import { defaultStoreFile, readStore, storeSignature, writeStore } from "../../src/squad-store.js";
 import {
   formatVariantLines,
   isSubagentCaller,
@@ -83,10 +90,11 @@ import {
   SQUAD_SESSION_INPUT,
 } from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
+import { slugForModel } from "../../src/workers.js";
 import {
-  describerScope,
   ensureGlobalModelDataFresh,
   getMetrics,
+  importLegacySquad,
   loadAuthTypes,
   loadModelSettings,
   loadRolePrompt,
@@ -95,8 +103,13 @@ import {
   SKILLS_DIR,
   squadDescriber,
   startMetricsRefresh,
-  syncGlobalSquadDescriptions,
 } from "./runtime.js";
+
+// `directory` scoped the squad to a project's agent files before #85.
+const DIRECTORY_GONE =
+  "Refused: `directory` is no longer supported. The squad is one roster (squad.json in the " +
+  "OpenCode config dir) registered by the plugin, not agent files in a directory. Call " +
+  "again without it.";
 
 // squad_metrics({full: true}) returns ~2K tokens per model; cap the bill.
 const MAX_FULL_MODELS = 6;
@@ -127,10 +140,10 @@ export default {
   id: "squad",
   /** @param {PluginContext} ctx */
   async setup(ctx) {
+    // A squad older versions wrote as agent files becomes squad.json first,
+    // so the model_data.json regen below already sees its models.
+    const legacyImport = importLegacySquad();
     ensureGlobalModelDataFresh();
-    // After the regen, which may rewrite model_data.json. opencode reloads
-    // the rewritten agent files on its own (agent.updated).
-    syncGlobalSquadDescriptions();
     startMetricsRefresh();
 
     // { package: "opencode-squad", options: { rate_limit_guard } }.
@@ -206,6 +219,85 @@ export default {
     /** @param {string} sessionID */
     const readContext = async (sessionID) => unwrap(await ctx.session.context({ sessionID })) ?? [];
 
+    // --- squad agents (#85) ---
+    //
+    // Registered from squad.json, never written as files. See
+    // src/squad-agents.js for why there are two transforms.
+
+    const storeFile = defaultStoreFile();
+    let storeSig = storeSignature(storeFile);
+    /** Agents a hand-authored file holds, and legacy ones hidden; from the late transform. */
+    let lateReport = {
+      foreign: /** @type {string[]} */ ([]),
+      hidden: /** @type {string[]} */ ([]),
+    };
+    const specsNow = () => {
+      const store = readStore(storeFile);
+      if (store.state !== "ok") return null;
+      return agentSpecs(store.roster, {
+        describe: squadDescriber(),
+        prompt: (role) => {
+          try {
+            return loadRolePrompt(role);
+          } catch {
+            return null;
+          }
+        },
+      });
+    };
+    await ctx.agent.transform((editor) => {
+      try {
+        earlyTransform(editor, specsNow() ?? []);
+      } catch {
+        // A broken roster must not take the host's agent list down with it.
+      }
+    });
+    /** What squad_dump and squad_patch say about the squad beyond its roster. */
+    const squadNotes = () => {
+      const notes = [];
+      for (const id of lateReport.foreign) {
+        notes.push(
+          `${id}: a hand-authored agent holds this id, so the squad's entry is not registered`,
+        );
+      }
+      for (const p of legacyImport.problems) {
+        notes.push(`legacy squad files were not imported: ${p}. Fix or delete it, then restart`);
+      }
+      const legacy = readLegacySquad(defaultAgentDir()).files;
+      if (legacy.length) {
+        notes.push(
+          `${legacy.length} agent file(s) from an earlier version remain in ${defaultAgentDir()} ` +
+            `(${legacy.join(", ")}). squad.json supersedes them and the plugin ignores them; ` +
+            "the user may delete them.",
+        );
+      }
+      return notes;
+    };
+
+    let lateRegistered = false;
+    /** @param {boolean} [force] reload even if squad.json looks unchanged */
+    const syncSquadAgents = async (force = false) => {
+      if (!lateRegistered) {
+        lateRegistered = true;
+        await ctx.agent.transform((editor) => {
+          try {
+            // An unreadable squad.json registers nothing and hides nothing:
+            // legacy agent files, if any, keep working until it is fixed.
+            const specs = specsNow();
+            if (specs) lateReport = lateTransform(editor, specs);
+          } catch {
+            // As above.
+          }
+        });
+        force = true;
+      }
+      const sig = storeSignature(storeFile);
+      if (!force && sig === storeSig) return;
+      storeSig = sig;
+      await ctx.agent.reload();
+      agentsPromise = undefined;
+    };
+
     // --- skills ---
 
     const skills = loadSkills([SKILLS_DIR]);
@@ -221,6 +313,13 @@ export default {
     // --- per-request transforms ---
 
     await ctx.session.hook("context", async (event) => {
+      try {
+        // Before the bootstrap: its inventory lists the squad. Also picks up
+        // a squad.json another OpenCode process changed.
+        await syncSquadAgents();
+      } catch {
+        // The squad stays as last registered.
+      }
       try {
         applySystemPartsTransform(event.system, loadRolePrompt);
       } catch {
@@ -374,21 +473,27 @@ export default {
         input: SQUAD_DUMP_INPUT,
         execute: async (input) => {
           const { directory: asked } = /** @type {{directory?: unknown}} */ (input ?? {});
-          const dir = typeof asked === "string" && asked ? asked : defaultAgentDir();
-          const { roster, conflicts: readConflicts } = readSquad(dir);
-          const conflicts = readConflicts;
-          const count =
-            Object.keys(roster.grunts ?? {}).length + Object.keys(roster.drills ?? {}).length;
-          const note = conflicts.length
-            ? `\n\nnotes:\n${conflicts.map((c) => `  ${c}`).join("\n")}`
-            : "";
+          if (asked !== undefined) return { content: DIRECTORY_GONE };
+          const store = readStore(storeFile);
+          if (store.state === "invalid") {
+            return {
+              content:
+                `The squad roster ${storeFile} cannot be read (${store.reason}). Nothing is ` +
+                "registered from it and squad_patch refuses until it is fixed: ask the user to " +
+                "repair or restore the file. It is never overwritten.",
+            };
+          }
+          const roster = store.state === "ok" ? store.roster : { grunts: {}, drills: {} };
+          const count = Object.keys(roster.grunts).length + Object.keys(roster.drills).length;
+          const notes = squadNotes();
+          const note = notes.length ? `\n\nnotes:\n${notes.map((c) => `  ${c}`).join("\n")}` : "";
           const variantLines = formatVariantLines(await getVariantMap(), roster);
           return {
             content:
-              `Agent dir: ${dir}\n${JSON.stringify(roster, null, 2)}${note}${variantLines}\n\n` +
+              `Squad roster: ${storeFile}\n${JSON.stringify(roster, null, 2)}${note}${variantLines}\n\n` +
               "To change the squad, pass this same document back to squad_patch with your " +
               "edits applied — keeping every agent you were not asked to touch.",
-            metadata: { title: `squad: ${count} agent(s)`, dir, agents: count },
+            metadata: { title: `squad: ${count} agent(s)`, store: storeFile, agents: count },
           };
         },
       });
@@ -504,7 +609,7 @@ export default {
           // Untyped until validated: Code Mode can send anything.
           const raw = /** @type {Record<string, unknown>} */ (input ?? {});
           const { allow_remove: allowRemove, directory: asked, ...doc } = raw;
-          const dir = typeof asked === "string" && asked ? asked : defaultAgentDir();
+          if (asked !== undefined) return { content: DIRECTORY_GONE };
           // Code Mode does not enforce the schema's additionalProperties, and
           // a roster wrapped as {roster: {...}} used to read as "no agents" —
           // a 14-agent deletion the guard caught twice in one afternoon.
@@ -530,28 +635,58 @@ export default {
             };
           }
           // Descriptions carry the owner's routing rules from model_data.json;
-          // writing from an unreadable file would strip them from every agent.
-          const problems = loadModelSettings(describerScope(dir, directory)).problems;
+          // registering from an unreadable file would strip them from every agent.
+          const problems = loadModelSettings(null).problems;
           if (problems.length) {
             return {
               content:
                 "Refused: model_data.json cannot be read, and agent descriptions are built " +
-                "from it — writing now would drop the owner's routing rules. Nothing was " +
+                "from it — applying now would drop the owner's routing rules. Nothing was " +
                 `written. Ask the user to fix:\n${problems.map((p) => `  - ${p}`).join("\n")}`,
             };
           }
-          const result = applySquad({
-            roster,
-            dir,
+          // Re-read right before writing: another OpenCode process may have
+          // changed the roster since this one last looked.
+          const store = readStore(storeFile);
+          if (store.state === "invalid") {
+            return {
+              content:
+                `Refused: the squad roster ${storeFile} cannot be read (${store.reason}), and ` +
+                "writing over it could lose the user's squad. Nothing was written. Ask the " +
+                "user to repair or restore it.",
+            };
+          }
+          const current = store.state === "ok" ? store.roster : { grunts: {}, drills: {} };
+          // A hand-authored agent already holding an id this roster wants.
+          const agents = unwrap(await ctx.agent.list().catch(() => null)) ?? [];
+          const byId = new Map(
+            (Array.isArray(agents) ? agents : []).map((a) => [String(a?.id ?? ""), a]),
+          );
+          const foreign = [];
+          for (const [key, role] of /** @type {const} */ ([
+            ["grunts", "grunt"],
+            ["drills", "drill"],
+          ])) {
+            for (const modelId of Object.keys(roster[key])) {
+              const id = slugForModel(modelId, role);
+              const agent = byId.get(id);
+              if (agent && !isSquadSystem(agent.system)) {
+                foreign.push({ id, agent: `${role} ${modelId}` });
+              }
+            }
+          }
+          const result = planPatch({
+            current,
+            next: roster,
             allowRemove: allowRemove === true,
-            describe: squadDescriber(dir, directory),
+            foreign,
           });
           if (result.ok) {
-            // The inventory lists the squad; let the next turn see the change.
-            agentsPromise = undefined;
+            writeStore(storeFile, roster);
+            await syncSquadAgents(true);
           }
           return {
-            content: formatApplyReport(result),
+            content: formatPatchReport(result, { store: storeFile, roster, notes: squadNotes() }),
             metadata: { ok: result.ok, ...result.diff },
           };
         },

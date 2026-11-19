@@ -1,6 +1,7 @@
 // Suite: the package entry (index.js → .opencode/lib/squad.js) as an
 // OpenCode 2 host sees it. Covers setup registering the squad_* tools,
-// squad_patch generating native V2 agent files, and squad_metrics rendering
+// squad_patch writing squad.json and registering the agents through the
+// host's agent transforms (#85), and squad_metrics rendering
 // host models + cached metrics, with the startup network refreshes stubbed at
 // the runtime boundary. Not covered: live hook firing,
 // rate-limit guard and skill loading — those need a real host or their own
@@ -11,6 +12,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import plugin from "../index.js";
+import { defaultStoreFile, readStore } from "../src/squad-store.js";
+import { roleRules } from "../src/workers.js";
 
 // Startup refreshes write global model data and schedule network requests;
 // leave tool registration and the filesystem generator real.
@@ -42,8 +45,7 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
   return {
     ...(await importOriginal()),
     ensureGlobalModelDataFresh: () => {},
-    // Both would touch the REAL global agent dir / model_data.json.
-    syncGlobalSquadDescriptions: () => [],
+    importLegacySquad: () => ({ imported: 0, problems: [] }),
     squadDescriber: () => (role, id) => `${role} on ${id}. Owner rule: no secrets.`,
     startMetricsRefresh: () => {},
     // A test may swap in its own cache contents.
@@ -65,44 +67,85 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
  *
  * @param {{directory: string} & Record<string, unknown>} host
  */
-async function setupHost({ directory, ...over }) {
+async function setupHost({ directory, agent, ...over }) {
   const tools = new Map();
+  /** Agent transforms in registration order, as the host keeps them. */
+  const transforms = [];
+  /** @type {Map<string, (input: any) => unknown>} */
+  const hooks = new Map();
   const dispose = await plugin.setup({
     location: { directory },
     options: { rate_limit_guard: { enabled: false } },
     skill: { transform: async () => {} },
-    session: { hook: async () => {} },
+    session: {
+      hook: async (name, callback) => {
+        hooks.set(name, callback);
+      },
+    },
     model: { list: async () => [] },
     tool: {
       hook: async () => {},
       transform: async (register) => register({ add: (tool) => tools.set(tool.name, tool) }),
     },
+    agent: {
+      list: async () => registered(),
+      transform: async (callback) => {
+        transforms.push(callback);
+        return { dispose: async () => {} };
+      },
+      reload: async () => {},
+      ...agent,
+    },
     ...over,
   });
-  return { tools, dispose };
+  /** The agent list the host would build: every transform over a fresh editor. */
+  function registered() {
+    const map = new Map();
+    const editor = {
+      list: () => [...map.values()],
+      get: (id) => map.get(id),
+      remove: (id) => map.delete(id),
+      default: () => {},
+      update: (id, f) => {
+        const a = map.get(id) ?? { id, permissions: [] };
+        f(a);
+        map.set(id, a);
+      },
+    };
+    for (const t of transforms) t(editor);
+    return [...map.values()];
+  }
+  /** The first request: registers the late transform. */
+  const firstRequest = () => hooks.get("context")?.({ agent: "build", system: [] });
+  return { tools, dispose, registered, firstRequest };
 }
 
 const dirs = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  // squad.json lives in the per-run config dir (tests/setup-isolation.js).
+  fs.rmSync(defaultStoreFile(), { force: true });
 });
 
-test("package exposes only setup and squad_patch generates native agents", async () => {
+test("package exposes only setup; squad_patch writes squad.json and registers the agents", async () => {
   expect(plugin.server).toBeUndefined();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-host-"));
   dirs.push(directory);
   const input = {
-    directory,
     grunts: { "a/b": { variant: "high" } },
-    drills: { "a/b": { variant: "high" } },
+    drills: { "a/b": { variant: "max" } },
   };
-  const { tools, dispose } = await setupHost({ directory });
+  const { tools, dispose, registered, firstRequest } = await setupHost({ directory });
   let wrapped;
+  let report;
+  let scoped;
   try {
+    await firstRequest();
     const patch = tools.get("squad_patch");
     // A roster wrapped one level too deep must not read as "delete everything".
-    wrapped = (await patch.execute({ roster: input, directory }, { agent: "build" })).content;
-    await patch.execute(input, { agent: "build" });
+    wrapped = (await patch.execute({ roster: input }, { agent: "build" })).content;
+    scoped = (await patch.execute({ ...input, directory }, { agent: "build" })).content;
+    report = (await patch.execute(input, { agent: "build" })).content;
   } finally {
     dispose();
   }
@@ -117,12 +160,24 @@ test("package exposes only setup and squad_patch generates native agents", async
   );
   expect(wrapped).toContain("Refused: pass `grunts` and/or `drills` at the TOP level");
   expect(wrapped).toContain("`roster`");
-  for (const role of ["grunt", "drill"]) {
-    const content = fs.readFileSync(path.join(directory, `${role}-a-b.md`), "utf8");
-    expect(content).toContain(`description: "${role} on a/b. Owner rule: no secrets."\n`);
-    expect(content).toContain("permissions:\n");
-    expect(content).toContain("model: a/b#high\n");
-    expect(content).not.toContain("permission:");
+  expect(scoped).toContain("`directory` is no longer supported");
+  expect(report).toContain("+2 added");
+  expect(readStore(defaultStoreFile())).toEqual({ state: "ok", roster: input });
+  // Nothing written next to the project, and no agent file anywhere.
+  expect(fs.readdirSync(directory)).toEqual([]);
+  const agents = registered();
+  for (const [role, variant] of [
+    ["grunt", "high"],
+    ["drill", "max"],
+  ]) {
+    const agent = agents.find((a) => a.id === `${role}-a-b`);
+    expect(agent).toMatchObject({
+      mode: "subagent",
+      hidden: true,
+      description: `${role} on a/b. Owner rule: no secrets.`,
+      model: { providerID: "a", id: "b", variant },
+    });
+    expect(agent.permissions.slice(-roleRules(role).length)).toEqual(roleRules(role));
   }
 });
 
@@ -300,8 +355,8 @@ test("squad_patch validates its input with the same schema it advertises", async
   dirs.push(directory);
   const { tools, dispose } = await setupHost({ directory });
   const patch = tools.get("squad_patch");
-  const run = async (input) =>
-    (await patch.execute({ directory, ...input }, { agent: "build" })).content;
+  const run = async (input) => (await patch.execute(input, { agent: "build" })).content;
+  const stored = () => readStore(defaultStoreFile()).state;
   try {
     // Advertised: the plain JSON Schema subset, no Zod-only keywords.
     const advertised = JSON.stringify(patch.input);
@@ -321,21 +376,25 @@ test("squad_patch validates its input with the same schema it advertises", async
       expect(bad).toContain('grunts["a/b"].steps must be a positive integer when present');
       expect(bad).toContain('grunts["a/b"] has unknown key "colour"');
       expect(bad).toContain('grunts["nope"]: "nope" is not a provider/model id');
-      expect(fs.readdirSync(directory)).toEqual([]);
+      expect(stored()).toBe("missing");
     }
     // The call's own switches go through the same schema.
     const switches = await run({ allow_remove: "true", grunts: { "a/b": {} } });
     expect(switches).toContain("allow_remove must be a boolean when present");
-    expect(fs.readdirSync(directory)).toEqual([]);
+    expect(stored()).toBe("missing");
 
     // Wrapped or missing roster: refused before validation, nothing written.
     expect(await run({ roster: { grunts: { "a/b": {} } } })).toContain("Refused: pass `grunts`");
     expect(await run({})).toContain("Refused: pass `grunts`");
-    expect(fs.readdirSync(directory)).toEqual([]);
+    expect(stored()).toBe("missing");
 
     // A valid one-role roster is written.
-    expect(await run({ grunts: { "a/b": { variant: "high" } } })).toContain("wrote  grunt-a-b.md");
-    expect(fs.readdirSync(directory)).toEqual(["grunt-a-b.md"]);
+    expect(await run({ grunts: { "a/b": { variant: "high" } } })).toContain("+1 added");
+    expect(readStore(defaultStoreFile())).toEqual({
+      state: "ok",
+      roster: { grunts: { "a/b": { variant: "high" } }, drills: {} },
+    });
+    expect(fs.readdirSync(directory)).toEqual([]);
   } finally {
     dispose();
   }

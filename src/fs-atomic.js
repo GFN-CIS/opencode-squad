@@ -37,7 +37,7 @@ function resolveTarget(file) {
  * @param {string} file
  * @returns {string | null}
  */
-export function danglingLinkTarget(file) {
+function danglingLinkTarget(file) {
   let link;
   try {
     if (!fs.lstatSync(file).isSymbolicLink()) return null;

@@ -12,11 +12,12 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { loadModelSettings } from "../.opencode/lib/runtime.js";
 import plugin from "../index.js";
+import { defaultStoreFile } from "../src/squad-store.js";
 
 vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   ensureGlobalModelDataFresh: () => {},
-  syncGlobalSquadDescriptions: () => [],
+  importLegacySquad: () => ({ imported: 0, problems: [] }),
   squadDescriber: () => (role, id) => `${role} on ${id}.`,
   startMetricsRefresh: () => {},
   getMetrics: async () => null,
@@ -64,7 +65,11 @@ async function host(over = {}) {
     location: { directory: os.tmpdir() },
     options: { rate_limit_guard: { max_silence_seconds: SILENCE_S } },
     skill: { transform: async () => {} },
-    agent: { list: async () => [] },
+    agent: {
+      list: async () => [],
+      transform: async () => ({ dispose: async () => {} }),
+      reload: async () => {},
+    },
     model: { list: over.modelList ?? (async () => []) },
     session: {
       hook: async (name, callback) => {
@@ -230,10 +235,10 @@ test("a failed model catalog lookup is retried by the next call", async () => {
     const dump = h.tools.get("squad_dump");
     const patch = h.tools.get("squad_patch");
     // The first lookup fails: variants read as unknown, not as "none".
-    expect((await dump.execute({ directory })).content).toContain("could not be read");
+    expect((await dump.execute({})).content).toContain("could not be read");
     // The next one asks again and checks the variant against the catalog.
     const res = await patch.execute(
-      { directory, grunts: { "a/b": { variant: "ultra" } } },
+      { grunts: { "a/b": { variant: "ultra" } } },
       { agent: "build" },
     );
     expect(res.content).toContain("Roster is invalid");
@@ -241,7 +246,7 @@ test("a failed model catalog lookup is retried by the next call", async () => {
     expect(fs.readdirSync(directory)).toEqual([]);
     expect(calls).toBe(2);
     // A successful catalog is kept.
-    await dump.execute({ directory });
+    await dump.execute({});
     expect(calls).toBe(2);
   } finally {
     h.dispose();
@@ -261,9 +266,10 @@ test("squad_patch refuses while model_data.json is unreadable, writing nothing",
   try {
     const res = await h.tools
       .get("squad_patch")
-      .execute({ directory, grunts: { "a/b": {} } }, { agent: "build" });
+      .execute({ grunts: { "a/b": {} } }, { agent: "build" });
     expect(res.content).toContain("Refused: model_data.json cannot be read");
     expect(res.content).toContain("invalid JSON at line 3, column 1");
+    expect(fs.existsSync(defaultStoreFile())).toBe(false);
     expect(fs.readdirSync(directory)).toEqual([]);
   } finally {
     h.dispose();

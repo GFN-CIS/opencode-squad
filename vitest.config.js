@@ -3,6 +3,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["tests/**/*.test.js"],
+    // No test may touch the real OpenCode config (squad.json, model_data.json).
+    setupFiles: ["tests/setup-isolation.js"],
     coverage: {
       provider: "v8",
       // Scoped to src/ on purpose: this is the pure decision-logic layer the
