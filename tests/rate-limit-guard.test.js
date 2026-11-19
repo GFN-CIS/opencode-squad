@@ -333,3 +333,20 @@ test("formatGuardNote: no reason claims the subagent never ran", () => {
     expect(text).toContain("may already have changed files or run commands");
   }
 });
+
+test("formatGuardNote: durations read at their real size, without a 60-minute remainder", () => {
+  const note = (silentMs) =>
+    formatGuardNote({
+      model: "p/m",
+      provider: "p",
+      reason: "silent_hang",
+      silentMs,
+      interrupt: "confirmed",
+    });
+  expect(note(15_000)).toContain("for ~15s ");
+  expect(note(400)).toContain("for ~less than a second ");
+  expect(note(61_000)).toContain("for ~2m ");
+  expect(note(7_199_000)).toContain("for ~2h ");
+  expect(note(7_199_000)).not.toContain("60m");
+  expect(note(90_061_000)).toContain("for ~1d 1h ");
+});
