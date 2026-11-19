@@ -294,10 +294,10 @@ function mergeRows(rows) {
 
 /**
  * The SuperIndex index to read from a metrics cache. A block of an earlier
- * format attributed a row to a requested id by normalized key only, so its
- * prices and context limits may be another model's: until it is refetched
- * (refreshMetrics treats it as due) only its basename scores are used, with
- * no serving facts.
+ * format kept one row per normalized key, so whatever it holds for an id
+ * (score, price, context) may be another model's: it is not used at all until
+ * it is refetched (refreshMetrics treats it as due, the summary header says
+ * so). #54: no number goes to a model the data cannot tie it to.
  *
  * @param {MetricsData|null|undefined} data
  * @returns {Record<string, SiEntry>|undefined}
@@ -305,14 +305,7 @@ function mergeRows(rows) {
 export function superindexOf(data) {
   const block = data?.superindex;
   if (!block?.index) return undefined;
-  if (block.format === SUPERINDEX_FORMAT) return block.index;
-  /** @type {Record<string, SiEntry>} */
-  const out = {};
-  for (const [k, e] of Object.entries(block.index)) {
-    if (k.includes("/") || k.startsWith("=")) continue;
-    out[k] = { ...e, priceIn: null, priceOut: null, context: null };
-  }
-  return out;
+  return block.format === SUPERINDEX_FORMAT ? block.index : undefined;
 }
 
 /**
@@ -439,19 +432,15 @@ export function resolveLlmbIdentity(id, data) {
  * slice is read by the identity's raw id only: a different id it holds is
  * another model and contributes nothing. An ambiguous identity shows as
  * ambiguous wherever a slice holds any of its candidates. A slice of an
- * earlier format (no raw-id keys, flagged in the header) counts only when
- * its basename match is the identity's id — or, when no identity could be
- * established from current data, when every earlier-format slice that
- * matches agrees on one id (`legacyId`).
+ * earlier format (no raw-id keys, flagged in the header) gives nothing: its
+ * values cannot be tied to one model.
  *
- * @param {string} id  opencode id
  * @param {Record<string, ScoreEntry>|undefined} slice
  * @param {boolean} current  the slice is at LLMBENCH_FORMAT
  * @param {LlmbIdentity|null} identity
- * @param {string|null} legacyId
  * @returns {{key: string, entry: ScoreEntry} | null}
  */
-function sliceHit(id, slice, current, identity, legacyId) {
+function sliceHit(slice, current, identity) {
   if (!slice) return null;
   if (current) {
     if (!identity) return null;
@@ -467,10 +456,10 @@ function sliceHit(id, slice, current, identity, legacyId) {
         }
       : null;
   }
-  const hit = lookup(id, slice);
-  if (!hit || hit.entry.candidates) return null;
-  const want = identity && "id" in identity ? identity.id : identity ? null : legacyId;
-  return want && hit.entry.id.toLowerCase() === want.toLowerCase() ? hit : null;
+  // An earlier-format slice may hold several models' values under one id
+  // (#54): nothing in it can be attributed to one model. It is withheld until
+  // the next check refetches it (the header says so).
+  return null;
 }
 
 /** @param {unknown} v */
@@ -652,12 +641,13 @@ export function formatSummary({
       "6 models: squad_metrics({models: [...], full: true}).",
     "",
   ];
-  if (si && data?.superindex?.format !== SUPERINDEX_FORMAT) {
+  if (data?.superindex?.index && data.superindex.format !== SUPERINDEX_FORMAT) {
     header.splice(
       -1,
       0,
-      "The cached SuperIndex data predates exact-id matching: its list prices and context " +
-        "limits are withheld until it is refetched; its scores are matched by model name only.",
+      "The cached SuperIndex data predates exact-id matching and cannot tie a row to one " +
+        "model: its scores, list prices and context limits are withheld until it is " +
+        "refetched at the next check.",
     );
   }
   const legacy = KEY_METRICS.filter(
@@ -668,8 +658,8 @@ export function formatSummary({
       -1,
       0,
       `The cached llmbenchmark rows for ${legacy.join(", ")} predate exact-id matching ` +
-        "and may pool models whose ids differ only in punctuation; they are refetched at the " +
-        "next check.",
+        "and may pool several models' values under one id, so no model is shown with them; " +
+        "they are refetched at the next check.",
     );
   }
   if (!si && !Object.keys(byMetric).length) {
@@ -691,21 +681,8 @@ export function formatSummary({
     // One llmbenchmark identity for every metric (#54); earlier-format
     // slices may only agree with it.
     const identity = resolveLlmbIdentity(m.id, data);
-    const legacyIds = new Set(
-      KEY_METRICS.filter(({ metric }) => byMetric[metric] && !currentRows(data?.scores, metric))
-        .map(({ metric }) => lookup(m.id, byMetric[metric])?.entry)
-        .filter((e) => e && !e.candidates)
-        .map((e) => e?.id.toLowerCase()),
-    );
-    const legacyId = legacyIds.size === 1 ? ([...legacyIds][0] ?? null) : null;
     const hits = KEY_METRICS.map(({ metric }) =>
-      sliceHit(
-        m.id,
-        byMetric[metric],
-        Boolean(currentRows(data?.scores, metric)),
-        identity,
-        legacyId,
-      ),
+      sliceHit(byMetric[metric], Boolean(currentRows(data?.scores, metric)), identity),
     );
     const rules = ownerRules(m.id, { note, providers: plans });
     const info = rules.length ? rules.join(" / ") : null;

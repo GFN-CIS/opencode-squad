@@ -742,7 +742,7 @@ describe("distinct llmbenchmark ids that normalize alike stay apart (#54)", () =
     expect(resolveLlmbIdentity("p/m.1", withScores)).toMatchObject({ id: "p/m.1" });
   });
 
-  test("score rows from an earlier cache format are shown, but flagged", () => {
+  test("score rows from an earlier cache format are withheld, and the header says why", () => {
     const legacy = indexScoreRows([{ modelId: "p/m-1", value: 0.5 }]);
     delete legacy["=p/m-1"];
     const out = formatSummary({
@@ -750,10 +750,61 @@ describe("distinct llmbenchmark ids that normalize alike stay apart (#54)", () =
       data: { scores: { fetchedAt: 0, byMetric: { [TB]: legacy } } },
       now: 0,
     });
-    expect(out).toContain("TerminalBench4 0.5");
+    expect(out).not.toContain("TerminalBench4 0.5");
     expect(out).toMatch(/llmbenchmark rows for TerminalBench4 predate exact-id matching/);
+    expect(out).toMatch(/no model is shown with them/);
     expect(resolveLlmbIdentity("p/m-1", { scores: { byMetric: { [TB]: legacy } } })).toBeNull();
   });
+});
+
+test("a pooled earlier-format slice gives no model its values, even when the id catalog is current (#54)", () => {
+  // What the indexer before exact-id matching made of two distinct ids: one
+  // entry, under the first id, holding both models' values.
+  const pooled = {
+    "m-1": {
+      id: "p/m-1",
+      values: [
+        { value: 0.1, setting: "low" },
+        { value: 0.9, setting: "high" },
+      ],
+    },
+  };
+  const out = formatSummary({
+    models: [{ id: "p/m-1" }, { id: "p/m.1" }],
+    data: {
+      scores: { fetchedAt: 0, byMetric: { tbench_4_0_accuracy: pooled } },
+      ids: {
+        fetchedAt: 0,
+        format: LLMBENCH_FORMAT,
+        index: indexModelIds([{ id: "p/m-1" }, { id: "p/m.1" }]),
+      },
+    },
+    now: 0,
+  });
+  expect(out).not.toMatch(/0\.1|0\.9/);
+});
+
+test("an earlier-format SuperIndex block gives no model its score either (#54)", () => {
+  const old = {
+    superindex: {
+      fetchedAt: 0,
+      index: {
+        "m-1": {
+          id: "p/m-1",
+          score: 77,
+          rank: 3,
+          status: null,
+          confidence: null,
+          priceIn: 1,
+          priceOut: 2,
+          context: 1000,
+        },
+      },
+    },
+  };
+  const out = formatSummary({ models: [{ id: "p/m.1" }], data: old, now: 0 });
+  expect(out).not.toMatch(/SI 77/);
+  expect(out).toMatch(/SuperIndex data predates exact-id matching/);
 });
 
 describe("one llmbenchmark identity per model, shared by every slice and both views (#54)", () => {
