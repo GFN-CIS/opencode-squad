@@ -58,25 +58,46 @@ test("the revision is of the bytes: any edit changes it, none means no file (#89
   fs.chmodSync(file, 0o600);
 });
 
-test("withStoreLock: exclusive, released after, busy while held, stale taken over", () => {
+test("withStoreLock: exclusive while held, released after, even after a throw", () => {
   const lock = `${file}.lock`;
-  // Held while the body runs: the lock names this process.
-  expect(withStoreLock(file, () => fs.readFileSync(lock, "utf8"))).toEqual({
-    busy: false,
-    value: String(process.pid),
-  });
+  // Held while the body runs, by this process.
+  const held = withStoreLock(file, () => JSON.parse(fs.readFileSync(lock, "utf8")));
+  expect(held).toMatchObject({ busy: false, value: { pid: process.pid } });
   expect(() =>
     withStoreLock(file, () => {
       throw new Error("boom");
     }),
   ).toThrow("boom");
-  // Released both times, even after a throw: an exclusive create succeeds,
-  // and stands in for another process holding it.
+  // Released both times: an exclusive create succeeds.
   fs.closeSync(fs.openSync(lock, "wx"));
-  expect(withStoreLock(file, () => 1)).toEqual({ busy: true });
-  const old = new Date(Date.now() - 60_000);
-  fs.utimesSync(lock, old, old);
-  expect(withStoreLock(file, () => 2)).toEqual({ busy: false, value: 2 });
+});
+
+test("a lock is never taken over, however old or whoever held it (#89)", () => {
+  const lock = `${file}.lock`;
+  const old = new Date(Date.now() - 600_000);
+  // A process that is gone, and one that is alive (this one) but slow.
+  for (const pid of [2 ** 22 + 12345, process.pid]) {
+    const text = JSON.stringify({ pid, host: "h", token: "theirs" });
+    fs.writeFileSync(lock, text);
+    fs.utimesSync(lock, old, old);
+    const out = withStoreLock(file, () => "entered");
+    expect(out).toMatchObject({ busy: true, holder: { pid } });
+    expect(out.holder.ageMs).toBeGreaterThan(500_000);
+    expect(fs.readFileSync(lock, "utf8")).toBe(text);
+  }
+  fs.rmSync(lock);
+});
+
+test("release removes only the lock this call created (#89)", () => {
+  const lock = `${file}.lock`;
+  const other = JSON.stringify({ pid: 1, host: "h", token: "someone else" });
+  withStoreLock(file, () => {
+    // Someone deleted ours and took the path meanwhile.
+    fs.rmSync(lock);
+    fs.writeFileSync(lock, other);
+  });
+  expect(fs.readFileSync(lock, "utf8")).toBe(other);
+  fs.rmSync(lock);
 });
 
 test.each([

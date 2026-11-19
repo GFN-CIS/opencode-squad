@@ -553,22 +553,28 @@ test("squad.json locked by another process: the patch writes nothing and says so
   const { tools, dispose } = await setupHost({ directory });
   const lock = `${defaultStoreFile()}.lock`;
   fs.mkdirSync(path.dirname(lock), { recursive: true });
-  fs.writeFileSync(lock, "4242");
-  const patch = () =>
-    tools.get("squad_patch").execute(
-      { revision: storeRevision(defaultStoreFile()), grunts: { "p/a": {} } },
-      {
-        agent: "build",
-      },
-    );
+  const text = JSON.stringify({ pid: 4242, host: "h", token: "t" });
+  fs.writeFileSync(lock, text);
+  const patch = async () =>
+    (
+      await tools.get("squad_patch").execute(
+        { revision: storeRevision(defaultStoreFile()), grunts: { "p/a": {} } },
+        {
+          agent: "build",
+        },
+      )
+    ).content;
   try {
-    expect((await patch()).content).toContain("another OpenCode process is writing squad.json");
-    expect(readStore(defaultStoreFile()).state).toBe("missing");
-    // A lock left by a process that died long ago is taken over.
+    expect(await patch()).toContain("another OpenCode process is writing squad.json");
+    // Old: still not taken over, but the user is told which file to delete.
     const old = new Date(Date.now() - 120_000);
     fs.utimesSync(lock, old, old);
-    expect((await patch()).content).toContain("+1 added");
-    expect(fs.existsSync(lock)).toBe(false);
+    const stale = await patch();
+    expect(stale).toContain(`${lock} has been held for`);
+    expect(stale).toContain("process 4242");
+    expect(stale).toContain("safe to delete");
+    expect(fs.readFileSync(lock, "utf8")).toBe(text);
+    expect(readStore(defaultStoreFile()).state).toBe("missing");
   } finally {
     dispose();
     fs.rmSync(lock, { force: true });

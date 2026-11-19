@@ -101,48 +101,80 @@ function revisionOf(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
 }
 
-/** A lock older than this was left by a process that died holding it. */
-const LOCK_STALE_MS = 30_000;
+/** A lock held longer than this is worth telling the user about. */
+export const LOCK_OLD_MS = 30_000;
 
 /**
  * Run `fn` holding `<file>.lock`, created exclusively: another OpenCode
  * process sharing the config dir (the desktop service and a CLI do) cannot
  * read-check-write the roster at the same time. `fn` must be synchronous;
  * with no await inside, no other patch of this process interleaves either.
- * Busy is reported, not waited out: the caller retries with a fresh dump.
+ *
+ * A lock someone else holds is never taken over, however old: removing it by
+ * path could remove a fresh lock another process has just created, and two
+ * writers would then both commit (#89). Busy is reported with the holder, and
+ * the caller declines; a lock left by a crash is for the user to delete. On
+ * release only the lock this call created is removed.
  *
  * @template T
  * @param {string} file
  * @param {() => T} fn
- * @returns {{busy: true} | {busy: false, value: T}}
+ * @returns {{busy: true, holder: LockHolder | null} | {busy: false, value: T}}
  */
 export function withStoreLock(file, fn) {
   const lock = `${file}.lock`;
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const token = crypto.randomUUID();
   let fd;
-  for (let attempt = 0; attempt < 2 && fd === undefined; attempt++) {
-    try {
-      fd = fs.openSync(lock, "wx");
-    } catch (e) {
-      if (/** @type {NodeJS.ErrnoException} */ (e)?.code !== "EEXIST") throw e;
-      let age = 0;
-      try {
-        age = Date.now() - fs.statSync(lock).mtimeMs;
-      } catch {
-        // Released meanwhile: try again.
-      }
-      if (age <= LOCK_STALE_MS) return { busy: true };
-      fs.rmSync(lock, { force: true });
-    }
-  }
-  if (fd === undefined) return { busy: true };
   try {
-    fs.writeSync(fd, String(process.pid));
+    fd = fs.openSync(lock, "wx");
+  } catch (e) {
+    if (/** @type {NodeJS.ErrnoException} */ (e)?.code !== "EEXIST") throw e;
+    return { busy: true, holder: lockHolder(lock) };
+  }
+  try {
+    fs.writeSync(fd, JSON.stringify({ pid: process.pid, host: os.hostname(), token }));
+    fs.closeSync(fd);
+    fd = undefined;
     return { busy: false, value: fn() };
   } finally {
-    fs.closeSync(fd);
-    fs.rmSync(lock, { force: true });
+    if (fd !== undefined) fs.closeSync(fd);
+    try {
+      if (JSON.parse(fs.readFileSync(lock, "utf8"))?.token === token) fs.rmSync(lock);
+    } catch {
+      // Gone already, or not ours: leave it.
+    }
   }
+}
+
+/**
+ * @typedef {{pid: number | null, host: string | null, ageMs: number}} LockHolder
+ */
+
+/**
+ * Who holds a lock, as far as its file says.
+ *
+ * @param {string} lock
+ * @returns {LockHolder | null}  null when it vanished meanwhile
+ */
+function lockHolder(lock) {
+  let ageMs;
+  try {
+    ageMs = Date.now() - fs.statSync(lock).mtimeMs;
+  } catch {
+    return null;
+  }
+  let owner = {};
+  try {
+    owner = JSON.parse(fs.readFileSync(lock, "utf8")) ?? {};
+  } catch {
+    // Being written, or not ours to read: age alone.
+  }
+  return {
+    pid: typeof owner.pid === "number" ? owner.pid : null,
+    host: typeof owner.host === "string" ? owner.host : null,
+    ageMs,
+  };
 }
 
 /**

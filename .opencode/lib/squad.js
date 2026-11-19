@@ -76,6 +76,7 @@ import {
 } from "../../src/squad-apply.js";
 import {
   defaultStoreFile,
+  LOCK_OLD_MS,
   NO_STORE_REVISION,
   readStore,
   storeRevision,
@@ -899,10 +900,20 @@ export default {
             return { result };
           });
           if (locked.busy) {
+            const holder = locked.holder;
+            const old =
+              holder && holder.ageMs > LOCK_OLD_MS
+                ? ` ${storeFile}.lock has been held for ${Math.round(holder.ageMs / 1000)} s` +
+                  (holder.pid
+                    ? ` by process ${holder.pid}${holder.host ? ` on ${holder.host}` : ""}`
+                    : "") +
+                  ": if no OpenCode process is changing the squad, it was left by one that " +
+                  "crashed, and it is safe to delete. Tell the user; do not delete it yourself."
+                : "";
             return {
               content:
                 "Refused: another OpenCode process is writing squad.json right now. Nothing " +
-                "was written. Call squad_dump again and retry with its revision.",
+                `was written. Call squad_dump again and retry with its revision.${old}`,
             };
           }
           if ("refused" in locked.value) return { content: locked.value.refused };

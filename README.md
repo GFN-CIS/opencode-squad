@@ -387,7 +387,9 @@ Three properties make the flow safe, and none is optional:
    hash of `squad.json`, and `squad_patch` requires it back. If the roster
    changed since (another session or OpenCode process patched it), the patch is
    refused and nothing is written, so two edits of one dump cannot undo each
-   other. The check and the write run under an exclusive `squad.json.lock`.
+   other. The check and the write run under an exclusive `squad.json.lock`. A
+   lock held by another process is never taken over: the patch is refused, and a
+   lock left behind by a crashed process is named so you can delete it.
 3. **Apply refuses to delete.** Read-modify-write only protects while the caller
    actually modifies; one that rebuilds the roster from memory reintroduces the
    wipe in a new wrapper. So deletions are refused and named — nothing at all is
