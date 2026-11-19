@@ -232,20 +232,35 @@ export function indexSuperIndex(json) {
       context: num(m.context_window),
     });
   }
-  rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  /** @type {Record<string, SiEntry>} */
+  return indexByIds(rows, mergeRows);
+}
+
+/**
+ * Index items three ways: by raw id (exactKey), by provider/modelKey and by
+ * modelKey, so lookup finds an exact id first and a normalized one only as a
+ * fallback. Items sharing a key go through `merge` (sorted by id, so source
+ * order does not matter); it decides what a shared key may still claim.
+ *
+ * @template {{id: string}} T
+ * @param {T[]} items
+ * @param {(group: T[]) => T} merge  called for groups of one too
+ * @returns {Record<string, T>}
+ */
+function indexByIds(items, merge) {
+  const sorted = [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  /** @type {Record<string, T>} */
   const out = {};
-  /** @param {(r: SiEntry) => string|null} keyOf */
+  /** @param {(r: T) => string|null} keyOf */
   const indexBy = (keyOf) => {
-    /** @type {Map<string, SiEntry[]>} */
+    /** @type {Map<string, T[]>} */
     const groups = new Map();
-    for (const r of rows) {
+    for (const r of sorted) {
       const k = keyOf(r);
       if (k === null) continue;
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k)?.push(r);
     }
-    for (const [k, group] of groups) out[k] = mergeRows(group);
+    for (const [k, group] of groups) out[k] = merge(group);
   };
   indexBy((r) => exactKey(r.id));
   indexBy((r) => {
@@ -299,42 +314,100 @@ export function superindexOf(data) {
 }
 
 /**
- * llmbenchmark /v1/scores rows for one metric -> {modelKey: [{value, setting}]}.
- * Rows for the same model at different settings are all kept: collapsing to
- * the best one would quietly report a max-effort number for every model.
+ * The current shape of the llmbenchmark indexes (indexScoreRows,
+ * indexModelIds). Score rows carry it per metric (`formatByMetric`), the id
+ * list on its block; rows without it were written by an earlier version,
+ * which pooled distinct ids under one normalized key.
+ */
+export const LLMBENCH_FORMAT = 2;
+
+/**
+ * @typedef {{id: string, values: Array<{value: number, setting: string|null}>,
+ *   candidates?: string[]}} ScoreEntry
+ *   candidates: several llmbenchmark ids share this key; `values` is then
+ *   empty, since no one id's scores may stand for the others.
+ */
+
+/**
+ * llmbenchmark /v1/scores rows for one metric -> {key: {id, values}}, keyed
+ * like indexSuperIndex (raw id, provider/modelKey, modelKey). Rows for the
+ * same id at different settings are all kept: collapsing to the best one
+ * would quietly report a max-effort number for every model. Rows of distinct
+ * ids are never pooled: a key they share holds no values, only the ids.
  *
  * @param {any} rows
- * @returns {Record<string, {id: string, values: Array<{value: number, setting: string|null}>}>}
+ * @returns {Record<string, ScoreEntry>}
  */
 export function indexScoreRows(rows) {
-  /** @type {ReturnType<typeof indexScoreRows>} */
-  const out = {};
+  /** @type {Map<string, ScoreEntry>} */
+  const byId = new Map();
   for (const r of Array.isArray(rows) ? rows : []) {
     const value = num(r?.value);
     if (typeof r?.modelId !== "string" || value === null) continue;
-    const key = modelKey(r.modelId);
-    out[key] ??= { id: r.modelId, values: [] };
-    out[key].values.push({ value, setting: typeof r.setting === "string" ? r.setting : null });
+    const k = exactKey(r.modelId);
+    if (!byId.has(k)) byId.set(k, { id: r.modelId, values: [] });
+    byId.get(k)?.values.push({ value, setting: typeof r.setting === "string" ? r.setting : null });
   }
-  return out;
+  return indexByIds([...byId.values()], (group) =>
+    group.length === 1
+      ? group[0]
+      : { id: group[0].id, values: [], candidates: group.map((g) => g.id) },
+  );
 }
 
 /**
- * llmbenchmark /v1/models list -> {modelKey: llmbenchmark id}, so a model with
- * no key-metric rows can still be looked up for its full detail.
+ * llmbenchmark /v1/models list -> {key: {id}} (keyed like indexScoreRows),
+ * so a model with no key-metric rows can still be looked up for its full
+ * detail. A key several ids share lists them as `candidates`.
  *
  * @param {any} list
- * @returns {Record<string, string>}
+ * @returns {Record<string, {id: string, candidates?: string[]}>}
  */
 export function indexModelIds(list) {
-  /** @type {Record<string, string>} */
-  const out = {};
+  /** @type {Map<string, {id: string, candidates?: string[]}>} */
+  const byId = new Map();
   for (const m of Array.isArray(list) ? list : []) {
-    if (typeof m?.id !== "string") continue;
-    const key = modelKey(m.id);
-    out[key] ??= m.id;
+    if (typeof m?.id === "string" && !byId.has(exactKey(m.id)))
+      byId.set(exactKey(m.id), { id: m.id });
   }
-  return out;
+  return indexByIds([...byId.values()], (group) =>
+    group.length === 1 ? group[0] : { id: group[0].id, candidates: group.map((g) => g.id) },
+  );
+}
+
+/**
+ * Score rows of one metric that are safe to attribute by id: written in the
+ * current format. Older rows may pool several ids under one key.
+ *
+ * @param {MetricsData["scores"] | null | undefined} scores
+ * @param {string} metric
+ */
+function currentRows(scores, metric) {
+  return scores?.formatByMetric?.[metric] === LLMBENCH_FORMAT
+    ? scores.byMetric?.[metric]
+    : undefined;
+}
+
+/**
+ * The llmbenchmark id whose full detail the full view fetches for an
+ * opencode id: from the model-id list, else from any metric's score rows,
+ * both only when written in the current format (an older one may hand back
+ * another model's id). `candidates`: several ids match and none is picked.
+ *
+ * @param {string} id  opencode id
+ * @param {MetricsData|null|undefined} data
+ * @returns {{id: string} | {candidates: string[]} | null}
+ */
+export function llmbenchIdFor(id, data) {
+  const lists = [
+    data?.ids?.format === LLMBENCH_FORMAT ? data.ids.index : undefined,
+    ...Object.keys(data?.scores?.byMetric ?? {}).map((m) => currentRows(data?.scores, m)),
+  ];
+  for (const index of lists) {
+    const hit = index ? lookup(id, index)?.entry : undefined;
+    if (hit) return hit.candidates ? { candidates: hit.candidates } : { id: hit.id };
+  }
+  return null;
 }
 
 /** @param {unknown} v */
@@ -445,6 +518,12 @@ function fmtScoresAge(scores, now) {
   return older.length ? `${newest} (${older.join(", ")})` : newest;
 }
 
+/** Candidate ids, at most three named. @param {string[]} ids */
+function fmtCandidates(ids) {
+  const rest = ids.length - 3;
+  return `${ids.slice(0, 3).join(", ")}${rest > 0 ? `, +${rest} more` : ""}`;
+}
+
 /** @param {Array<{value:number, setting:string|null}>} values */
 function fmtValues(values) {
   if (values.length === 1) return fmtVal(values[0].value);
@@ -457,9 +536,13 @@ function fmtValues(values) {
  *   index?: ReturnType<typeof indexSuperIndex>}} [superindex]
  *   no `format` (or another one): written by an earlier version; see superindexOf.
  * @property {{fetchedAt?: number, fetchedAtByMetric?: Record<string, number>,
+ *   formatByMetric?: Record<string, number>,
  *   byMetric?: Record<string, ReturnType<typeof indexScoreRows>>}} [scores]
  *   `fetchedAt` is the single timestamp of the old cache format; see metricFetchedAt.
- * @property {{fetchedAt?: number, index?: Record<string, string>}} [ids]
+ *   A metric not at LLMBENCH_FORMAT in `formatByMetric` has rows of an earlier format.
+ * @property {{fetchedAt?: number, format?: number,
+ *   index?: Record<string, {id: string, candidates?: string[]}>}} [ids]
+ *   an index without `format` maps keys to bare id strings and is not used.
  */
 
 /**
@@ -514,6 +597,18 @@ export function formatSummary({
         "limits are withheld until it is refetched; its scores are matched by model name only.",
     );
   }
+  const legacy = KEY_METRICS.filter(
+    ({ metric }) => byMetric[metric] && !currentRows(data?.scores, metric),
+  ).map((m) => m.label);
+  if (legacy.length) {
+    header.splice(
+      -1,
+      0,
+      `The cached llmbenchmark rows for ${legacy.join(", ")} predate exact-id matching ` +
+        "and may pool models whose ids differ only in punctuation; they are refetched at the " +
+        "next check.",
+    );
+  }
   if (!si && !Object.keys(byMetric).length) {
     header.push(
       "Metrics are unavailable right now (first fetch has not completed or both sources " +
@@ -556,7 +651,9 @@ export function formatSummary({
     }
     const provider = m.id.split("/")[0];
     // The SuperIndex row by id: two exact ids that normalize alike are two rows.
-    const signature = `${provider}|${s?.entry.id ?? ""}|${hits.map((h) => h?.key ?? "").join("|")}`;
+    const signature = `${provider}|${s?.entry.id ?? ""}|${hits
+      .map((h) => h?.entry.candidates?.join(",") ?? h?.entry.id ?? "")
+      .join("|")}`;
     const same = firstBySignature.get(signature);
     if (same) {
       lines.push(
@@ -574,15 +671,16 @@ export function formatSummary({
       // Unranked scores rest on too few benchmarks to compare with ranked ones.
       else parts.push(`SI ${e.score} (provisional, conf ${e.confidence ?? "?"}%)`);
       // Several rows answer to this id: the score is the first one's.
-      if (e.candidates) {
-        const [shown, rest] = [e.candidates.slice(0, 3), e.candidates.length - 3];
-        parts[parts.length - 1] +=
-          ` (ambiguous: ${shown.join(", ")}${rest > 0 ? `, +${rest} more` : ""})`;
-      }
+      if (e.candidates) parts[parts.length - 1] += ` (ambiguous: ${fmtCandidates(e.candidates)})`;
     }
     parts.push(...own);
     hits.forEach((h, i) => {
-      if (h) parts.push(`${KEY_METRICS[i].label} ${fmtValues(h.entry.values)}`);
+      if (!h) return;
+      // Several llmbenchmark ids answer to this key: name them, pool none.
+      const c = h.entry.candidates;
+      parts.push(
+        `${KEY_METRICS[i].label} ${c ? `ambiguous (${fmtCandidates(c)})` : fmtValues(h.entry.values)}`,
+      );
     });
     const matched = [s?.key, ...hits.map((h) => h?.key)]
       .filter(Boolean)
@@ -601,8 +699,10 @@ export function formatSummary({
  * @param {string} id  opencode id as asked
  * @param {any} detail  llmbenchmark /v1/models/{id} body (or null)
  * @param {SiEntry | null} si  matched row, from lookup(id, superindexOf(data))
- * @param {BillingContext & {context?: number|null}} [opts]  context: opencode
- *   catalog limit; the rest is how the model is paid for, as the summary has it
+ * @param {BillingContext & {context?: number|null, llmbCandidates?: string[]}} [opts]
+ *   context: opencode catalog limit; llmbCandidates: llmbenchmark ids that all
+ *   match (see llmbenchIdFor), none fetched; the rest is how the model is paid
+ *   for, as the summary has it
  * @returns {string}
  */
 export function formatDetail(id, detail, si, opts = {}) {
@@ -632,7 +732,14 @@ export function formatDetail(id, detail, si, opts = {}) {
   if (serving.length) head.push(`Serving: ${serving.join(" · ")}`);
   const scores = Array.isArray(detail?.scores) ? detail.scores : [];
   if (!scores.length) {
-    head.push(detail ? "llmbenchmark: no scores." : "llmbenchmark: not found or unavailable.");
+    const c = opts.llmbCandidates;
+    head.push(
+      c?.length
+        ? `llmbenchmark: ambiguous match (${fmtCandidates(c)}); no one model's scores are shown.`
+        : detail
+          ? "llmbenchmark: no scores."
+          : "llmbenchmark: not found or unavailable.",
+    );
     return head.join("\n");
   }
   head.push(`llmbenchmark id: ${detail.id} (Artificial Analysis rows omitted)`);

@@ -15,7 +15,8 @@ import plugin from "../index.js";
 // Startup refreshes write global model data and schedule network requests;
 // leave tool registration and the filesystem generator real.
 vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
-  const { indexScoreRows, indexSuperIndex, SUPERINDEX_FORMAT } = await import("../src/metrics.js");
+  const { indexModelIds, indexScoreRows, indexSuperIndex, LLMBENCH_FORMAT, SUPERINDEX_FORMAT } =
+    await import("../src/metrics.js");
   const fx = (name) =>
     JSON.parse(
       fs.readFileSync(path.join(import.meta.dirname, "fixtures", "metrics", name), "utf8"),
@@ -29,9 +30,14 @@ vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => {
     },
     scores: {
       fetchedAt: Date.now(),
+      formatByMetric: Object.fromEntries(Object.keys(rows).map((m) => [m, LLMBENCH_FORMAT])),
       byMetric: Object.fromEntries(Object.entries(rows).map(([m, r]) => [m, indexScoreRows(r)])),
     },
-    ids: { fetchedAt: Date.now(), index: { "glm-5-3": "z-ai/glm-5.3" } },
+    ids: {
+      fetchedAt: Date.now(),
+      format: LLMBENCH_FORMAT,
+      index: indexModelIds([{ id: "z-ai/glm-5.3" }]),
+    },
   };
   return {
     ...(await importOriginal()),

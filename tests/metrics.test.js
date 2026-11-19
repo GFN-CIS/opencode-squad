@@ -15,6 +15,8 @@ import {
   indexSuperIndex,
   KEY_METRICS,
   keyCandidates,
+  LLMBENCH_FORMAT,
+  llmbenchIdFor,
   lookup,
   ownerRules,
   providerEntry,
@@ -33,7 +35,11 @@ const BY_METRIC = Object.fromEntries(
 );
 const DATA = {
   superindex: { fetchedAt: 0, format: SUPERINDEX_FORMAT, index: SI },
-  scores: { fetchedAt: 0, byMetric: BY_METRIC },
+  scores: {
+    fetchedAt: 0,
+    formatByMetric: Object.fromEntries(KEY_METRICS.map(({ metric }) => [metric, LLMBENCH_FORMAT])),
+    byMetric: BY_METRIC,
+  },
 };
 
 // The squad as opencode names it; each source spells these differently.
@@ -82,11 +88,11 @@ describe("matching", () => {
     expect(lookup("opencode/big-pickle", SI)).toBeNull();
   });
 
-  test("indexModelIds keys llmbenchmark ids by normalized model part", () => {
-    expect(indexModelIds([{ id: "z-ai/glm-5.3" }, { id: "x" }])).toEqual({
-      "glm-5-3": "z-ai/glm-5.3",
-      x: "x",
-    });
+  test("indexModelIds keys llmbenchmark ids by raw id and normalized model part", () => {
+    const idx = indexModelIds([{ id: "z-ai/glm-5.3" }, { id: "x" }]);
+    expect(lookup("zai-coding-plan/glm-5.3", idx)?.entry).toEqual({ id: "z-ai/glm-5.3" });
+    expect(lookup("Z-AI/GLM-5.3", idx)?.entry).toEqual({ id: "z-ai/glm-5.3" });
+    expect(lookup("x", idx)?.entry).toEqual({ id: "x" });
   });
 });
 
@@ -655,6 +661,98 @@ describe("full view knows the billing the summary shows (#53)", () => {
   test("metered API shows the source's list price, labeled as reference", () => {
     const text = formatDetail("anthropic/opus", null, entry, {});
     expect(text).toContain("SuperIndex list price $3/$10 per 1M (reference)");
+  });
+});
+
+describe("distinct llmbenchmark ids that normalize alike stay apart (#54)", () => {
+  const ROWS = [
+    { modelId: "p/m-1", value: 0.5 },
+    { modelId: "p/m.1", value: 0.7, setting: "high" },
+    { modelId: "p/m.1", value: 0.8, setting: "max" },
+  ];
+  const orders = [
+    ["dash first", indexScoreRows(ROWS)],
+    ["dot first", indexScoreRows([...ROWS].reverse())],
+  ];
+  const TB = "tbench_4_0_accuracy";
+  const summary = (idx, ids) =>
+    formatSummary({
+      models: ids.map((id) => ({ id })),
+      data: {
+        scores: {
+          fetchedAtByMetric: { [TB]: 0 },
+          formatByMetric: { [TB]: LLMBENCH_FORMAT },
+          byMetric: { [TB]: idx },
+        },
+      },
+      now: 0,
+    }).split("\n");
+  const line = (lines, id) => lines.find((l) => l.startsWith(`- ${id}:`)) ?? "";
+
+  for (const [name, idx] of orders) {
+    test(`each raw id keeps its own values, every setting of one id stays together (${name})`, () => {
+      expect(lookup("p/m.1", idx)?.entry.id).toBe("p/m.1");
+      expect(
+        lookup("p/m.1", idx)
+          ?.entry.values.map((v) => v.value)
+          .sort(),
+      ).toEqual([0.7, 0.8]);
+      expect(lookup("p/m-1", idx)?.entry.values).toEqual([{ value: 0.5, setting: null }]);
+      expect(lookup("P/M.1", idx)?.entry.id).toBe("p/m.1");
+    });
+
+    test(`a request that only normalizes to both ids pools nothing and names them (${name})`, () => {
+      const hit = lookup("p/m_1", idx)?.entry;
+      expect(hit?.candidates).toEqual(["p/m-1", "p/m.1"]);
+      expect(hit?.values).toEqual([]);
+      const l = line(summary(idx, ["p/m_1"]), "p/m_1");
+      expect(l).toContain("TerminalBench4 ambiguous (p/m-1, p/m.1)");
+      expect(l).not.toMatch(/0\.[578]/);
+    });
+
+    test(`both ids asked together each get their own values (${name})`, () => {
+      const lines = summary(idx, ["p/m-1", "p/m.1"]);
+      expect(line(lines, "p/m-1")).toContain("TerminalBench4 0.5");
+      expect(line(lines, "p/m-1")).not.toContain("0.7");
+      expect(line(lines, "p/m.1")).toContain("0.7 (high)");
+      expect(line(lines, "p/m.1")).toContain("0.8 (max)");
+      expect(line(lines, "p/m.1")).not.toContain("0.5");
+      expect(lines.join("\n")).not.toContain("same benchmarks as");
+    });
+  }
+
+  test("the model-id list keeps them apart too, and the full view names the candidates", () => {
+    const index = indexModelIds([{ id: "p/m.1" }, { id: "p/m-1" }]);
+    const data = { ids: { fetchedAt: 0, format: LLMBENCH_FORMAT, index } };
+    expect(llmbenchIdFor("p/m.1", data)).toEqual({ id: "p/m.1" });
+    expect(llmbenchIdFor("p/m-1", data)).toEqual({ id: "p/m-1" });
+    expect(llmbenchIdFor("p/m_1", data)).toEqual({ candidates: ["p/m-1", "p/m.1"] });
+    const text = formatDetail("p/m_1", null, null, { llmbCandidates: ["p/m-1", "p/m.1"] });
+    expect(text).toContain("ambiguous");
+    expect(text).toContain("p/m-1, p/m.1");
+  });
+
+  test("an old-format id list is not trusted; current score rows still resolve the id", () => {
+    const old = { ids: { fetchedAt: 0, index: { "m-1": "p/m-1" } } };
+    expect(llmbenchIdFor("p/m.1", old)).toBeNull();
+    const withScores = {
+      ...old,
+      scores: { formatByMetric: { [TB]: LLMBENCH_FORMAT }, byMetric: { [TB]: orders[0][1] } },
+    };
+    expect(llmbenchIdFor("p/m.1", withScores)).toEqual({ id: "p/m.1" });
+  });
+
+  test("score rows from an earlier cache format are shown, but flagged", () => {
+    const legacy = indexScoreRows([{ modelId: "p/m-1", value: 0.5 }]);
+    delete legacy["=p/m-1"];
+    const out = formatSummary({
+      models: [{ id: "p/m-1" }],
+      data: { scores: { fetchedAt: 0, byMetric: { [TB]: legacy } } },
+      now: 0,
+    });
+    expect(out).toContain("TerminalBench4 0.5");
+    expect(out).toMatch(/llmbenchmark rows for TerminalBench4 predate exact-id matching/);
+    expect(llmbenchIdFor("p/m-1", { scores: { byMetric: { [TB]: legacy } } })).toBeNull();
   });
 });
 

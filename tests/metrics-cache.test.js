@@ -6,7 +6,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { KEY_METRICS, metricFetchedAt, SUPERINDEX_FORMAT } from "../src/metrics.js";
+import {
+  KEY_METRICS,
+  LLMBENCH_FORMAT,
+  metricFetchedAt,
+  SUPERINDEX_FORMAT,
+} from "../src/metrics.js";
 import {
   fetchDetail,
   LLMBENCH_API,
@@ -142,26 +147,57 @@ test("a failed metric keeps its old age and is retried at the next check", async
   expect(metricFetchedAt(after, "epoch_apex_agents")).toBe(t1);
 });
 
-test("a cache file in the old single-timestamp format is read and aged as before", async () => {
+test("score rows and ids in an earlier format are refetched within the TTL (#54)", async () => {
   const dir = tmp();
   const byMetric = Object.fromEntries(
     KEY_METRICS.map(({ metric }) => [metric, { "m-1": { id: "q/m-1", values: [{ value: 0.1 }] } }]),
   );
   fs.writeFileSync(
     path.join(dir, "metrics.json"),
-    JSON.stringify({ scores: { fetchedAt: 0, byMetric } }),
+    JSON.stringify({
+      scores: { fetchedAt: 0, byMetric },
+      ids: { fetchedAt: 0, index: { "m-1": "q/m-1" } },
+    }),
   );
-  const within = healthy();
-  const r = await refreshMetrics({ fetch: within.fetch, dir, now: TTL_MS - 1 });
-  expect(r.scores).toBe("fresh");
-  expect(within.calls.filter((u) => u.includes("/scores?"))).toHaveLength(0);
+  // The single timestamp still ages the old rows...
+  expect(metricFetchedAt(readMetrics(dir).scores, KEY_METRICS[0].metric)).toBe(0);
+  // ...but rows that may pool distinct ids are due at once.
+  const within = healthy(0.6);
+  const r = await refreshMetrics({ fetch: within.fetch, dir, now: 1 });
+  expect(r.scores).toBe("updated");
+  expect(r.ids).toBe("updated");
+  expect(within.calls.filter((u) => u.includes("/scores?"))).toHaveLength(KEY_METRICS.length);
+  const data = readMetrics(dir);
+  for (const { metric } of KEY_METRICS) {
+    expect(metricFetchedAt(data.scores, metric)).toBe(1);
+    expect(data.scores.formatByMetric[metric]).toBe(LLMBENCH_FORMAT);
+  }
+  expect(data.ids.format).toBe(LLMBENCH_FORMAT);
+  expect(data.ids.index["=q/m-1"]).toEqual({ id: "q/m-1" });
+});
 
-  const at = healthy(0.6);
-  const r2 = await refreshMetrics({ fetch: at.fetch, dir, now: TTL_MS });
-  expect(r2.scores).toBe("updated");
-  expect(at.calls.filter((u) => u.includes("/scores?"))).toHaveLength(KEY_METRICS.length);
+test("an old-format metric whose refetch fails stays old-format and due", async () => {
+  const dir = tmp();
+  const TB = "tbench_4_0_accuracy";
+  fs.writeFileSync(
+    path.join(dir, "metrics.json"),
+    JSON.stringify({
+      scores: {
+        fetchedAt: 0,
+        byMetric: { [TB]: { "m-1": { id: "q/m-1", values: [{ value: 0.1 }] } } },
+      },
+    }),
+  );
+  const partial = stubFetch((url) =>
+    new URL(url).searchParams.get("metric") === TB ? 503 : healthyRoute(url),
+  );
+  await refreshMetrics({ fetch: partial.fetch, dir, now: 1 });
   const scores = readMetrics(dir).scores;
-  for (const { metric } of KEY_METRICS) expect(metricFetchedAt(scores, metric)).toBe(TTL_MS);
+  expect(scores.byMetric[TB]["m-1"].values[0].value).toBe(0.1);
+  expect(scores.formatByMetric?.[TB]).toBeUndefined();
+  const next = healthy();
+  await refreshMetrics({ fetch: next.fetch, dir, now: 2 });
+  expect(next.calls).toEqual([`${LLMBENCH_API}/scores?metric=${TB}`]);
 });
 
 test("the shrink guard counts models, not the provider/model keys beside them", async () => {

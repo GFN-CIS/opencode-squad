@@ -33,6 +33,7 @@ import { formatInventory, hasSquad } from "../../src/inventory.js";
 import {
   formatDetail,
   formatSummary,
+  llmbenchIdFor,
   lookup,
   squadRoles,
   superindexOf,
@@ -431,14 +432,17 @@ export default {
           if (full === true) {
             const parts = await Promise.all(
               wanted.slice(0, MAX_FULL_MODELS).map(async (id) => {
-                const llmbId =
-                  lookup(id, data?.ids?.index)?.entry ??
-                  Object.values(data?.scores?.byMetric ?? {})
-                    .map((idx) => lookup(id, idx)?.entry.id)
-                    .find(Boolean);
-                const detail = llmbId
-                  ? await fetchDetail({ fetch: globalThis.fetch, dir: METRICS_DIR, now, llmbId })
-                  : null;
+                // Several llmbenchmark ids may match: then none is fetched.
+                const llmb = llmbenchIdFor(id, data);
+                const detail =
+                  llmb && "id" in llmb
+                    ? await fetchDetail({
+                        fetch: globalThis.fetch,
+                        dir: METRICS_DIR,
+                        now,
+                        llmbId: llmb.id,
+                      })
+                    : null;
                 return formatDetail(
                   id,
                   detail,
@@ -448,6 +452,7 @@ export default {
                     note: notes?.[id],
                     plans,
                     authTypes,
+                    llmbCandidates: llmb && "candidates" in llmb ? llmb.candidates : undefined,
                   },
                 );
               }),
