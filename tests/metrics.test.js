@@ -175,6 +175,27 @@ describe("formatSummary", () => {
   });
   const line = (id) => out.split("\n").find((l) => l.startsWith(`- ${id}`)) ?? "";
 
+  test("header shows the age of each benchmark when they differ", () => {
+    const hour = 3600_000;
+    const mixed = formatSummary({
+      models: [{ id: "anthropic/claude-sonnet-5-5" }],
+      data: {
+        superindex: DATA.superindex,
+        scores: {
+          byMetric: BY_METRIC,
+          fetchedAtByMetric: Object.fromEntries(
+            KEY_METRICS.map(({ metric }) => [
+              metric,
+              metric === "tbench_4_0_accuracy" ? 0 : 50 * hour,
+            ]),
+          ),
+        },
+      },
+      now: 52 * hour,
+    });
+    expect(mixed).toContain("llmbenchmark.ai: fetched 2h ago (TerminalBench4: 52h ago).");
+  });
+
   test("header states sources, age, attribution and the effort caveat", () => {
     expect(out).toContain("CC-BY-4.0");
     expect(out).toContain("fetched 5h ago");
