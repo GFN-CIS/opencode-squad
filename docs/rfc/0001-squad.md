@@ -26,7 +26,7 @@ Status: draft for review. Target behaviour of the plugin as a whole; integration
 - An expensive primary model does routine work itself: reads, edits, log digging. The cost and its context grow with work a cheaper model could do.
 - Work handed to a cheaper model comes back unchecked; a confident wrong change reaches the user.
 - The host dispatches subagents by agent id, not by model, so choosing a model needs one agent per model and role.
-- The host retries a rate-limited call for as long as the provider asks, days included; a subagent in that state blocks the lead indefinitely.
+- The host retries a retryable provider error up to 10 times and honours an announced wait up to 15 minutes each; a subagent in that state blocks the lead for up to two and a half hours while another model could do the work.
 - An empty subagent result carries no reason; the lead invents one (a provider refusal) and acts on it.
 - Per-turn text in the prompt invalidates the prompt cache for the whole conversation; measured cost was about a third of the spend over two weeks.
 - Earlier versions kept the squad as agent files; the host reaches one file under several ids, and writes, prunes and migrations damaged other agents.
@@ -158,6 +158,7 @@ Session tools and metrics:
 | FR-042 | **THE** `squad_session` tool **SHALL** report, for each session id given, whether its prompt cache is warm or cold with the seconds left or elapsed, where the TTL came from (configured, published, measured or assumed), its context size and whether it is still running; without ids, the current time and the caller's own context size. | GOAL-3 |
 | FR-043 | **IF** a session's last result is empty or cut at the output cap, **THEN THE** `squad_session` report **SHALL** state the cause from the session's numbers and, for a cut, that it is not a provider refusal. | GOAL-3 |
 | FR-044 | **WHEN** `squad_compact` is called with a subagent session id, **THE** plugin **SHALL** compact that session with the host's compaction settings and report its size before and after. | GOAL-6 |
+| FR-047 | **THE** `squad_metrics` tool **SHALL** report, for the provider of each requested model, the rate-limit usage last seen in this process with its age, or that it is unknown when no response from that provider has carried quota headers. | GOAL-3 |
 
 Release:
 
@@ -213,9 +214,9 @@ Plugin options: `{ "rate_limit_guard": { enabled, retry_on_errors, retryable_err
 
 | ID | Assumption / accepted risk | Source |
 | --- | --- | --- |
-| ASM-001 | The lead model follows the bootstrap and `squad-delegate`: a SELF or DELEGATE verdict first, grunt then drill for changes, confirmation before high-risk writes, return to the user after CON-005. | OOS-1 |
+| ASM-001 | The lead model follows the bootstrap and `squad-delegate`: a SELF or DELEGATE verdict first, grunt then drill for changes, confirmation before high-risk writes, return to the user after CON-005. It is not verified by tests or evaluations. | OOS-1 |
 | ASM-002 | The host runs agent transforms in registration order, a plugin's setup-time transform before its own config plugin, and evaluates permission rules last match wins; verified on the CON-001 release. | GOAL-2 |
-| ASM-003 | Anthropic sends its unified rate-limit headers on every successful response; the ChatGPT (Codex) path sends none on the CON-001 release, so it gets no quota note. | GOAL-3 |
+| ASM-003 | Anthropic sends its unified rate-limit headers on every successful response; the ChatGPT (Codex) path sends none on the CON-001 release, so it gets no quota note and FR-047 reports it as unknown. | GOAL-3 |
 | ASM-004 | Accepted risk: a roster lock left by a crashed process blocks patches until the user deletes it; the refusal names the file. | GOAL-5 |
 | ASM-005 | Accepted risk: a user agent identical in every field to a legacy file is indistinguishable from it and is treated as the squad's. | ASC-1 |
 | ASM-006 | Accepted risk: while the plugin re-registers its late transform, a request for a squad agent fails as unknown. | GOAL-2 |
@@ -226,11 +227,8 @@ Plugin options: `{ "rate_limit_guard": { enabled, retry_on_errors, retryable_err
 | ID | Defect |
 | --- | --- |
 | DEF-001 | Unit assertions on prompt and skill prose break on harmless edits and miss the behaviour they claim to protect (GitHub #76). |
-| DEF-002 | No integration test on the real host covers FR-003's rejection of edits, MCP tools and output redirection, FR-007, FR-014, FR-015, FR-017, FR-018, FR-020, FR-023, FR-024, FR-028, FR-030 to FR-035, FR-039 to FR-041, FR-043 or FR-044; unit tests cover most of them. |
+| DEF-002 | No integration test on the real host covers FR-004, FR-006, FR-007, FR-008, FR-009, FR-019 beyond a user-owned id, FR-025, FR-026, FR-034 for cumulative waits, FR-038, FR-039, FR-045, FR-046 or NFR-001, nor FR-003's denial of MCP tools and Code Mode; unit tests cover them. FR-039 is unreachable with the test model, which bypasses HTTP, and FR-007 needs a plugin re-activation the harness cannot trigger. |
 
 ## 6. Open questions
 
-| ID | Question | Blocks | Owner |
-| --- | --- | --- | --- |
-| OQ-001 | Is ASM-001 verified at all, for example by evaluations against real models, or does it stay an assumption? | whether OOS-1 stays a non-goal | maintainer |
-| OQ-002 | Should `squad_metrics` say that quota is unknown for a provider that sends no quota headers? | FR-039 and FR-040 wording | maintainer |
+None open.

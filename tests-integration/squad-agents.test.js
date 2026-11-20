@@ -68,7 +68,7 @@ const toolState = (context, id) =>
 // decide for its agents.
 const GLOBAL_ALLOW = { permissions: [{ action: "*", resource: "*", effect: "allow" }] };
 
-test("the squad is registered from squad.json: dispatch, drill policy, legacy agents, live patch", async () => {
+test("FR-001, FR-003, FR-013, FR-016, FR-021: the squad is registered from squad.json: dispatch, drill policy, legacy agents, live patch", async () => {
   await writeRoster({ grunts: { "p/m": { variant: "high" } }, drills: { "p/m": {} } });
   const revision = storeRevision(storeFile());
   const children = {};
@@ -196,7 +196,7 @@ test("the squad is registered from squad.json: dispatch, drill policy, legacy ag
   expect(children["CHILD-NEW"]).toBeDefined();
 }, 120_000);
 
-test("a hand-authored agent holding a roster id keeps its own prompt, and squad_patch refuses that id", async () => {
+test("FR-010, FR-019: a hand-authored agent holding a roster id keeps its own prompt, and squad_patch refuses that id", async () => {
   await writeRoster({ grunts: { "p/q": {} }, drills: {} });
   const revision = storeRevision(storeFile());
   const children = {};

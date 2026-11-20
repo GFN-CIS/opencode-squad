@@ -96,7 +96,7 @@ Defaults shown; every field is optional.
 }
 ```
 
-OpenCode retries a rate-limited call for as long as the provider asks, days included. For subagents only, the guard stops the retry when one announced wait exceeds `max_wait_seconds`, when retries add up past `max_cumulative_seconds`, or when the subagent shows no activity for `max_silence_seconds`. The lead gets a note with the reset time when known, and a warning that the subagent may already have changed something. Details: `src/rate-limit-guard.js`.
+OpenCode retries a rate-limited call up to 10 times, waiting up to 15 minutes each, while the lead waits on the subagent. For subagents only, the guard stops the retry when one announced wait exceeds `max_wait_seconds`, when retries add up past `max_cumulative_seconds`, or when the subagent shows no activity for `max_silence_seconds`. The lead gets a note with the reset time when known, and a warning that the subagent may already have changed something. Details: `src/rate-limit-guard.js`.
 
 ## How the squad is stored
 

@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   bandOf,
+  createQuotaLog,
   createQuotaReporter,
   formatQuotaClause,
   parseQuotaHeaders,
@@ -250,4 +251,19 @@ test("one continuous rejection is announced once, even as the bands climb", () =
     .filter(Boolean);
   expect(notes).toHaveLength(1);
   expect(notes[0]).toMatch(/5h 50%.*REJECTING/);
+});
+
+test("FR-047: squad_metrics' quota block says unknown for a provider that sent no quota headers", () => {
+  const log = createQuotaLog();
+  const now = 1_000_000;
+  log.record("anthropic", ANTHROPIC_200, now - 5 * 60_000);
+  // A response with no rate-limit headers records nothing.
+  log.record("zai", { "x-log-id": "1" }, now);
+  const block = log.block(["zai", "anthropic", "anthropic"], now);
+  expect(block.split("\n")).toEqual([
+    "Provider quota, last seen in this process:",
+    "- anthropic: 5h 7% (binding), 7d 6% used (as of 5m ago)",
+    "- zai: unknown (no rate-limit headers seen from this provider)",
+  ]);
+  expect(log.block([], now)).toBe("");
 });

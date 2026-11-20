@@ -14,7 +14,7 @@ const isTitleRequest = (request) => (request.tools ?? []).length === 0;
 /** The child session id the subagent tool reported, e.g. in its result. */
 const SESSION_ID = /sessionID[=:]\s*\\?"?(ses_[A-Za-z0-9]+)/;
 
-test("a child resumed by session id after a completed run is interrupted when it hangs, and its orchestrator told once", async () => {
+test("FR-036: a child resumed by session id after a completed run is interrupted when it hangs, and its orchestrator told once", async () => {
   const out = await withHost(
     (h) =>
       Effect.gen(function* () {

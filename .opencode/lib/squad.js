@@ -41,7 +41,7 @@ import {
   superindexOf,
 } from "../../src/metrics.js";
 import { fetchDetail } from "../../src/metrics-cache.js";
-import { createQuotaReporter } from "../../src/quota.js";
+import { createQuotaLog, createQuotaReporter } from "../../src/quota.js";
 import {
   evaluateRetry,
   formatGuardNote,
@@ -127,6 +127,19 @@ const DIRECTORY_GONE =
 
 // squad_metrics({full: true}) returns ~2K tokens per model; cap the bill.
 const MAX_FULL_MODELS = 6;
+
+// Quota snapshots per provider, recorded by the http.response hook and shown
+// by squad_metrics.
+const quotaLog = createQuotaLog();
+
+/**
+ * @param {string[]} ids  provider/model ids asked for
+ * @param {number} now
+ */
+const quotaFor = (ids, now) => {
+  const block = quotaLog.block(ids.map((id) => id.split("/")[0]).filter(Boolean), now);
+  return block ? `\n\n${block}` : "";
+};
 
 // How long the agent list (and the inventory rendered from it) is reused.
 const AGENTS_TTL_MS = 15_000;
@@ -754,6 +767,7 @@ export default {
                 "setting it was measured at; values are 0-1 unless a unit is shown. " +
                 "SuperIndex: superindex.app (CC-BY-4.0).\n\n" +
                 parts.join("\n\n") +
+                quotaFor(wanted.slice(0, MAX_FULL_MODELS), now) +
                 ignored,
               metadata: { title: `metrics (full): ${Math.min(wanted.length, MAX_FULL_MODELS)}` },
             };
@@ -772,7 +786,9 @@ export default {
                 authTypes,
                 data,
                 now,
-              }) + ignored,
+              }) +
+              quotaFor(wanted, now) +
+              ignored,
             metadata: { title: `metrics: ${models.length} model(s)` },
           };
         },
@@ -1028,6 +1044,7 @@ export default {
       } catch {
         return;
       }
+      quotaLog.record(providerID, headers, Date.now());
       void (async () => {
         const info = await getSessionInfo(event.sessionID);
         if (!info) return; // the orchestrator's own calls: nobody to tell

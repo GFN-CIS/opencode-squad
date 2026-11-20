@@ -1,14 +1,12 @@
 // Pure decision logic for the subagent rate-limit guard.
 //
-// opencode's own retry policy (packages/opencode/src/session/retry.ts) retries
-// a rate-limited/overloaded provider call FOREVER, honoring the provider's
-// `retry-after`/`retry-after-ms` header up to ~24.8 days (the int32 setTimeout
-// ceiling), or a 30s-capped exponential backoff when no header is present.
-// There is no config surface for this in opencode core — confirmed by reading
-// the schema and the retry policy itself. For a subagent (dispatched via the
-// `subagent` tool), that means the orchestrator sits blocked for however long the
-// provider says to wait, with no way to know it could just pick a different
-// model instead.
+// OpenCode's own retry policy (2.1.3, @opencode/core model-retry) retries a
+// retryable provider error up to 10 times, with exponential backoff of at
+// least 2 s and at most 10 s, or the provider's announced `retry-after`
+// capped at 15 minutes. There is no config surface for it. For a subagent
+// (dispatched via the `subagent` tool) that is up to two and a half hours in
+// which the orchestrator sits blocked, with no way to know it could just pick
+// a different model instead. Versions before OpenCode 2 waited without a cap.
 //
 // This module decides WHEN to intervene (abort the stuck subagent session)
 // based on two independent rules, mirroring the two scenarios from the
