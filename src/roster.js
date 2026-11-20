@@ -1,5 +1,5 @@
-// The squad roster as data: read the current squad out of the generated agent
-// files, validate an edited roster, and diff the two.
+// The squad roster as data: diff two rosters, and read one entry back out of
+// an agent file that versions before #85 generated (for the one-time import).
 //
 // Why this exists. The generator used to take one declarative list — "here is
 // the roster, prune everything else". Asked to ADD a model, the caller would
@@ -13,16 +13,16 @@
 //
 // Two properties make that safe, and neither is optional:
 //
-//   1. The roster is DERIVED from the agent files on every dump, never stored
-//      alongside them. A stored manifest would be a second source of truth, and
-//      it would desync the first time anyone touched the agent dir by hand.
+//   1. The roster has ONE home, squad.json (src/squad-store.js), which only the
+//      plugin writes. Before #85 it was derived from agent files instead, to
+//      avoid a second source of truth; now there are no agent files at all.
 //
 //   2. Apply refuses to delete. Read-modify-write only protects while the
 //      caller actually modifies; one that regenerates the roster from memory
 //      reintroduces the wipe in a new wrapper. The guard, not the format, is
 //      what makes destruction require intent.
 //
-// SHAPE. One map per role, keyed by model id, mirroring the files on disk:
+// SHAPE. One map per role, keyed by model id:
 //
 //   { "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high" } },
 //     "drills": { "anthropic/claude-opus-5": { "variant": "max" } } }

@@ -1,568 +1,209 @@
-// Filesystem side of the squad roster: read it off disk, write one back.
-// Backs the `squad_dump` / `squad_patch` plugin tools.
+// The squad_patch decision and its report, plus the one-time import of a
+// squad that older versions wrote as agent files.
 //
-// Kept apart from src/roster.js so that module stays pure and directly
-// testable, and apart from the tool definitions so the deletion guard and the
-// report have exactly one implementation.
+// Since #85 the roster lives in squad.json (src/squad-store.js) and its
+// agents are registered through the plugin API (src/squad-agents.js): an
+// apply changes one file the plugin owns and never touches an agent file.
+// What remains here is the part that was never about files: the deletion
+// guard, and a report the orchestrator can act on.
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-import { danglingLinkTarget, writeFileAtomic } from "./fs-atomic.js";
+import { readFrontmatter } from "./frontmatter.js";
 import { opencodeConfigDir } from "./paths.js";
-import { buildRoster, diffRoster, parseAgentFile, ROLE_KEYS } from "./roster.js";
-import { agentMarkdown, isGeneratedAgent } from "./workers.js";
+import { buildRoster, diffRoster, parseAgentFile } from "./roster.js";
+import { isGeneratedAgent } from "./workers.js";
 
 const GENERATED_FILE_RE = /^(grunt|drill|worker)-.*\.md$/;
 
-/** The global agent dir opencode merges; the default target for the squad. */
+/** The global agent dir, where versions before #85 wrote the squad's files. */
 export function defaultAgentDir() {
   return path.join(opencodeConfigDir(process.env, os.homedir()), "agent");
 }
 
 /**
- * Read the squad that currently exists, from the generated agent files
- * themselves — there is deliberately no stored manifest to consult, so there is
- * nothing that can desync from what opencode will actually load.
+ * Read a squad that an earlier version wrote as agent files, for the one-time
+ * import into squad.json. Read-only: the files stay where they are, and the
+ * plugin hides the agents they define once the roster no longer holds them
+ * (src/squad-agents.js lateTransform).
  *
- * Only files carrying our marker count: a hand-authored `grunt-something.md`
- * belongs to somebody else and is neither dumped nor pruned.
- *
- * `filesByAgent` lists EVERY generated file that claims an agent, in directory
- * order: a legacy `worker-` file and its `grunt-` successor, or two ids that
- * slug to near-identical names, all have to go when that agent is removed.
+ * Only files carrying our generator marker count. A file whose model cannot be
+ * read is reported, never silently dropped: an import that lost an agent
+ * would look like a squad the user chose.
  *
  * @param {string} dir
- * @returns {{roster: Record<string, Record<string, any>>, conflicts: string[], filesByAgent: Map<string, string[]>}}
+ * @returns {{roster: Record<string, Record<string, any>>, problems: string[], files: string[],
+ *   agents: Array<{id: string, definition: LegacyDefinition | null}>}}
+ *   agents: each file's agent as the host builds it from that file alone, or
+ *   null for a shape that cannot be reproduced exactly; the plugin compares it
+ *   to the live agent to tell this file from another agent at the id (#88)
  */
-export function readSquad(dir) {
+export function readLegacySquad(dir) {
+  const parsed = [];
+  /** @type {string[]} */
   const files = [];
-  /** @type {Map<string, string[]>} */
-  const filesByAgent = new Map();
+  /** @type {Array<{id: string, definition: LegacyDefinition | null}>} */
+  const agents = [];
+  /** @type {string[]} */
+  const problems = [];
   let names = [];
   try {
     names = fs.readdirSync(dir).sort();
   } catch {
-    // No agent dir yet is an empty squad, not an error — also the first-run path.
-    return { roster: buildRoster([]).roster, conflicts: [], filesByAgent };
+    return { roster: buildRoster([]).roster, problems, files, agents };
   }
-  /** @type {string[]} */
-  const unreadable = [];
   for (const name of names) {
     const m = GENERATED_FILE_RE.exec(name);
     if (!m) continue;
-    const read = readText(path.join(dir, name));
-    if (read.state === "error") {
-      unreadable.push(`${name}: cannot read (${read.code})`);
-      continue;
-    }
-    if (read.state === "missing" || !isGenerated(read.text)) continue;
-    const { modelId, entry } = parseAgentFile(read.text);
-    if (isDamaged(read.text)) {
-      unreadable.push(
-        `${name}: generated file with no readable model (damaged header). It is left as is and blocks the model_data.json refresh: ask the user to repair or delete it`,
-      );
-      continue;
-    }
-    // Legacy `worker-` files predate the grunt/drill split; treat them as the
-    // executor so an old squad still round-trips instead of vanishing.
-    const role = m[1] === "worker" ? "grunt" : m[1];
-    files.push({ role, modelId, entry });
-    const agent = `${role} ${modelId}`;
-    filesByAgent.set(agent, [...(filesByAgent.get(agent) ?? []), name]);
-  }
-  const { roster, conflicts } = buildRoster(files);
-  // squad_dump shows these too, not only the write paths that refuse them.
-  const shared = sharedDestinations(dir, [...filesByAgent.values()].flat()).map((s) => s.line);
-  return { roster, conflicts: [...conflicts, ...unreadable, ...shared], filesByAgent };
-}
-
-/**
- * A missing file and one that cannot be read are different answers: only the
- * first means there is nothing to protect.
- *
- * @param {string} file
- * @returns {{state: "ok", text: string} | {state: "missing"} | {state: "error", code: string}}
- */
-function readText(file) {
-  try {
-    return { state: "ok", text: fs.readFileSync(file, "utf8") };
-  } catch (e) {
-    const err = /** @type {NodeJS.ErrnoException} */ (e);
-    if (err?.code === "ENOENT") return { state: "missing" };
-    return { state: "error", code: err?.code ?? err?.name ?? "error" };
-  }
-}
-
-const isGenerated = isGeneratedAgent;
-
-/** The file a path really lands on: through symlinks, or the path itself when new. @param {string} file */
-function physicalPath(file) {
-  try {
-    return fs.realpathSync(file);
-  } catch {
-    return path.resolve(file);
-  }
-}
-
-/**
- * The directories OpenCode's config-agent loader reads agent Markdown from
- * (OpenCode 2.1.3, config/plugin/agent.ts `legacySources`): `deep` ones
- * recursively, the others top level only. tests/regress-squad-files.test.js
- * compares this with the installed loader, so an OpenCode bump that changes
- * them fails there instead of here.
- */
-export const AGENT_SOURCES = [
-  { name: "agent", deep: true },
-  { name: "agents", deep: true },
-  { name: "mode", deep: false },
-  { name: "modes", deep: false },
-];
-
-/**
- * Every agent file name OpenCode could load next to `dir`. The pinned
- * OpenCode 2.1.3 config-agent loader scans a config dir for
- * every .md below `agent/` and `agents/` (subagents, recursive) and the .md
- * files directly in `mode/` and `modes/` (primary agents, top level only), following links, and names each by its
- * path: a file reached through another root or a linked directory is another
- * agent name for the same file. Names are relative to `dir` (a sibling
- * root's start with `../agents/`, `../mode/`, ...).
- *
- * Linked directories are followed as OpenCode follows them, so every alias
- * path is listed. A link back into a directory already on the current path
- * (a cycle) has no finite listing, and a directory that cannot be read hides
- * what is in it: both go to `unlisted`, which callers treat as "uniqueness
- * unknown". A missing root is no agents, not a gap.
- *
- * @param {string} dir
- * @returns {{names: string[], unlisted: string[]}}
- */
-function listAgentFiles(dir) {
-  /** @type {string[]} */
-  const names = [];
-  /** @type {string[]} */
-  const unlisted = [];
-  // Only when `dir` is one of the sources is its parent a config dir with
-  // siblings to check.
-  const base = path.basename(dir);
-  const roots = AGENT_SOURCES.some((s) => s.name === base)
-    ? AGENT_SOURCES.map((s) => ({ abs: path.join(path.dirname(dir), s.name), deep: s.deep }))
-    : [{ abs: dir, deep: true }];
-  /**
-   * @param {string} abs
-   * @param {Set<string>} ancestors  real paths of the directories above
-   * @param {boolean} isRoot
-   * @param {boolean} deep  descend into subdirectories (agent roots) or not (mode roots)
-   */
-  const walk = (abs, ancestors, isRoot, deep) => {
-    /** @type {fs.Dirent[]} */
-    let entries;
-    let real;
+    let text;
     try {
-      real = fs.realpathSync(abs);
-      entries = fs.readdirSync(abs, { withFileTypes: true });
+      text = fs.readFileSync(path.join(dir, name), "utf8");
     } catch (e) {
       const code = /** @type {NodeJS.ErrnoException} */ (e)?.code;
-      if (isRoot && code === "ENOENT") return;
-      unlisted.push(`${abs} (${code ?? "error"})`);
-      return;
-    }
-    if (ancestors.has(real)) {
-      unlisted.push(`${abs} (links back to a directory above it)`);
-      return;
-    }
-    const below = new Set(ancestors).add(real);
-    for (const ent of entries) {
-      const child = path.join(abs, ent.name);
-      let isDir = ent.isDirectory();
-      if (ent.isSymbolicLink()) {
-        try {
-          isDir = fs.statSync(child).isDirectory();
-        } catch {
-          isDir = false; // dangling: a file name at most
-        }
-      }
-      if (isDir) {
-        if (deep) walk(child, below, false, true);
-      } else if (ent.name.endsWith(".md"))
-        names.push(path.relative(dir, child).split(path.sep).join("/"));
-    }
-  };
-  for (const root of roots) walk(root.abs, new Set(), true, root.deep);
-  return { names, unlisted };
-}
-
-/**
- * Targets that reach one physical file under another agent file's name: two
- * symlinks onto one file, or a link onto a sibling agent. Writing both would
- * leave one agent with the other's configuration while both report success.
- * An ordinary link onto a file no other loadable agent name reaches is fine.
- *
- * @param {string} dir
- * @param {string[]} targets  filenames about to be written
- * @returns {Array<{names: string[], line: string}>}  one per shared destination
- */
-function sharedDestinations(dir, targets) {
-  /** @type {Map<string, Set<string>>} physical path -> agent filenames reaching it */
-  const reach = new Map();
-  /** @param {string} name */
-  const add = (name) => {
-    const real = physicalPath(path.join(dir, name));
-    if (!reach.has(real)) reach.set(real, new Set());
-    reach.get(real)?.add(name);
-  };
-  const { names, unlisted } = listAgentFiles(dir);
-  for (const name of new Set([...names, ...targets])) add(name);
-  const out = [];
-  // A tree we could not list completely proves nothing about uniqueness:
-  // every target is held back, and the gap is named.
-  if (unlisted.length && targets.length) {
-    out.push({
-      names: [...targets].sort(),
-      line:
-        `cannot list ${unlisted.join(", ")}, so whether ${[...targets].sort().join(", ")} ` +
-        "share a file with an agent there is unknown",
-    });
-  }
-  for (const [real, set] of reach) {
-    if (set.size < 2 || !targets.some((t) => set.has(t))) continue;
-    const names = [...set].sort();
-    out.push({
-      names,
-      line: `${names.join(", ")} all lead to ${real}; each agent needs its own file`,
-    });
-  }
-  return out;
-}
-
-/**
- * Ours, but with no model we can read (a truncated or mangled header). One
- * predicate for dump and apply, so the file the dump says it leaves in place is
- * the file apply refuses to replace: it may hold the user's edits.
- *
- * @param {string} text
- */
-const isDamaged = (text) => isGenerated(text) && !parseAgentFile(text).modelId;
-
-/**
- * @typedef {{role: string, id: string, variant?: string, filename: string, unchanged?: boolean}} WrittenAgent
- * @typedef {{ok: true, diff: ReturnType<typeof diffRoster>, written: WrittenAgent[], pruned: string[],
- *   migrated: string[], refreshed: string[], conflicts: string[], dir: string}} ApplyDone
- * @typedef {{ok: false, refusal: "remove" | "collision" | "unreadable" | "damaged" | "dangling", problems: string[],
- *   diff: ReturnType<typeof diffRoster>, written: [], pruned: [], conflicts: string[], dir: string}} ApplyRefused
- */
-
-/**
- * Write a roster to the agent dir.
- *
- * Returns `{ok: false, ...}` rather than throwing when the apply is refused —
- * the refusal is an ordinary outcome the caller reports, not an exception —
- * and every check runs before the first write, so a refused apply leaves the
- * squad exactly as it was. Five refusals:
- *
- *   remove     — the apply would delete agents and `allowRemove` is not set;
- *   collision  — two roster agents map to one filename (`p/model-1` and
- *                `p/model.1` both slug to `grunt-p-model-1.md`), or the target
- *                file exists and is not ours (hand-authored);
- *   unreadable — a target file exists but cannot be read, so whether it is
- *                ours cannot be established;
- *   damaged    — a target file is ours but its header has no readable model
- *                (the one squad_dump reports and leaves as is), so what it
- *                held and any edits to it would be lost;
- *   dangling   — a target path is a symlink whose target is missing (a dotfiles
- *                checkout that is not there): writing would replace the link
- *                with a regular file and detach the path from the repo copy.
- *
- * Another generated file still claiming a kept agent is handled by name. A
- * legacy `worker-` file is migrated: deleted once the agent's `grunt-` file is
- * written, so the agent lives in one file and a later removal removes it
- * completely. Any other one (a hand copy that kept our marker) is a separate
- * agent to OpenCode, so deleting it is a removal like any other: refused
- * without `allowRemove`, pruned with it.
- *
- * On success: a file whose text is already identical is not rewritten (every
- * write makes opencode reload), and a file pruned for a removed agent is never
- * one just written for a kept agent.
- *
- * `describe(role, modelId)` supplies each agent's description (see
- * describeAgent); without it the role's generic line is written.
- *
- * @param {{roster: Record<string, Record<string, any>>, dir: string, allowRemove?: boolean,
- *   describe?: (role: "grunt"|"drill", modelId: string) => string|undefined}} input
- * @returns {ApplyDone | ApplyRefused}
- */
-export function applySquad({ roster, dir, allowRemove = false, describe }) {
-  const { roster: current, conflicts, filesByAgent } = readSquad(dir);
-  const diff = diffRoster(current, roster);
-  /** @param {ApplyRefused["refusal"]} refusal @param {string[]} problems @returns {ApplyRefused} */
-  const refuse = (refusal, problems) => ({
-    ok: false,
-    refusal,
-    problems,
-    diff,
-    written: [],
-    pruned: [],
-    // A shared destination is both a dump note and this refusal: say it once.
-    conflicts: conflicts.filter((c) => !problems.includes(c)),
-    dir,
-  });
-
-  // The bundled prompts are deliberately NOT read here: an agent file carries a
-  // fenced placeholder and the plugin injects the current role prompt at
-  // request time (src/prompt-inject.js), so this writes only frontmatter and
-  // the roster's own `notes`.
-  const plan = [];
-  /** @type {Map<string, string>} filename -> the agent it is planned for */
-  const byFile = new Map();
-  const problems = [];
-  /** @type {string[]} */
-  const unreadable = [];
-  /** @type {string[]} */
-  const damaged = [];
-  /** @type {string[]} */
-  const dangling = [];
-  for (const [key, role] of Object.entries(ROLE_KEYS)) {
-    for (const [modelId, entry] of Object.entries(roster?.[key] ?? {})) {
-      const { filename, content } = agentMarkdown(role, modelId, {
-        ...entry,
-        description: describe?.(role, modelId),
-      });
-      const agent = `${role} ${modelId}`;
-      const other = byFile.get(filename);
-      if (other) {
-        problems.push(`${other} and ${agent} would both be written to ${filename}`);
-        continue;
-      }
-      byFile.set(filename, agent);
-      const read = readText(path.join(dir, filename));
-      const link = read.state === "missing" ? danglingLinkTarget(path.join(dir, filename)) : null;
-      if (link !== null) {
-        dangling.push(
-          `${path.join(dir, filename)}: symlink to ${link}, which does not exist (${agent} targets it)`,
-        );
-        continue;
-      }
-      if (read.state === "error") {
-        unreadable.push(`${path.join(dir, filename)}: ${read.code} (${agent} targets it)`);
-        continue;
-      }
-      const existing = read.state === "ok" ? read.text : null;
-      if (existing !== null && !isGenerated(existing)) {
-        problems.push(
-          `${filename} exists and was not generated by this plugin (${agent} targets it)`,
-        );
-        continue;
-      }
-      if (existing !== null && isDamaged(existing)) {
-        damaged.push(
-          `${path.join(dir, filename)}: damaged header, no readable model (${agent} targets it)`,
-        );
-        continue;
-      }
-      plan.push({ role, modelId, entry, filename, content, existing });
-    }
-  }
-  /** @type {string[]} */
-  const migrate = [];
-  /** @type {Array<{file: string, agent: string}>} */
-  const duplicates = [];
-  for (const [agent, files] of filesByAgent) {
-    if (diff.removed.includes(agent)) continue;
-    for (const f of files) {
-      if (byFile.has(f)) continue;
-      if (f.startsWith("worker-")) migrate.push(f);
-      else duplicates.push({ file: f, agent });
-    }
-  }
-  /** Files of removed agents that no kept agent takes over: pruned below. */
-  const prune = diff.removed.flatMap((agent) =>
-    (filesByAgent.get(agent) ?? []).filter((f) => !byFile.has(f)),
-  );
-
-  // Every path this apply writes, prunes or migrates away. Unlinking a file
-  // that another loadable name also reaches breaks that agent as surely as
-  // overwriting it, and allow_remove covers the roster entry, not the other
-  // agent: so deletions go through the same check as writes, before anything
-  // changes.
-  for (const shared of sharedDestinations(dir, [
-    ...plan.map((p) => p.filename),
-    ...prune,
-    ...duplicates.map((d) => d.file),
-    ...migrate,
-  ]))
-    problems.push(shared.line);
-  if (unreadable.length) return refuse("unreadable", unreadable);
-  if (damaged.length) return refuse("damaged", damaged);
-  if (dangling.length) return refuse("dangling", dangling);
-  if (problems.length) return refuse("collision", problems);
-  if ((diff.removed.length > 0 || duplicates.length > 0) && !allowRemove) {
-    return refuse("remove", [
-      ...diff.removed,
-      ...duplicates.map((d) => `${d.file} (a second file for ${d.agent})`),
-    ]);
-  }
-
-  fs.mkdirSync(dir, { recursive: true });
-
-  /** @type {WrittenAgent[]} */
-  const written = [];
-  // Descriptions follow model_data.json, not the roster, so the roster diff
-  // cannot see them change; report them separately or an `info` edit
-  // re-applied reads as "=14 unchanged" while 14 files changed.
-  const refreshed = [];
-  for (const { role, modelId, entry, filename, content, existing } of plan) {
-    const unchanged = existing === content;
-    if (existing !== null && !unchanged) {
-      const before = descriptionLine(existing);
-      const after = descriptionLine(content);
-      if (before !== after) refreshed.push(`${role} ${modelId}: ${after}`);
-    }
-    if (!unchanged) writeFileAtomic(path.join(dir, filename), content);
-    written.push({
-      role,
-      id: modelId,
-      variant: entry?.variant,
-      filename,
-      ...(unchanged ? { unchanged: true } : {}),
-    });
-  }
-
-  const pruned = [];
-  for (const f of prune) {
-    fs.unlinkSync(path.join(dir, f));
-    pruned.push(f);
-  }
-  for (const { file } of duplicates) {
-    fs.unlinkSync(path.join(dir, file));
-    pruned.push(file);
-  }
-  const migrated = [];
-  for (const f of migrate) {
-    fs.unlinkSync(path.join(dir, f));
-    migrated.push(f);
-  }
-
-  return { ok: true, diff, written, pruned, migrated, refreshed, conflicts, dir };
-}
-
-/**
- * Bring the existing squad's descriptions in line with model_data.json — run at
- * plugin start. opencode reloads agent files on change (an `agent.updated`
- * event, seconds later), so an edited `info` or plan reaches the orchestrator
- * without anyone re-drafting the squad.
- *
- * Re-renders each generated file from its own roster entry, so variant, steps
- * and notes survive; writes only files whose content actually changes, since
- * every write makes opencode reload — and one service process runs this for
- * every project it hosts. Files under a legacy name are left for squad_patch,
- * which migrates them.
- *
- * @param {{dir: string, describe: (role: "grunt"|"drill", modelId: string) => string|undefined}} input
- * @returns {string[]}  filenames rewritten
- */
-export function syncDescriptions({ dir, describe }) {
-  const { roster, filesByAgent } = readSquad(dir);
-  const planned = [];
-  for (const [key, role] of Object.entries(ROLE_KEYS)) {
-    for (const [modelId, entry] of Object.entries(roster[key] ?? {})) {
-      const { filename, content } = agentMarkdown(role, modelId, {
-        ...entry,
-        description: describe(role, modelId),
-      });
-      if (!filesByAgent.get(`${role} ${modelId}`)?.includes(filename)) continue;
-      planned.push({ filename, content });
-    }
-  }
-  // The same destination contract as applySquad: paths that reach one file
-  // are left alone, whoever wrote last would win for both agents.
-  const shared = sharedDestinations(
-    dir,
-    planned.map((p) => p.filename),
-  );
-  const blocked = new Set(shared.flatMap((s) => s.names));
-  for (const s of shared) console.warn(`[squad] description refresh skipped: ${s.line}`);
-  const rewritten = [];
-  for (const { filename, content } of planned) {
-    if (blocked.has(filename)) continue;
-    const file = path.join(dir, filename);
-    let current;
-    try {
-      current = fs.readFileSync(file, "utf8");
-    } catch {
+      if (code !== "ENOENT") problems.push(`${name}: cannot read (${code ?? "error"})`);
       continue;
     }
-    if (current === content) continue;
-    writeFileAtomic(file, content);
-    rewritten.push(filename);
+    if (!isGeneratedAgent(text)) continue;
+    const { modelId, entry } = parseAgentFile(text);
+    if (!modelId) {
+      problems.push(`${name}: generated file with no readable model (damaged header)`);
+      continue;
+    }
+    // Legacy `worker-` files predate the grunt/drill split: the executor.
+    parsed.push({ role: m[1] === "worker" ? "grunt" : m[1], modelId, entry });
+    files.push(name);
+    agents.push({ id: name.replace(/\.md$/, ""), definition: legacyDefinition(text) });
   }
-  return rewritten;
-}
-
-/** The frontmatter `description:` value as written (quoted or not). */
-/** @param {string} text */
-function descriptionLine(text) {
-  return /^description: (.*)$/m.exec(text)?.[1] ?? "";
+  const { roster, conflicts } = buildRoster(parsed);
+  return { roster, problems: [...problems, ...conflicts], files, agents };
 }
 
 /**
- * Human-readable report for an apply — including the variant echo, which is the
- * only place a mistyped reasoning level surfaces at all, since opencode drops an
- * unknown one silently.
+ * @typedef {{fields: Record<string, unknown>, permissions: Array<Record<string, unknown>>}} LegacyDefinition
+ *   fields: the agent fields the file sets, as OpenCode 2.1.3's config-agent
+ *   plugin applies them; permissions: the file's own rules
+ */
+
+/** Frontmatter keys of the last generated format, and nothing else. */
+const LEGACY_KEYS = new Set([
+  "description",
+  "mode",
+  "model",
+  "variant",
+  "steps",
+  "hidden",
+  "permissions",
+]);
+
+/**
+ * What the host builds from a generated file alone, for the format the last
+ * file-writing version produced (and older files using only its keys).
+ * Anything else (a `permission`/`tools` map, a key this does not model, a
+ * disabled agent) cannot be reproduced exactly: null, and the plugin then
+ * never treats the live agent at that id as this file.
  *
- * @param {ApplyDone | ApplyRefused} result
+ * @param {string} text
+ * @returns {LegacyDefinition | null}
+ */
+function legacyDefinition(text) {
+  const fm = readFrontmatter(text);
+  if (fm.state !== "ok") return null;
+  const f = fm.fields;
+  if (Object.keys(f).some((k) => !LEGACY_KEYS.has(k))) return null;
+  if (typeof f.model !== "string" || !f.model.trim()) return null;
+  // `model: p/m#v`, or `variant:` folded into it, as the host's decode does.
+  let ref = f.model.trim();
+  if (!ref.includes("#") && typeof f.variant === "string" && /^[^#]+$/.test(f.variant)) {
+    ref = `${ref}#${f.variant}`;
+  } else if (f.variant !== undefined && !ref.includes("#")) return null;
+  const [path0, variant] = ref.split("#");
+  const slash = path0.indexOf("/");
+  if (slash <= 0) return null;
+  /** @type {Record<string, unknown>} */
+  const fields = {
+    system: fm.body.trim(),
+    model: {
+      id: path0.slice(slash + 1),
+      providerID: path0.slice(0, slash),
+      ...(variant ? { variant } : {}),
+    },
+  };
+  for (const key of ["description", "mode", "hidden", "steps"]) {
+    if (f[key] !== undefined) fields[key] = f[key];
+  }
+  const permissions = f.permissions ?? [];
+  if (!Array.isArray(permissions)) return null;
+  if (
+    permissions.some(
+      (r) =>
+        !r ||
+        typeof r !== "object" ||
+        Object.keys(r).sort().join() !== "action,effect,resource" ||
+        String(r.resource).startsWith("~") ||
+        String(r.resource).startsWith("$HOME"),
+    )
+  ) {
+    return null;
+  }
+  return { fields, permissions: permissions.map((r) => ({ ...r })) };
+}
+
+/**
+ * @typedef {{ok: true, diff: ReturnType<typeof diffRoster>}} PatchOk
+ * @typedef {{ok: false, refusal: "remove" | "foreign", problems: string[], diff: ReturnType<typeof diffRoster>}} PatchRefused
+ */
+
+/**
+ * Decide whether a roster may replace the current one.
+ *
+ * Two refusals, checked before anything is written:
+ *   foreign — the roster asks for an agent id a hand-authored agent already
+ *             holds; the user's agent wins and is not taken over;
+ *   remove  — the apply would delete agents and `allowRemove` is not set.
+ *
+ * @param {{current: Record<string, any>, next: Record<string, any>, allowRemove?: boolean,
+ *   foreign?: Array<{id: string, agent: string}>}} input
+ *   foreign: hand-authored agents holding ids this roster wants
+ * @returns {PatchOk | PatchRefused}
+ */
+export function planPatch({ current, next, allowRemove = false, foreign = [] }) {
+  const diff = diffRoster(current, next);
+  if (foreign.length) {
+    return {
+      ok: false,
+      refusal: "foreign",
+      problems: foreign.map((f) => `${f.agent}: agent id ${f.id} is a hand-authored agent`),
+      diff,
+    };
+  }
+  if (diff.removed.length && !allowRemove) {
+    return { ok: false, refusal: "remove", problems: [...diff.removed], diff };
+  }
+  return { ok: true, diff };
+}
+
+/**
+ * Human-readable report for squad_patch, including the variant echo, which is
+ * the only place a mistyped reasoning level surfaces at all, since OpenCode
+ * drops an unknown one silently.
+ *
+ * @param {PatchOk | PatchRefused} result
+ * @param {{store: string, roster: Record<string, Record<string, any>>, notes?: string[]}} context
  * @returns {string}
  */
-export function formatApplyReport(result) {
-  const lines = [`Agent dir: ${result.dir}`];
-  for (const c of result.conflicts) lines.push(`  note   ${c}`);
+export function formatPatchReport(result, { store, roster, notes = [] }) {
+  const lines = [`Squad roster: ${store}`];
+  for (const n of notes) lines.push(`  note   ${n}`);
 
-  if (!result.ok && result.refusal === "unreadable") {
+  if (!result.ok && result.refusal === "foreign") {
     lines.push(
       "",
-      "REFUSED: an agent file this roster would replace cannot be read, so it is",
-      "unknown whether this plugin wrote it:",
+      "REFUSED: the roster asks for an agent id that a hand-authored agent already holds:",
       ...result.problems.map((p) => `  - ${p}`),
       "",
-      "Nothing was written. The file may be the user's own agent: tell the user and",
-      "let them fix its permissions or move it. Do not retry until they have.",
-    );
-    return lines.join("\n");
-  }
-  if (!result.ok && result.refusal === "damaged") {
-    lines.push(
-      "",
-      "REFUSED: an agent file this roster would replace has a damaged header, so",
-      "what it held, and any edits made to it, cannot be carried over:",
-      ...result.problems.map((p) => `  - ${p}`),
-      "",
-      "Nothing was written. Ask the user to repair or delete the file. Do not retry",
-      "until they have.",
-    );
-    return lines.join("\n");
-  }
-  if (!result.ok && result.refusal === "dangling") {
-    lines.push(
-      "",
-      "REFUSED: an agent file this roster would replace is a symlink whose target",
-      "does not exist, and writing it would replace the link with a regular file:",
-      ...result.problems.map((p) => `  - ${p}`),
-      "",
-      "Nothing was written and the link is left in place. Ask the user to restore",
-      "the link's target (e.g. check out their dotfiles) or remove the link. Do not",
-      "retry until they have.",
-    );
-    return lines.join("\n");
-  }
-  if (!result.ok && result.refusal === "collision") {
-    lines.push(
-      "",
-      "REFUSED: the roster cannot be written without clobbering an agent file:",
-      ...result.problems.map((p) => `  - ${p}`),
-      "",
-      "Nothing was written. Two model ids that differ only in punctuation share a",
-      "filename — keep one of them. A file that is not ours belongs to the user: ask",
-      "before touching it.",
+      "Nothing was written. The existing agent belongs to the user: ask them to rename",
+      "or remove it, or drop that entry from the roster.",
     );
     return lines.join("\n");
   }
@@ -579,43 +220,36 @@ export function formatApplyReport(result) {
     return lines.join("\n");
   }
 
-  for (const w of result.written) {
-    lines.push(
-      `  ${w.unchanged ? "same " : "wrote"}  ${w.filename}   (${w.id}${w.variant ? `, variant: ${w.variant}` : ""})`,
-    );
-  }
-  for (const f of result.pruned) lines.push(`  pruned ${f}`);
-  for (const f of result.migrated) lines.push(`  migrated away from ${f}`);
+  const { diff } = result;
   lines.push(
     "",
-    `+${result.diff.added.length} added, -${result.diff.removed.length} removed, ` +
-      `~${result.diff.changed.length} changed, =${result.diff.unchanged.length} unchanged.`,
-    ...result.diff.added.map((a) => `  + ${a}`),
-    ...result.diff.changed.map((c) => `  ~ ${c}`),
-    ...result.diff.removed.map((r) => `  - ${r}`),
+    `+${diff.added.length} added, -${diff.removed.length} removed, ` +
+      `~${diff.changed.length} changed, =${diff.unchanged.length} unchanged.`,
+    ...diff.added.map((a) => `  + ${a}`),
+    ...diff.changed.map((c) => `  ~ ${c}`),
+    ...diff.removed.map((r) => `  - ${r}`),
   );
-  if (result.refreshed?.length) {
-    lines.push(
-      "",
-      `Descriptions refreshed from model_data.json (${result.refreshed.length}):`,
-      ...result.refreshed.map((r) => `  ~ ${r}`),
-    );
+  const variants = [];
+  for (const [key, role] of [
+    ["grunts", "grunt"],
+    ["drills", "drill"],
+  ]) {
+    for (const [id, entry] of Object.entries(roster[key] ?? {})) {
+      if (entry?.variant) variants.push(`  ${role} ${id} -> ${entry.variant}`);
+    }
   }
-
-  const variants = result.written.filter((w) => w.variant);
-  if (variants.length > 0) {
+  if (variants.length) {
     lines.push(
       "",
-      "Variants written — opencode IGNORES an unrecognized variant without erroring,",
+      "Variants set — opencode IGNORES an unrecognized variant without erroring,",
       "so check each against that model's `reasoning_options` in models.dev:",
-      ...variants.map((w) => `  ${w.role} ${w.id} -> ${w.variant}`),
+      ...variants,
     );
   }
   lines.push(
     "",
-    "OpenCode reloads changed agent files automatically; no restart is needed.",
-    "Role prompt bodies do NOT need this: the plugin refreshes them from the bundled",
-    "prompts/<role>.md on every request.",
+    "The plugin re-registered the squad's agents; the change applies to the next dispatch.",
+    "No agent files are written: the roster above is the whole squad.",
   );
   return lines.join("\n");
 }

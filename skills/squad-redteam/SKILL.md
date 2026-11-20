@@ -41,7 +41,7 @@ step 3's `subagent` calls are sent:
   fall back to "whatever seems to be the current task" — a wrong guess here
   means every panel member reviews the wrong thing.
 - The only tools you may use before dispatch are the discovery commands in
-  step 1 (listing agent files, the `squad_metrics` tool) and the
+  step 1 (`squad_dump`, the `squad_metrics` tool) and the
   multi-select question tool.
 
 And every dispatched grunt gets told, verbatim, in its task brief (step 3):
@@ -62,11 +62,9 @@ first.
 
 1. **Discover the grunts yourself — don't rely on the bootstrap inventory
    having arrived this turn.** Read the source of truth directly:
-   ```bash
-   ls ~/.config/opencode/agent/grunt-*.md .opencode/agent/grunt-*.md 2>/dev/null
-   ```
-   Each file's frontmatter has a `model:` line (`provider/model`). Group the
-   grunts by the provider segment of the filename (`grunt-<provider>-...`).
+   call `squad_dump`. Its `grunts` map is keyed by model id
+   (`provider/model`); the agent id is `grunt-<provider>-<model>`. Group the
+   grunts by provider.
 2. Within each provider group, rank by capability. Use the `squad_metrics`
    result already in your history, or call it once with the grunts' models if
    it is not: the

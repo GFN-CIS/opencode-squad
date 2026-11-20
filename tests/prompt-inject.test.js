@@ -9,8 +9,7 @@ import {
   promptOpen,
   wrapPrompt,
 } from "../src/prompt-inject.js";
-import { parseAgentFile } from "../src/roster.js";
-import { agentMarkdown } from "../src/workers.js";
+import { agentSpecs } from "../src/squad-agents.js";
 
 const sys = (text) => [text];
 
@@ -123,49 +122,29 @@ describe("createPromptLoader", () => {
   });
 });
 
-describe("generated agent files carry the fence", () => {
-  it("fences a placeholder — never a copy of the role prompt — with notes outside it", () => {
-    const { content } = agentMarkdown("grunt", "anthropic/claude-opus-5", {
-      notes: "this model over-scaffolds",
-    });
-    const fence = findPromptFence(content);
+describe("registered squad agents carry the fence", () => {
+  const io = { describe: () => "d", prompt: () => "BUNDLED BODY" };
+
+  it("fences the role prompt, with notes outside it", () => {
+    const [spec] = agentSpecs({ grunts: { "a/b": { notes: "this model over-scaffolds" } } }, io);
+    const fence = findPromptFence(spec.system);
     expect(fence.role).toBe("grunt");
-    expect(content.slice(fence.start, fence.end)).toBe(
-      wrapPrompt("grunt", placeholderBody("grunt")),
-    );
-    expect(content.indexOf("<!-- squad:notes -->")).toBeGreaterThan(fence.end);
+    expect(spec.system.slice(fence.start, fence.end)).toBe(wrapPrompt("grunt", "BUNDLED BODY"));
+    expect(spec.system.indexOf("<!-- squad:notes -->")).toBeGreaterThan(fence.end);
   });
 
-  it("the placeholder tells an unhelped agent to stop rather than improvise", () => {
-    const { content } = agentMarkdown("grunt", "a/b");
-    expect(content).toContain("squad prompt missing");
-    expect(content).toContain("Do not");
+  it("an unreadable prompt registers the placeholder, which tells the agent to stop", () => {
+    const [spec] = agentSpecs({ grunts: { "a/b": {} } }, { ...io, prompt: () => null });
+    expect(spec.system).toContain(placeholderBody("grunt"));
+    expect(spec.system).toContain("squad prompt missing");
   });
 
-  it("round-trips through parseAgentFile with notes and model intact", () => {
-    const { content } = agentMarkdown("grunt", "anthropic/claude-opus-5", {
-      variant: "high",
-      notes: "this model over-scaffolds",
-    });
-    const { modelId, entry } = parseAgentFile(content);
-    expect(modelId).toBe("anthropic/claude-opus-5");
-    expect(entry).toEqual({
-      variant: "high",
-      notes: "this model over-scaffolds",
-    });
-    // Regenerating from what was read back must reproduce the same file — the
-    // fence sits before the notes markers, which is exactly where a parser
-    // reading by index could start eating them.
-    const again = agentMarkdown("grunt", modelId, entry);
-    expect(again.content).toBe(content);
-  });
-
-  it("the placeholder is replaced by the real prompt, notes intact", () => {
-    const { content } = agentMarkdown("drill", "zai-coding-plan/glm-5.3", { notes: "keep me" });
-    const system = sys(content);
-    applySystemPromptTransform(system, () => "REAL ROLE BODY");
-    expect(system[0]).toContain("REAL ROLE BODY");
-    expect(system[0]).not.toContain("squad prompt missing");
+  it("the per-request splice replaces the registered body with the current one, notes intact", () => {
+    const [spec] = agentSpecs({ drills: { "z/glm": { notes: "keep me" } } }, io);
+    const system = sys(spec.system);
+    applySystemPromptTransform(system, () => "EDITED ROLE BODY");
+    expect(system[0]).toContain("EDITED ROLE BODY");
+    expect(system[0]).not.toContain("BUNDLED BODY");
     expect(system[0]).toContain("keep me");
     expect(system[0]).toContain(PROMPT_CLOSE);
   });

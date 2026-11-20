@@ -27,6 +27,8 @@
  * hooks and tools.
  */
 
+import path from "node:path";
+
 import { formatCompactReport } from "../../src/compact.js";
 import { estimateContextTokens, indexModelCatalog } from "../../src/context.js";
 import { formatInventory, hasSquad } from "../../src/inventory.js";
@@ -57,11 +59,30 @@ import {
   sessionFacts,
 } from "../../src/session-status.js";
 import {
-  applySquad,
+  agentSpecs,
+  deniedTools,
+  earlyTransform,
+  endsWithRoleRules,
+  isLegacyFile,
+  lateTransform,
+  newProbeId,
+  rosterCollisions,
+} from "../../src/squad-agents.js";
+import {
   defaultAgentDir,
-  formatApplyReport,
-  readSquad,
+  formatPatchReport,
+  planPatch,
+  readLegacySquad,
 } from "../../src/squad-apply.js";
+import {
+  defaultStoreFile,
+  LOCK_OLD_MS,
+  NO_STORE_REVISION,
+  readStore,
+  storeRevision,
+  withStoreLock,
+  writeStore,
+} from "../../src/squad-store.js";
 import {
   formatVariantLines,
   isSubagentCaller,
@@ -83,10 +104,11 @@ import {
   SQUAD_SESSION_INPUT,
 } from "../../src/v2/schemas.js";
 import { loadSkills } from "../../src/v2/skills.js";
+import { roleRules, slugForModel, squadRoleOf } from "../../src/workers.js";
 import {
-  describerScope,
   ensureGlobalModelDataFresh,
   getMetrics,
+  importLegacySquad,
   loadAuthTypes,
   loadModelSettings,
   loadRolePrompt,
@@ -95,8 +117,13 @@ import {
   SKILLS_DIR,
   squadDescriber,
   startMetricsRefresh,
-  syncGlobalSquadDescriptions,
 } from "./runtime.js";
+
+// `directory` scoped the squad to a project's agent files before #85.
+const DIRECTORY_GONE =
+  "Refused: `directory` is no longer supported. The squad is one roster (squad.json in the " +
+  "OpenCode config dir) registered by the plugin, not agent files in a directory. Call " +
+  "again without it.";
 
 // squad_metrics({full: true}) returns ~2K tokens per model; cap the bill.
 const MAX_FULL_MODELS = 6;
@@ -127,10 +154,10 @@ export default {
   id: "squad",
   /** @param {PluginContext} ctx */
   async setup(ctx) {
+    // A squad older versions wrote as agent files becomes squad.json first,
+    // so the model_data.json regen below already sees its models.
+    const legacyImport = importLegacySquad();
     ensureGlobalModelDataFresh();
-    // After the regen, which may rewrite model_data.json. opencode reloads
-    // the rewritten agent files on its own (agent.updated).
-    syncGlobalSquadDescriptions();
     startMetricsRefresh();
 
     // { package: "opencode-squad", options: { rate_limit_guard } }.
@@ -139,7 +166,7 @@ export default {
 
     // --- lazy, process-lifetime lookups ---
 
-    // opencode reloads agent files live, so the list is re-read after a short
+    // The agent list changes at runtime (squad_patch, another process), so it is re-read after a short
     // TTL rather than held for the process lifetime: the startup description
     // sync and squad_patch both land seconds AFTER a first turn may have
     // asked, and the desktop service runs for hours.
@@ -206,6 +233,235 @@ export default {
     /** @param {string} sessionID */
     const readContext = async (sessionID) => unwrap(await ctx.session.context({ sessionID })) ?? [];
 
+    // --- squad agents (#85) ---
+    //
+    // Registered from squad.json, never written as files. See
+    // src/squad-agents.js for why there are two transforms.
+
+    const storeFile = defaultStoreFile();
+    // What the agents were last built from: squad.json's content revision.
+    // Size and mtime can match for different contents (#92).
+    let storeSig = storeRevision(storeFile);
+    /** From the late transform: hand-authored holders of roster ids, legacy agents hidden, stray ones left. */
+    let lateReport = {
+      globals: /** @type {Array<{action: string, resource: string, effect: string}>} */ ([]),
+      built: /** @type {string[]} */ ([]),
+      foreign: /** @type {string[]} */ ([]),
+      hidden: /** @type {string[]} */ ([]),
+      stray: /** @type {string[]} */ ([]),
+      kept: /** @type {string[]} */ ([]),
+    };
+    // The agents earlier versions generated as files in the global agent dir,
+    // verified by their marker once, at start: the only way to know a
+    // pre-fence file or a worker-* is ours (src/squad-agents.js lateTransform).
+    const legacyAgents = new Map(readLegacySquad(defaultAgentDir()).agents.map((a) => [a.id, a]));
+    /**
+     * The roster as it stands. Without squad.json yet (its import was blocked),
+     * the squad still exists as files: that is the roster an apply diffs
+     * against, so rebuilding from an empty dump cannot delete it unguarded.
+     *
+     * @returns {{state: "ok", roster: any, revision: string} | {state: "invalid", problems: string[]}}
+     *   revision: of the bytes the roster was read from; NO_STORE_REVISION
+     *   while there is no squad.json
+     */
+    const currentSquad = () => {
+      const store = readStore(storeFile);
+      if (store.state === "ok")
+        return { state: "ok", roster: store.roster, revision: store.revision };
+      if (store.state === "invalid") {
+        return { state: "invalid", problems: [`${storeFile}: ${store.reason}`] };
+      }
+      const legacy = readLegacySquad(defaultAgentDir());
+      if (legacy.problems.length) {
+        return {
+          state: "invalid",
+          problems: legacy.problems.map((p) => path.join(defaultAgentDir(), p)),
+        };
+      }
+      return { state: "ok", roster: legacy.roster, revision: NO_STORE_REVISION };
+    };
+    // The owner's rules for descriptions, with the last good read kept (#91).
+    const readDescriptions = squadDescriber();
+    const specsNow = () => {
+      const store = readStore(storeFile);
+      if (store.state !== "ok") return null;
+      return agentSpecs(store.roster, {
+        describe: readDescriptions().describe,
+        prompt: (role) => {
+          try {
+            return loadRolePrompt(role);
+          } catch {
+            return null;
+          }
+        },
+      });
+    };
+    // This instance's probe: its own id, and what the early transform saw.
+    const probe = {
+      id: newProbeId(),
+      seen: /** @type {{defaults?: Record<string, unknown>}} */ ({}),
+    };
+    await ctx.agent.transform((editor) => {
+      try {
+        earlyTransform(editor, probe.id, probe.seen);
+      } catch {
+        // The late transform then finds no probe and adds no global rules.
+      }
+    });
+    /** What squad_dump and squad_patch say about the squad beyond its roster. */
+    const squadNotes = () => {
+      const notes = [];
+      for (const id of lateReport.foreign) {
+        notes.push(
+          `${id}: a hand-authored agent holds this id, so the squad's entry is not registered`,
+        );
+      }
+      for (const id of lateReport.kept) {
+        notes.push(
+          `${id}: an agent file from an earlier version has this id, but the agent OpenCode ` +
+            "loaded here is not exactly that file (another agent, a project's own perhaps, or a " +
+            "file in a format this version cannot verify), so it is left as is. If it is the " +
+            "old squad file, the user may delete it",
+        );
+      }
+      const store = readStore(storeFile);
+      if (store.state === "ok") {
+        for (const c of rosterCollisions(store.roster)) {
+          notes.push(
+            `${c.entries.join(" and ")} map to the same agent id ${c.id}, so neither is ` +
+              "registered; keep one of them",
+          );
+        }
+      }
+      for (const id of lateReport.stray) {
+        notes.push(
+          `${id}: looks generated but is not in the global agent dir, so it is left as is; ` +
+            "if it is an old squad file of a project, the user may delete it",
+        );
+      }
+      const described = readDescriptions();
+      if (described.problems.length) {
+        notes.push(
+          `model_data.json cannot be read (${described.problems.join("; ")}): ` +
+            (described.stale
+              ? "agent descriptions keep the owner rules read earlier in this session"
+              : "agent descriptions carry no owner rules and say so") +
+            ". Ask the user to fix the file.",
+        );
+      }
+      for (const p of legacyImport.problems) {
+        notes.push(`legacy squad files were not imported: ${p}. Fix or delete it, then restart`);
+      }
+      const legacy = readLegacySquad(defaultAgentDir()).files;
+      if (legacy.length) {
+        notes.push(
+          `${legacy.length} agent file(s) from an earlier version remain in ${defaultAgentDir()} ` +
+            `(${legacy.join(", ")}). squad.json supersedes them and the plugin ignores them; ` +
+            "the user may delete them.",
+        );
+      }
+      return notes;
+    };
+
+    /** @param {any} editor */
+    const runLate = (editor) => {
+      try {
+        // An unreadable squad.json registers nothing and hides nothing:
+        // legacy agent files, if any, keep working until it is fixed.
+        const specs = specsNow();
+        if (specs) lateReport = lateTransform(editor, specs, legacyAgents, probe);
+        else {
+          editor.remove(probe.id);
+          lateReport = { ...lateReport, built: [] };
+        }
+      } catch {
+        // A broken roster must not take the host's agent list down with it.
+      }
+    };
+    /** The late transform's registration; re-registering moves it to the end. */
+    let late = /** @type {{dispose?: () => Promise<unknown>} | null} */ (null);
+    /** tool name -> the permission action it is checked under (`write` -> `edit`) */
+    const toolActions = new Map();
+    let toolsRecorded = false;
+    /** @param {any} editor */
+    const recordTools = (editor) => {
+      if (typeof editor?.list !== "function") return;
+      toolActions.clear();
+      for (const tool of editor.list()) {
+        if (tool?.name) toolActions.set(tool.name, tool.options?.permission ?? tool.name);
+      }
+    };
+    /**
+     * Live agents the late transform built, and their roles: nothing else is
+     * policed, not a user's agent, a stray fenced file or a legacy agent left
+     * live while squad.json is unreadable.
+     */
+    const liveSquad = async () => {
+      const agents = unwrap(await ctx.agent.list().catch(() => null)) ?? [];
+      return (Array.isArray(agents) ? agents : []).flatMap((a) => {
+        const role = squadRoleOf(a?.id);
+        return role && lateReport.built.includes(a.id) ? [{ agent: a, role }] : [];
+      });
+    };
+    let syncing = Promise.resolve();
+    /**
+     * Make sure the late transform is registered after the config plugin's
+     * and the agents match squad.json. Serialised: hooks of parallel sessions
+     * call it at once.
+     *
+     * @param {{force?: boolean, reposition?: boolean}} [opts]
+     *   force: reload even if squad.json looks unchanged;
+     *   reposition: register the late transform again, at the end
+     */
+    const syncSquadAgents = ({ force = false, reposition = false } = {}) => {
+      const run = syncing.then(async () => {
+        if (!late || reposition) {
+          // Old one out first: two of them would see each other's agents.
+          const previous = late;
+          late = null;
+          await previous?.dispose?.();
+          late = await ctx.agent.transform(runLate);
+          force = true;
+        }
+        if (!toolsRecorded) {
+          toolsRecorded = true;
+          await ctx.tool.transform(recordTools);
+        }
+        const sig = storeRevision(storeFile);
+        if (!force && sig === storeSig) return;
+        storeSig = sig;
+        await ctx.agent.reload();
+        agentsPromise = undefined;
+      });
+      syncing = run.catch(() => {});
+      return run;
+    };
+    /**
+     * A squad agent's request offers only the tools its rules leave usable.
+     * The host builds a request's tool catalog before this hook runs, from the
+     * agent as it was then; if the role's rules were not last (the late
+     * transform moved behind the config plugin's), it is put back and the
+     * catalog cut to what the role allows (#87).
+     *
+     * @param {{agent?: string, tools?: Record<string, unknown>}} event
+     */
+    const enforceRoleTools = async (event) => {
+      const role = squadRoleOf(event.agent);
+      if (!role || !event.tools) return;
+      let live = (await liveSquad()).find((s) => s.agent.id === event.agent);
+      if (!live) return;
+      if (!endsWithRoleRules(live.agent, role)) {
+        await syncSquadAgents({ reposition: true });
+        live = (await liveSquad()).find((s) => s.agent.id === event.agent) ?? live;
+      }
+      const names = Object.keys(event.tools);
+      const drop = new Set([
+        ...deniedTools(names, live.agent.permissions ?? [], toolActions),
+        ...deniedTools(names, roleRules(role), toolActions),
+      ]);
+      for (const name of drop) delete event.tools[name];
+    };
+
     // --- skills ---
 
     const skills = loadSkills([SKILLS_DIR]);
@@ -220,7 +476,31 @@ export default {
 
     // --- per-request transforms ---
 
+    // Before the host selects the agent for a prompted turn (a subagent's
+    // child session included): squad agents exist from the late transform
+    // only, so it must be in place before the first request is built (#87).
+    await ctx.session.hook("prompt", async () => {
+      try {
+        await syncSquadAgents();
+      } catch {
+        // The squad stays as last registered.
+      }
+    });
+
     await ctx.session.hook("context", async (event) => {
+      try {
+        // Before the bootstrap: its inventory lists the squad. Also picks up
+        // a squad.json another OpenCode process changed, and covers a turn
+        // that resumed without a prompt.
+        await syncSquadAgents();
+      } catch {
+        // The squad stays as last registered.
+      }
+      try {
+        await enforceRoleTools(event);
+      } catch {
+        // The host's runtime check still applies the agent's rules.
+      }
       try {
         applySystemPartsTransform(event.system, loadRolePrompt);
       } catch {
@@ -374,21 +654,31 @@ export default {
         input: SQUAD_DUMP_INPUT,
         execute: async (input) => {
           const { directory: asked } = /** @type {{directory?: unknown}} */ (input ?? {});
-          const dir = typeof asked === "string" && asked ? asked : defaultAgentDir();
-          const { roster, conflicts: readConflicts } = readSquad(dir);
-          const conflicts = readConflicts;
-          const count =
-            Object.keys(roster.grunts ?? {}).length + Object.keys(roster.drills ?? {}).length;
-          const note = conflicts.length
-            ? `\n\nnotes:\n${conflicts.map((c) => `  ${c}`).join("\n")}`
-            : "";
+          if (asked !== undefined) return { content: DIRECTORY_GONE };
+          const squad = currentSquad();
+          if (squad.state === "invalid") {
+            return {
+              content:
+                "The squad cannot be read, so it is NOT empty: it is unknown. Nothing new is " +
+                "registered and squad_patch refuses until the user fixes:\n" +
+                squad.problems.map((p) => `  - ${p}`).join("\n") +
+                "\nAsk the user to repair or restore these. Do not build a roster from scratch.",
+            };
+          }
+          const roster = squad.roster;
+          const { revision } = squad;
+          const count = Object.keys(roster.grunts).length + Object.keys(roster.drills).length;
+          const notes = squadNotes();
+          const note = notes.length ? `\n\nnotes:\n${notes.map((c) => `  ${c}`).join("\n")}` : "";
           const variantLines = formatVariantLines(await getVariantMap(), roster);
           return {
             content:
-              `Agent dir: ${dir}\n${JSON.stringify(roster, null, 2)}${note}${variantLines}\n\n` +
+              `Squad roster: ${storeFile}\n${JSON.stringify({ revision, ...roster }, null, 2)}` +
+              `${note}${variantLines}\n\n` +
               "To change the squad, pass this same document back to squad_patch with your " +
-              "edits applied — keeping every agent you were not asked to touch.",
-            metadata: { title: `squad: ${count} agent(s)`, dir, agents: count },
+              "edits applied — its revision included, and every agent you were not asked to " +
+              "touch kept.",
+            metadata: { title: `squad: ${count} agent(s)`, store: storeFile, agents: count },
           };
         },
       });
@@ -504,7 +794,7 @@ export default {
           // Untyped until validated: Code Mode can send anything.
           const raw = /** @type {Record<string, unknown>} */ (input ?? {});
           const { allow_remove: allowRemove, directory: asked, ...doc } = raw;
-          const dir = typeof asked === "string" && asked ? asked : defaultAgentDir();
+          if (asked !== undefined) return { content: DIRECTORY_GONE };
           // Code Mode does not enforce the schema's additionalProperties, and
           // a roster wrapped as {roster: {...}} used to read as "no agents" —
           // a 14-agent deletion the guard caught twice in one afternoon.
@@ -517,41 +807,131 @@ export default {
                 ". Nothing was written.",
             };
           }
+          // Without the base it was built on, a patch cannot tell an edit from
+          // a revert of someone else's change (#89).
+          if (typeof raw.revision !== "string") {
+            return {
+              content:
+                "Refused: pass the `revision` from squad_dump along with the roster you edited " +
+                "from it. Nothing was written. Call squad_dump, apply your edit to what it " +
+                "prints, and send that document back whole.",
+            };
+          }
           const errors = validatePatchInput(raw);
           if (errors.length) {
             return { content: `Roster is invalid:\n${errors.map((e) => `  - ${e}`).join("\n")}` };
           }
           const valid = /** @type {SquadPatchInput} */ (raw);
           const roster = { grunts: valid.grunts ?? {}, drills: valid.drills ?? {} };
+          // Two model ids with one agent id would leave one entry unregistered
+          // while the report counts both (#90).
+          const collisions = rosterCollisions(roster);
+          if (collisions.length) {
+            return {
+              content: `Roster is invalid:\n${collisions
+                .map(
+                  (c) =>
+                    `  - ${c.entries.join(" and ")} map to the same agent id ${c.id}; keep one of them`,
+                )
+                .join("\n")}`,
+            };
+          }
           const variantErrors = validateVariants(roster, await getVariantMap());
           if (variantErrors.length) {
             return {
               content: `Roster is invalid:\n${variantErrors.map((e) => `  - ${e}`).join("\n")}`,
             };
           }
-          // Descriptions carry the owner's routing rules from model_data.json;
-          // writing from an unreadable file would strip them from every agent.
-          const problems = loadModelSettings(describerScope(dir, directory)).problems;
-          if (problems.length) {
+          // An unreadable model_data.json does not block the roster: the
+          // descriptions keep the owner's rules last read, or say they are
+          // unknown, and the report's notes name the file (#91).
+          // Every await happens above this line. From here to the write the
+          // handler is synchronous, so no other patch of this process runs in
+          // between, and the lock keeps other OpenCode processes out (#89).
+          const agents = unwrap(await ctx.agent.list().catch(() => null)) ?? [];
+          const byId = new Map(
+            (Array.isArray(agents) ? agents : []).map((a) => [String(a?.id ?? ""), a]),
+          );
+          const locked = withStoreLock(storeFile, () => {
+            const squad = currentSquad();
+            if (squad.state === "invalid") {
+              return {
+                refused:
+                  "Refused: the current squad cannot be read, and writing a roster now could " +
+                  "lose it. Nothing was written. Ask the user to fix:\n" +
+                  squad.problems.map((p) => `  - ${p}`).join("\n"),
+              };
+            }
+            const now = squad.revision;
+            if (now !== valid.revision) {
+              return {
+                refused:
+                  "REFUSED: squad.json changed since that squad_dump (revision " +
+                  `${valid.revision}, now ${now}): another session or OpenCode process ` +
+                  "patched it. Nothing was written. Call squad_dump again, apply your edit to " +
+                  "what it prints now, and patch with its revision.",
+              };
+            }
+            const current = squad.roster;
+            // A hand-authored agent already holding an id this roster wants.
+            const foreign = [];
+            for (const [key, role] of /** @type {const} */ ([
+              ["grunts", "grunt"],
+              ["drills", "drill"],
+            ])) {
+              for (const [modelId, entry] of Object.entries(roster[key])) {
+                // An entry kept as it was is not a new claim on the id: a user
+                // agent that took it over later is reported, not a reason to
+                // refuse every future patch.
+                const before = current[key]?.[modelId];
+                if (before && JSON.stringify(before) === JSON.stringify(entry)) continue;
+                const id = slugForModel(modelId, role);
+                const agent = byId.get(id);
+                // Ours only if the late transform built it or it is our own
+                // legacy file: the same test the registration applies.
+                if (
+                  agent &&
+                  !lateReport.built.includes(id) &&
+                  !isLegacyFile(agent, legacyAgents.get(id), {
+                    defaults: probe.seen.defaults,
+                    globals: lateReport.globals,
+                  })
+                ) {
+                  foreign.push({ id, agent: `${role} ${modelId}` });
+                }
+              }
+            }
+            const result = planPatch({
+              current,
+              next: roster,
+              allowRemove: allowRemove === true,
+              foreign,
+            });
+            if (result.ok) writeStore(storeFile, roster);
+            return { result };
+          });
+          if (locked.busy) {
+            const holder = locked.holder;
+            const old =
+              holder && holder.ageMs > LOCK_OLD_MS
+                ? ` ${storeFile}.lock has been held for ${Math.round(holder.ageMs / 1000)} s` +
+                  (holder.pid
+                    ? ` by process ${holder.pid}${holder.host ? ` on ${holder.host}` : ""}`
+                    : "") +
+                  ": if no OpenCode process is changing the squad, it was left by one that " +
+                  "crashed, and it is safe to delete. Tell the user; do not delete it yourself."
+                : "";
             return {
               content:
-                "Refused: model_data.json cannot be read, and agent descriptions are built " +
-                "from it — writing now would drop the owner's routing rules. Nothing was " +
-                `written. Ask the user to fix:\n${problems.map((p) => `  - ${p}`).join("\n")}`,
+                "Refused: another OpenCode process is writing squad.json right now. Nothing " +
+                `was written. Call squad_dump again and retry with its revision.${old}`,
             };
           }
-          const result = applySquad({
-            roster,
-            dir,
-            allowRemove: allowRemove === true,
-            describe: squadDescriber(dir, directory),
-          });
-          if (result.ok) {
-            // The inventory lists the squad; let the next turn see the change.
-            agentsPromise = undefined;
-          }
+          if ("refused" in locked.value) return { content: locked.value.refused };
+          const { result } = locked.value;
+          if (result.ok) await syncSquadAgents({ force: true });
           return {
-            content: formatApplyReport(result),
+            content: formatPatchReport(result, { store: storeFile, roster, notes: squadNotes() }),
             metadata: { ok: result.ok, ...result.diff },
           };
         },
@@ -776,10 +1156,24 @@ export default {
       stopSilenceWatch(sessionID);
     };
 
+    // After the host (re)activates plugins: the late transform registered at
+    // once, so squad agents exist before the first request, and moved back
+    // to the end if the config plugin's transform was re-registered after it.
+    const onPluginsUpdated = async () => {
+      const reposition =
+        late !== null && (await liveSquad()).some((s) => !endsWithRoleRules(s.agent, s.role));
+      await syncSquadAgents({ reposition });
+    };
+
     const events = new AbortController();
-    if (guardConfig.enabled) {
+    if (typeof ctx.event?.subscribe === "function") {
       void (async () => {
         for await (const event of ctx.event.subscribe({ signal: events.signal })) {
+          if (event?.type === "plugin.updated") {
+            void onPluginsUpdated().catch(() => {});
+            continue;
+          }
+          if (!guardConfig.enabled) continue;
           const data = /** @type {Record<string, unknown> | undefined} */ (event?.data);
           const sessionID = data?.sessionID;
           if (typeof sessionID !== "string") continue;

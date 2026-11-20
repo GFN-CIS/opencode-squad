@@ -11,17 +11,22 @@ let sarge choose a model — for execution OR review — is a named agent per mo
 a `grunt-<provider>-<model>` (executor) and a `drill-<provider>-<model>`
 (read-only reviewer with allowlisted git/gh/glab inspection and web access).
 
-Requires OpenCode 2. Generated files use native `permissions:`, `model: provider/model#variant`
-and `disabled: true`. Existing legacy agent files are read and migrated on re-apply.
+Requires OpenCode 2. The roster is saved to `squad.json` in the OpenCode config dir and the
+plugin registers the agents itself; no agent file is written. A squad that an older
+version wrote as agent files is imported once, at the first start.
 
 The squad is edited through two tools, `squad_dump` and `squad_patch`. The
 roster they speak is one map per role, keyed by model id:
 
 ```json
-{ "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high" },
+{ "revision": "3f9c0a1b2c4d5e6f",
+  "grunts": { "zai-coding-plan/glm-5.3": { "variant": "high" },
               "openai/gpt-5.6-luna": {} },
   "drills": { "anthropic/claude-opus-5": { "variant": "max" } } }
 ```
+
+`revision` identifies the roster you were shown; keep it when you send the
+document back.
 
 An agent exists if it appears in a role map, and `{}` is a valid entry meaning
 "this model, role defaults". Per-agent fields: `variant`, `notes`, `steps`,
@@ -71,13 +76,15 @@ job. (If they hand you an explicit list, honor it.)
 3. **Do not write descriptions — they are generated.** The description is what
    sarge reads at the moment of choice, so it carries only what the USER owns:
    the model's `info` from `model_data.json` (a binding routing rule, e.g. "no
-   secrets, no production") and the provider's plan. The plugin builds it on
-   every `squad_patch` and rewrites it at every start, so an edited `info` or
-   plan reaches sarge after a restart without a re-draft. Benchmarks, prices,
+   secrets, no production") and the provider's plan. The plugin builds it
+   whenever it registers the agents (at start and after every `squad_patch`),
+   so an edited `info` or plan reaches sarge after a restart without a re-draft. Benchmarks, prices,
    context and rankings stay out — sarge reads them live from `squad_metrics`;
    a frozen copy goes stale (a GLM grunt kept advertising "(60/75/84)" long
    after its source re-scored it at half that). `squad_patch` refuses a
-   `description`.
+   `description`. If `model_data.json` cannot be read, the dump and the patch
+   report say so; tell the user, because descriptions then keep older rules or
+   say the rules are unknown.
 
    **If the user states a routing rule**, write it into
    `~/.config/opencode/model_data.json` yourself — their words, one line, keep
@@ -160,7 +167,15 @@ job. (If they hand you an explicit list, honor it.)
    their edits. Do not apply before they confirm.
 
 6. **Apply with `squad_patch`**, passing the COMPLETE intended squad — the
-   document you got from `squad_dump` with your edits folded in.
+   document you got from `squad_dump` with your edits folded in, its
+   `revision` included.
+
+   - **A stale revision is refused.** If another session or OpenCode process
+     patched the squad since your dump, nothing is written. Call `squad_dump`
+     again, fold the same edits into what it prints now, and patch with its
+     revision; never copy the old revision onto a new dump.
+   - Two model ids that map to one agent id (`p/m-1` and `p/m.1`) are refused:
+     keep one of them.
 
    - **Deletions are refused by default.** Any agent present now and absent from
      your roster is a deletion, including dropping a drill from a model that
@@ -170,16 +185,16 @@ job. (If they hand you an explicit list, honor it.)
      the user asked for it.
    - Prefer `disable: true` over deleting an agent the user may want back — it
      stops being dispatchable but keeps its settings.
-   - `directory` targets a project's `.opencode/agent` instead of the global
-     `~/.config/opencode/agent` (or `$XDG_CONFIG_HOME/opencode/agent`).
-   - Hand-authored agents are invisible to both tools: never dumped, never
-     pruned.
+   - There is one squad for every project; `directory` is no longer accepted.
+   - Hand-authored agents are never dumped or changed. One that already holds a
+     squad id wins: that entry is not registered, and `squad_patch` refuses to
+     add or change it.
 
 7. **Report** the applied diff (`+added / -removed / ~changed / =unchanged`),
    echo the variants that were written — opencode ignores an unrecognized one
    without erroring, so this is the only place a typo shows up — and tell the
-   user that OpenCode reloads changed agent files automatically, so no restart is
-   needed. Role prompt bodies refresh on every request without re-apply.
+   user the change applies to the next dispatch, with no restart. Role prompt
+   bodies refresh on every request without re-apply.
 
 ## Notes
 
@@ -197,17 +212,9 @@ job. (If they hand you an explicit list, honor it.)
   round-trip through `squad_dump`. Use them for per-model quirks, not for policy
   that belongs in the shared role prompt.
 - To change behavior for ALL agents of a role, edit the bundled
-  `prompts/grunt.md` / `prompts/drill.md`. **No re-apply is needed**: the agent
-  file holds only a fenced placeholder, and the plugin injects the current
-  prompt on every request (the session `context` hook, see
+  `prompts/grunt.md` / `prompts/drill.md`. **No re-apply is needed**: the plugin
+  injects the current prompt on every request (the session `context` hook, see
   `src/prompt-inject.js`), so an edit is live for the next model call — even
-  mid-session. The prompt is NOT copied into the file, deliberately: one source
-  of truth, and nothing on disk that can quietly disagree with what was sent.
-  Without the plugin an agent has no role prompt at all — the placeholder tells
-  it to stop and say so, which is the right failure for a grunt holding
-  `edit`/`shell`. Two limits: an agent generated before the fence existed needs
-  ONE re-apply to opt in, and everything in the frontmatter — `model`,
-  `variant`, `steps`, `disable`, permissions, adding or removing a model — still
-  only changes by re-applying the roster. The `description` is the exception:
-  the plugin re-derives it from `model_data.json` at every start, and opencode
-  reloads changed agent files live.
+  mid-session. `model`, `variant`, `steps`, `disable` and adding or removing a
+  model change through `squad_patch`; the `description` follows
+  `model_data.json` at the next start.

@@ -7,15 +7,12 @@ import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "../../src/fs-atomic.js";
 import { billingFor, ownerRules } from "../../src/metrics.js";
 import { metricsDir, readMetrics, refreshMetrics } from "../../src/metrics-cache.js";
-import {
-  buildModelData,
-  modelsChanged,
-  readModelDataFile,
-  scanSquadModels,
-} from "../../src/model-data.js";
+import { buildModelData, modelsChanged, readModelDataFile } from "../../src/model-data.js";
 import { opencodeConfigDir, opencodeDataDir } from "../../src/paths.js";
 import { createPromptLoader } from "../../src/prompt-inject.js";
-import { defaultAgentDir, syncDescriptions } from "../../src/squad-apply.js";
+import { rosterCollisions } from "../../src/squad-agents.js";
+import { defaultAgentDir, readLegacySquad } from "../../src/squad-apply.js";
+import { defaultStoreFile, readStore, withStoreLock, writeStore } from "../../src/squad-store.js";
 import { describeAgent } from "../../src/workers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -165,16 +162,17 @@ export function loadAuthTypes() {
 }
 
 /**
- * Startup auto-regen of the GLOBAL model_data.json: rescan the squad, MERGE
- * (preserving every hand-written field, dropping legacy AA perf fields), and
- * write ONLY when the models actually changed — so a new grunt/drill lands
- * automatically without clobbering edits or churning the file every boot.
- * No-op when there is no squad yet (0 models). Only the global agent dir is
- * scanned; a project's .opencode/model_data.json is edited by hand only.
+ * Startup auto-regen of the GLOBAL model_data.json: list the squad's models
+ * (from squad.json), MERGE (preserving every hand-written field, dropping
+ * legacy AA perf fields), and write ONLY when the models actually changed —
+ * so a new grunt/drill lands automatically without clobbering edits or
+ * churning the file every boot. No-op when there is no squad yet.
  *
- * A file that exists but does not parse is LEFT ALONE: treating it as missing
- * once overwrote a hand-edited file with a fresh skeleton, losing every owner
- * rule and provider plan in it. Never throws — startup must not break.
+ * A model_data.json that exists but does not parse is LEFT ALONE: treating it
+ * as missing once overwrote a hand-edited file with a fresh skeleton, losing
+ * every owner rule and provider plan in it. So is everything when squad.json
+ * cannot be read: the merge would drop every model's entry. Never throws —
+ * startup must not break.
  *
  * @returns {{wrote: boolean, problem?: string}}
  */
@@ -187,24 +185,19 @@ export function ensureGlobalModelDataFresh() {
       console.warn(`[opencode-squad] model_data.json left untouched — ${problem}`);
       return { wrote: false, problem };
     }
-    const agentDir = path.join(path.dirname(file), "agent");
-    // A squad file whose model cannot be determined (unreadable, or a cut-off
-    // or broken header) has an unknown model; the merge would drop that
-    // model's entry and its owner rules with it. One scan feeds both the check
-    // and the snapshot, so the snapshot is built from what was checked.
-    const scan = scanSquadModels(agentDir);
-    if (scan.unreadable.length || scan.undetermined.length) {
-      const why = [
-        ...(scan.unreadable.length ? [`cannot read ${scan.unreadable.join(", ")}`] : []),
-        ...(scan.undetermined.length ? [`no model in ${scan.undetermined.join(", ")}`] : []),
-      ];
-      const problem = `${agentDir}: ${why.join("; ")}`;
+    const store = readStore(defaultStoreFile());
+    if (store.state === "invalid") {
+      const problem = `${defaultStoreFile()}: ${store.reason}`;
       console.warn(`[opencode-squad] model_data.json left untouched — ${problem}`);
       return { wrote: false, problem };
     }
+    if (store.state === "missing") return { wrote: false }; // no squad
+    const ids = [
+      ...new Set([...Object.keys(store.roster.grunts), ...Object.keys(store.roster.drills)]),
+    ].sort();
     const existing = read.state === "ok" ? read.data : {};
     const generated = new Date().toISOString().slice(0, 10);
-    const snapshot = buildModelData(scan.ids, existing, generated);
+    const snapshot = buildModelData(ids, existing, generated);
     if (Object.keys(snapshot.models).length === 0) return { wrote: false }; // no squad
     if (!modelsChanged(existing, snapshot)) return { wrote: false }; // unchanged
     writeFileAtomic(file, `${JSON.stringify(snapshot, null, 2)}\n`);
@@ -218,26 +211,95 @@ export function ensureGlobalModelDataFresh() {
 }
 
 /**
- * describe(role, modelId) for the squad in `agentDir`, from model_data.json.
- * The GLOBAL agent dir — shared by every project — reads the global file only:
- * with project overrides the shared files would flip with whichever project
- * started last. A project's own agent dir also sees that project's file.
+ * First start after #85: a squad that earlier versions wrote as agent files
+ * becomes squad.json. Only when squad.json does not exist yet, and only when
+ * every generated file could be read: an import that dropped an unreadable
+ * agent would look like a squad the user chose. The files are left in place;
+ * the plugin hides the agents they define once the roster no longer holds
+ * them. Never throws.
  *
- * @param {string} agentDir
- * @param {string} [directory]  project root
+ * @returns {{imported: number, problems: string[]}}
  */
-export function squadDescriber(agentDir, directory) {
-  return describerFrom(loadModelSettings(describerScope(agentDir, directory)));
+export function importLegacySquad() {
+  const store = defaultStoreFile();
+  try {
+    // Under the roster's lock: another process may be importing or patching.
+    const locked = withStoreLock(store, () => {
+      if (readStore(store).state !== "missing") return { imported: 0, problems: [] };
+      const legacy = readLegacySquad(defaultAgentDir());
+      if (legacy.problems.length) {
+        for (const p of legacy.problems) {
+          console.warn(`[opencode-squad] legacy squad not imported — ${p}`);
+        }
+        return { imported: 0, problems: legacy.problems };
+      }
+      // Two files whose models map to one agent id: importing both would
+      // register only one of them (#90).
+      const clashes = rosterCollisions(legacy.roster).map(
+        (c) =>
+          `${c.entries.join(" and ")} map to the same agent id ${c.id}; delete one of the files`,
+      );
+      if (clashes.length) {
+        for (const p of clashes) console.warn(`[opencode-squad] legacy squad not imported — ${p}`);
+        return { imported: 0, problems: clashes };
+      }
+      const count =
+        Object.keys(legacy.roster.grunts).length + Object.keys(legacy.roster.drills).length;
+      if (count === 0) return { imported: 0, problems: [] };
+      writeStore(store, legacy.roster);
+      return { imported: count, problems: [] };
+    });
+    // Busy: the process holding the lock imports, or the next start does.
+    return locked.busy ? { imported: 0, problems: [] } : locked.value;
+  } catch (e) {
+    const err = /** @type {NodeJS.ErrnoException} */ (e);
+    const problem = `${store}: ${err?.code ?? err?.name ?? "error"}`;
+    console.warn(`[opencode-squad] legacy squad import failed — ${problem}`);
+    return { imported: 0, problems: [problem] };
+  }
 }
 
+/** Said in a squad agent's description when the owner's rules cannot be read. */
+export const OWNER_RULES_UNKNOWN =
+  "Owner rules UNKNOWN: model_data.json could not be read, so any routing rule the " +
+  "owner set for this model is missing here. Ask the user before giving it secrets or " +
+  "anything they may restrict.";
+
 /**
- * The model_data scope that feeds an agent dir's descriptions.
+ * describe(role, modelId) for the squad, from the GLOBAL model_data.json: the
+ * squad is global, and with project overrides its descriptions would flip with
+ * whichever project's instance registered last.
  *
- * @param {string} agentDir
- * @param {string} [directory]
+ * The owner's rules in there are binding routing rules ("no secrets"), and a
+ * description is the line the orchestrator routes by, so a file that cannot
+ * be read must not turn them into a plain description (#91). One contract for
+ * startup, every reload and squad_patch alike:
+ *   - the settings last read without a problem stay in force, for the life of
+ *     the plugin instance (`stale`);
+ *   - with none read yet, each description says the owner's rules are unknown;
+ *   - either way `problems` names the file, for squad_dump and squad_patch.
+ *
+ * @returns {() => {describe: (role: "grunt"|"drill", modelId: string) => string,
+ *   problems: string[], stale: boolean}}
  */
-export function describerScope(agentDir, directory) {
-  return path.resolve(agentDir) === path.resolve(defaultAgentDir()) ? null : (directory ?? null);
+export function squadDescriber() {
+  /** @type {ModelSettings | null} */
+  let lastGood = null;
+  return () => {
+    const settings = loadModelSettings(null);
+    if (!settings.problems.length) {
+      lastGood = settings;
+      return { describe: describerFrom(settings), problems: [], stale: false };
+    }
+    if (lastGood) {
+      return { describe: describerFrom(lastGood), problems: settings.problems, stale: true };
+    }
+    return {
+      describe: (role) => `${describeAgent(role)} ${OWNER_RULES_UNKNOWN}`,
+      problems: settings.problems,
+      stale: false,
+    };
+  };
 }
 
 /**
@@ -251,20 +313,4 @@ function describerFrom({ models, providers }) {
       rules: ownerRules(modelId, { note: models[modelId], providers }),
       billing: billingFor(modelId, { note: models[modelId], plans: providers, authTypes }),
     });
-}
-
-// Startup: rewrite the global squad's descriptions from model_data.json, so an
-// edited `info` or plan reaches the orchestrator with a restart instead of a
-// re-draft (opencode reloads agent files live). Best-effort, like the regen.
-//
-// Skipped while the global model_data.json is unreadable: describing from it
-// then would rewrite every agent without its owner rules.
-export function syncGlobalSquadDescriptions() {
-  try {
-    const settings = loadModelSettings(null);
-    if (settings.problems.length) return [];
-    return syncDescriptions({ dir: defaultAgentDir(), describe: describerFrom(settings) });
-  } catch {
-    return [];
-  }
 }

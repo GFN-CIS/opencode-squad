@@ -10,14 +10,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { loadModelSettings } from "../.opencode/lib/runtime.js";
 import plugin from "../index.js";
 
 vi.mock("../.opencode/lib/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   ensureGlobalModelDataFresh: () => {},
-  syncGlobalSquadDescriptions: () => [],
-  squadDescriber: () => (role, id) => `${role} on ${id}.`,
+  importLegacySquad: () => ({ imported: 0, problems: [] }),
+  squadDescriber: () => () => ({
+    describe: (role, id) => `${role} on ${id}.`,
+    problems: globalThis.__modelDataProblems ?? [],
+    stale: false,
+  }),
   startMetricsRefresh: () => {},
   getMetrics: async () => null,
   loadModelSettings: vi.fn(() => ({ models: {}, providers: {}, found: false, problems: [] })),
@@ -64,7 +67,11 @@ async function host(over = {}) {
     location: { directory: os.tmpdir() },
     options: { rate_limit_guard: { max_silence_seconds: SILENCE_S } },
     skill: { transform: async () => {} },
-    agent: { list: async () => [] },
+    agent: {
+      list: async () => [],
+      transform: async () => ({ dispose: async () => {} }),
+      reload: async () => {},
+    },
     model: { list: over.modelList ?? (async () => []) },
     session: {
       hook: async (name, callback) => {
@@ -230,10 +237,10 @@ test("a failed model catalog lookup is retried by the next call", async () => {
     const dump = h.tools.get("squad_dump");
     const patch = h.tools.get("squad_patch");
     // The first lookup fails: variants read as unknown, not as "none".
-    expect((await dump.execute({ directory })).content).toContain("could not be read");
+    expect((await dump.execute({})).content).toContain("could not be read");
     // The next one asks again and checks the variant against the catalog.
     const res = await patch.execute(
-      { directory, grunts: { "a/b": { variant: "ultra" } } },
+      { revision: "none", grunts: { "a/b": { variant: "ultra" } } },
       { agent: "build" },
     );
     expect(res.content).toContain("Roster is invalid");
@@ -241,7 +248,7 @@ test("a failed model catalog lookup is retried by the next call", async () => {
     expect(fs.readdirSync(directory)).toEqual([]);
     expect(calls).toBe(2);
     // A successful catalog is kept.
-    await dump.execute({ directory });
+    await dump.execute({});
     expect(calls).toBe(2);
   } finally {
     h.dispose();
@@ -249,23 +256,23 @@ test("a failed model catalog lookup is retried by the next call", async () => {
   }
 });
 
-test("squad_patch refuses while model_data.json is unreadable, writing nothing", async () => {
+test("an unreadable model_data.json does not block squad_patch; the report names it (#91)", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "squad-unreadable-"));
   const h = await host();
-  vi.mocked(loadModelSettings).mockReturnValueOnce({
-    models: {},
-    providers: {},
-    found: false,
-    problems: ["/cfg/opencode/model_data.json: invalid JSON at line 3, column 1"],
-  });
+  globalThis.__modelDataProblems = [
+    "/cfg/opencode/model_data.json: invalid JSON at line 3, column 1",
+  ];
   try {
     const res = await h.tools
       .get("squad_patch")
-      .execute({ directory, grunts: { "a/b": {} } }, { agent: "build" });
-    expect(res.content).toContain("Refused: model_data.json cannot be read");
+      .execute({ revision: "none", grunts: { "a/b": {} } }, { agent: "build" });
+    expect(res.content).toContain("+1 added");
+    expect(res.content).toContain("model_data.json cannot be read");
     expect(res.content).toContain("invalid JSON at line 3, column 1");
+    expect(res.content).toContain("agent descriptions carry no owner rules and say so");
     expect(fs.readdirSync(directory)).toEqual([]);
   } finally {
+    delete globalThis.__modelDataProblems;
     h.dispose();
     fs.rmSync(directory, { recursive: true, force: true });
   }

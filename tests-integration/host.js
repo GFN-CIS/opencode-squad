@@ -34,16 +34,22 @@ export const model = SessionRunnerModel.resolved(
  * Boot a host in a temp project, run `body` against it, tear everything down.
  *
  * @template T
- * @param {(h: {opencode: any, llm: any, project: string, location: any}) => Effect.Effect<T, any, any>} body
+ * @param {(h: {opencode: any, llm: any, project: string, location: any, resolved: any[]}) => Effect.Effect<T, any, any>} body
  * @param {Record<string, unknown>} [configExtra]  more opencode.json content
+ * @param {{prepare?: (project: string) => Promise<void>}} [opts]
+ *   prepare: lay out files before the host starts (the project is also the
+ *   host's config dir, so `<project>/agent/*.md` are loaded agent files)
  * @returns {Promise<T>}
  */
-export function withHost(body, configExtra = {}) {
+export function withHost(body, configExtra = {}, { prepare } = {}) {
+  /** Every session the runner resolved a model for, as the host passed it. */
+  const resolved = [];
   const program = Effect.gen(function* () {
     const project = yield* Effect.acquireRelease(
       Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "squad-it-project-"))),
       (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
     );
+    if (prepare) yield* Effect.promise(() => prepare(project));
     const llm = yield* TestLLM.Test.pipe(Effect.provide(TestLLM.testLayer()));
     const opencode = yield* OpenCode.create(
       {
@@ -63,13 +69,18 @@ export function withHost(body, configExtra = {}) {
         overrides: [
           llmClient.replace(Layer.succeed(LLMClient.Service, llm)),
           SessionRunnerModel.node.replace(
-            Layer.succeed(SessionRunnerModel.Service, { resolve: () => Effect.succeed(model) }),
+            Layer.succeed(SessionRunnerModel.Service, {
+              resolve: (/** @type {any} */ session) => {
+                resolved.push(session);
+                return Effect.succeed(model);
+              },
+            }),
           ),
         ],
       },
     );
     const location = Location.Ref.make({ directory: AbsolutePath.make(project) });
-    return yield* body({ opencode, llm, project, location });
+    return yield* body({ opencode, llm, project, location, resolved });
   });
   return Effect.runPromise(Effect.scoped(program));
 }

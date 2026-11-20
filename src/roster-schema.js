@@ -3,7 +3,7 @@
 // a tool without the advertised schema being enforced), and the input type
 // all come from these Zod schemas. Installed-model variant checks and the
 // deletion guard stay at the application boundary (src/squad-tools.js,
-// src/squad-apply.js): they need the host and the disk.
+// src/squad-apply.js): they need the host and the stored roster.
 
 import { z } from "zod";
 
@@ -55,8 +55,8 @@ const RosterSchema = z.strictObject({
 
 /** squad_patch's whole input: the roster plus the call's own switches. */
 const SquadPatchInputSchema = RosterSchema.extend({
+  revision: z.string().describe(ARG_DESCRIPTIONS["patch.revision"]),
   allow_remove: z.boolean().describe(ARG_DESCRIPTIONS["patch.allow_remove"]).optional(),
-  directory: z.string().describe(ARG_DESCRIPTIONS["patch.directory"]).optional(),
 });
 
 /** @typedef {z.input<typeof SquadPatchInputSchema>} SquadPatchInput */
@@ -109,7 +109,7 @@ export function validateRoster(doc) {
 
 /**
  * validateRoster for squad_patch's whole input: the roster plus `allow_remove`
- * and `directory`, against the same schema the tool advertises.
+ * against the same schema the tool advertises.
  *
  * @param {unknown} input
  * @returns {string[]}  empty when valid

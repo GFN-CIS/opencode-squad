@@ -59,18 +59,19 @@ describe("V2 schemas", () => {
     expect(SQUAD_SESSION_INPUT.properties.sessionIDs.description).toBe(
       ARG_DESCRIPTIONS["session.sessionIDs"],
     );
+    // No `directory` since #85: the squad is one roster, not files in a dir.
     expect(Object.keys(SQUAD_PATCH_INPUT.properties).sort()).toEqual([
       "allow_remove",
-      "directory",
       "drills",
       "grunts",
+      "revision",
     ]);
+    // The base the edit was built on is not optional (#89).
+    expect(SQUAD_PATCH_INPUT.required).toEqual(["revision"]);
     expect(SQUAD_PATCH_INPUT.properties.grunts.additionalProperties.properties.steps.type).toBe(
       "integer",
     );
-    expect(SQUAD_DUMP_INPUT.properties.directory.description).toBe(
-      ARG_DESCRIPTIONS["dump.directory"],
-    );
+    expect(SQUAD_DUMP_INPUT.properties).toEqual({});
     for (const s of [
       SQUAD_COMPACT_INPUT,
       SQUAD_DUMP_INPUT,

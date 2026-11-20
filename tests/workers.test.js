@@ -1,22 +1,15 @@
+// Suite: src/workers.js — agent ids, role permission rules and descriptions.
+// Run: npx vitest run tests/workers.test.js
+
 import { expect, test } from "vitest";
-import { readFrontmatter } from "../src/frontmatter.js";
-import { PROMPT_CLOSE, promptOpen } from "../src/prompt-inject.js";
-import { NOTES_CLOSE, NOTES_OPEN, parseAgentFile } from "../src/roster.js";
 import {
-  agentMarkdown,
   defaultDescriptions,
   describeAgent,
-  GENERATED_MARKER,
+  isGeneratedAgent,
+  roleRules,
   slugForModel,
   squadRoleOf,
 } from "../src/workers.js";
-
-/** The frontmatter fields of a generated document; throws unless it parses. */
-function frontmatterOf(content) {
-  const fm = readFrontmatter(content);
-  if (fm.state !== "ok") throw new Error(`frontmatter ${fm.state}`);
-  return fm.fields;
-}
 
 test("slug collapses provider/model and punctuation, prefixed by role", () => {
   expect(slugForModel("openai/gpt-5.5")).toBe("grunt-openai-gpt-5-5"); // default role
@@ -33,33 +26,16 @@ test("slug is stable and trimmed (no leading/trailing/doubled dashes)", () => {
   expect(slugForModel("  Foo//Bar..Baz  ", "drill")).toBe("drill-foo-bar-baz");
 });
 
-test("grunt markdown: native ordered edit/shell allows and explicit subagent deny", () => {
-  const body = "You are grunt, a worker subagent.";
-  const { slug, filename, content } = agentMarkdown("grunt", "anthropic/claude-opus-4-7");
-  expect(slug).toBe("grunt-anthropic-claude-opus-4-7");
-  expect(filename).toBe("grunt-anthropic-claude-opus-4-7.md");
-  expect(content.startsWith("---\n")).toBe(true);
-  expect(content).toContain("mode: subagent");
-  expect(content).toContain("model: anthropic/claude-opus-4-7");
-  expect(content).toContain("hidden: true");
-  expect(content).toContain(
-    'permissions:\n  - {"action":"edit","resource":"*","effect":"allow"}\n' +
-      '  - {"action":"shell","resource":"*","effect":"allow"}\n' +
-      '  - {"action":"subagent","resource":"*","effect":"deny"}\n---',
-  );
-  expect(content).not.toContain("permission:");
-  expect(content).toContain(GENERATED_MARKER);
-  expect(content).toContain(promptOpen("grunt"));
-  expect(content.trimEnd().endsWith(PROMPT_CLOSE)).toBe(true);
-  expect(content).not.toContain(body);
+test("grunt rules: edit and shell allowed, subagent denied", () => {
+  expect(roleRules("grunt")).toEqual([
+    { action: "edit", resource: "*", effect: "allow" },
+    { action: "shell", resource: "*", effect: "allow" },
+    { action: "subagent", resource: "*", effect: "deny" },
+  ]);
 });
 
-test("V2 drill markdown denies by default, allowing only local reads, web and narrow shell inspection", () => {
-  const { slug, content } = agentMarkdown("drill", "openai/gpt-5.5");
-  expect(slug).toBe("drill-openai-gpt-5-5");
-  expect(content).toContain("permissions:\n");
-  expect(content).not.toContain("permission:");
-  const rules = frontmatterOf(content).permissions;
+test("drill rules deny by default, allowing only local reads, web and narrow shell inspection", () => {
+  const rules = roleRules("drill");
   expect(rules).toEqual([
     { action: "*", resource: "*", effect: "deny" },
     { action: "read", resource: "*", effect: "allow" },
@@ -133,13 +109,10 @@ test("V2 drill markdown denies by default, allowing only local reads, web and na
   expect(
     rules.filter((rule) => rule.effect === "allow").map((rule) => rule.resource),
   ).not.toContain("gh api *");
-  expect(content).toContain(promptOpen("drill"));
-  expect(content.trimEnd().endsWith(PROMPT_CLOSE)).toBe(true);
 });
 
-test("V2 write guards and env exceptions come after their broad allows", () => {
-  const { content } = agentMarkdown("drill", "a/b");
-  const rules = frontmatterOf(content).permissions;
+test("drill write guards and env exceptions come after their broad allows", () => {
+  const rules = roleRules("drill");
   const index = (action, resource) =>
     rules.findIndex((r) => r.action === action && r.resource === resource);
   for (const resource of ["*--output*", "sort *-o*", "*>*"]) {
@@ -152,116 +125,13 @@ test("V2 write guards and env exceptions come after their broad allows", () => {
   expect(index("read", "*.env.example")).toBeGreaterThan(index("read", "*.env.*"));
 });
 
-test.each(["grunt", "drill"])(
-  "native %s preserves overrides through a roster round trip",
-  (role) => {
-    const { content } = agentMarkdown(role, "openai/gpt-5.5", {
-      variant: "high",
-      disable: true,
-      steps: 12,
-      notes: "inspect edge cases",
-    });
-    expect(content).toContain("model: openai/gpt-5.5#high\n");
-    expect(content).toContain("disabled: true\n");
-    expect(content).not.toContain("\nvariant:");
-    expect(content).not.toContain("\ndisable:");
-    expect(parseAgentFile(content)).toEqual({
-      modelId: "openai/gpt-5.5",
-      entry: {
-        variant: "high",
-        disable: true,
-        steps: 12,
-        notes: "inspect edge cases",
-      },
-    });
-  },
-);
-
 test("unknown role throws", () => {
-  expect(() => agentMarkdown("captain", "openai/gpt-5.5")).toThrow();
+  expect(() => roleRules("captain")).toThrow();
 });
 
-test.each(["grunt", "drill"])(
-  "the generated %s document parses as YAML frontmatter + body",
-  (role) => {
-    const { content } = agentMarkdown(role, "openai/gpt-5.5", {
-      variant: "high",
-      description: 'routes on: "quotes" # and hashes',
-      notes: "n",
-    });
-    const fields = frontmatterOf(content);
-    expect(fields).toMatchObject({
-      description: 'routes on: "quotes" # and hashes',
-      mode: "subagent",
-      model: "openai/gpt-5.5#high",
-      hidden: true,
-    });
-    expect(Array.isArray(fields.permissions)).toBe(true);
-    const { body } = readFrontmatter(content);
-    expect(body.trimStart().startsWith(promptOpen(role))).toBe(true);
-  },
-);
-
-test("agentMarkdown emits variant only when one is given", () => {
-  const withVariant = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", {
-    variant: "high",
-  }).content;
-  expect(withVariant).toContain("model: zai-coding-plan/glm-5.3#high\n");
-
-  const without = agentMarkdown("grunt", "anthropic/claude-opus-5").content;
-  expect(without).not.toContain("variant:");
-  expect(without).toContain("model: anthropic/claude-opus-5\nhidden: true\n");
-});
-
-test("agentMarkdown ignores a blank variant rather than writing a bare #", () => {
-  const { content } = agentMarkdown("drill", "openai/gpt-5.5", { variant: "   " });
-  expect(frontmatterOf(content).model).toBe("openai/gpt-5.5");
-});
-
-test("the variant does not leak into the slug — one agent per model, not per variant", () => {
-  const a = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", { variant: "high" });
-  const b = agentMarkdown("grunt", "zai-coding-plan/glm-5.3");
-  expect(a.slug).toBe(b.slug);
-  expect(a.filename).toBe(b.filename);
-});
-
-test("agentMarkdown writes the per-agent overrides, and only those that were given", () => {
-  const { content } = agentMarkdown("grunt", "zai-coding-plan/glm-5.3", {
-    variant: "high",
-    description: "cheap long-context coder",
-    notes: "prefer the write tool over bash heredocs",
-    steps: 40,
-    disable: true,
-  });
-  // Quoted, so an owner note carrying ": " or " #" stays valid YAML.
-  expect(content).toContain('description: "cheap long-context coder"\n');
-  expect(content).toContain("model: zai-coding-plan/glm-5.3#high\n");
-  expect(content).toContain("steps: 40");
-  expect(content).toContain("disabled: true");
-  expect(content).toContain(NOTES_OPEN);
-  expect(content).toContain("prefer the write tool over bash heredocs");
-  expect(content).toContain(NOTES_CLOSE);
-
-  const bare = agentMarkdown("grunt", "a/b").content;
-  expect(bare).not.toContain("variant:");
-  expect(bare).not.toContain("steps:");
-  expect(bare).not.toContain("disable:");
-  expect(bare).not.toContain(NOTES_OPEN);
-  // Falls back to the role's generic description rather than writing nothing.
-  expect(bare).toContain(`description: ${JSON.stringify(defaultDescriptions().grunt)}`);
-});
-
-test("notes are fenced so the body stays separable from the role prompt", () => {
-  const { content } = agentMarkdown("drill", "a/b", { notes: "extra" });
-  const body = content.slice(content.lastIndexOf("---\n") + 4);
-  expect(body.indexOf(PROMPT_CLOSE)).toBeLessThan(body.indexOf(NOTES_OPEN));
-  expect(body.indexOf(NOTES_OPEN)).toBeLessThan(body.indexOf(NOTES_CLOSE));
-});
-
-test("a blank override is ignored rather than written as an empty key", () => {
-  const { content } = agentMarkdown("grunt", "a/b", { variant: "  ", notes: "  " });
-  expect(content).not.toContain("variant:");
-  expect(content).not.toContain(NOTES_OPEN);
+test("roleRules hands out copies: a caller cannot edit the role's policy", () => {
+  roleRules("drill")[0].effect = "allow";
+  expect(roleRules("drill")[0]).toEqual({ action: "*", resource: "*", effect: "deny" });
 });
 
 test("describeAgent carries the owner rule and the plan, nothing invented", () => {
@@ -292,4 +162,13 @@ test("squadRoleOf reads the role off a runtime agent id and nothing else", () =>
   expect(squadRoleOf("build")).toBeNull();
   expect(squadRoleOf("my-grunt-helper")).toBeNull();
   expect(squadRoleOf(undefined)).toBeNull();
+});
+
+test("isGeneratedAgent: only this plugin's marker, on the first frontmatter line", () => {
+  expect(
+    isGeneratedAgent("---\n# generated-by: opencode-squad squad-draft\nmodel: a/b\n---\n"),
+  ).toBe(true);
+  expect(isGeneratedAgent("---\r\n# generated-by: opencode-orchestrate x\r\n")).toBe(true);
+  expect(isGeneratedAgent("---\n# generated-by: opencode-other-tool\n---\n")).toBe(false);
+  expect(isGeneratedAgent("---\nmodel: a/b\n---\n# generated-by: opencode-squad\n")).toBe(false);
 });
