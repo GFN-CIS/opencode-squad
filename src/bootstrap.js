@@ -3,7 +3,7 @@
 // changes: anything that changes per turn here breaks the prompt cache for the
 // whole conversation. Kept lightweight: heavy PDCA logic lives in the skill.
 
-export const BOOTSTRAP_MARKER = "<ORCHESTRATE_BOOTSTRAP>";
+export const BOOTSTRAP_MARKER = "<SQUAD_BOOTSTRAP>";
 // The closing tag follows the marker, so renaming one cannot orphan the other.
 const BOOTSTRAP_END = `</${BOOTSTRAP_MARKER.slice(1)}`;
 

@@ -24,7 +24,7 @@
 //
 // Which agents are ours: one built from the roster, or one that an earlier
 // version generated as a file in the global agent dir, when the live agent at
-// that id IS that file (same prompt and model). Any other agent at a squad id
+// that id IS that file (equal, field for field, to what the file alone yields). Any other agent at a squad id
 // belongs to the user and is left exactly as the host built it.
 
 import crypto from "node:crypto";

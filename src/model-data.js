@@ -4,9 +4,8 @@
 // have a grunt-/drill- agent. Every field is the user's: `info` (a routing
 // note the squad_metrics tool shows next to the numbers), `billing`
 // ("subscription" marks a flat-rate model), and `cache_ttl_seconds` (the
-// provider's published prompt-cache TTL, read by src/cache-status.js; left
-// unset where no TTL is published and reported as "unknown" rather than
-// guessed). Benchmarks and prices are not stored here — they are fetched live
+// user's override of the prompt-cache TTL; when unset, src/cache-status.js
+// uses a published, measured or assumed value and labels which). Benchmarks and prices are not stored here — they are fetched live
 // (src/metrics-cache.js) so they cannot go stale in a file.
 //
 // The plugin refreshes the global file at startup: new squad models get an

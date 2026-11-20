@@ -24,7 +24,7 @@ test("the plugin loads from disk and its bootstrap reaches the orchestrator's sy
     }),
   );
   const ours = JSON.stringify(out.plugins);
-  expect(ours).toMatch(/"orchestrate"|"squad"/);
+  expect(ours).toContain('"squad"');
   expect(ours).toContain("active");
   expect(JSON.stringify(out.context)).toContain("scripted reply");
   const turn = out.requests.find((r) => !isTitleRequest(r));
