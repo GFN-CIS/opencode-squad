@@ -12,7 +12,7 @@
 // the method and why it's trustworthy (it reproduces Anthropic's published
 // 300s from ~70k samples).
 //
-// MANUAL ONLY, like squad-file-performance.mjs: opencode never runs this. That
+// MANUAL ONLY: opencode never runs this. That
 // staleness is tolerable here in a way it wasn't for the cache-status read path
 // — this is a periodic measurement, and a provider with no entry falls back to
 // the tiers in src/cache-status.js rather than to "unknown".

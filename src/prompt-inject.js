@@ -31,7 +31,7 @@
 //   2. Nothing volatile goes in. This text sits in the cache prefix, so a clock
 //      or a counter here would invalidate the whole conversation on every call
 //      — the exact failure that cost one orchestrator session ~195k of cache
-//      write per turn (see src/message-transform.js).
+//      write per turn (docs/adr/0005-bootstrap-in-system-prompt.md).
 
 /** @param {string} role */
 export function promptOpen(role) {

@@ -9,9 +9,9 @@
 // all.
 //
 // When that field is absent, `resolveCacheTtl()` below supplies a number
-// anyway. That fallback lives here (read on every squad_session call) rather
-// than in scripts/squad-file-performance.mjs, which is manual-only by
-// design and so would leave the field unset exactly as it was before.
+// anyway. That fallback lives here, on the read path of every squad_session
+// call, rather than in a manual script that writes the field: a script nobody
+// runs leaves the field unset exactly as it was before.
 //
 // Every provider gets a TTL, because the previous behaviour — "TTL isn't
 // published, judge for yourself" — was read as "no constraint", i.e. as if the

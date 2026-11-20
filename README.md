@@ -142,6 +142,10 @@ Unit tests never touch your real OpenCode config. Integration tests boot the pin
 
 Releases: bump `version` in a PR; merging it publishes to npm and creates the GitHub release.
 
+## Design
+
+Target behaviour: [docs/rfc/0001-squad.md](docs/rfc/0001-squad.md). Decisions and the alternatives they rejected: [docs/adr/](docs/adr/).
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
