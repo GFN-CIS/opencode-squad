@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-The host retries a rate-limited call for as long as the provider asks, up to weeks, with no configuration. A subagent in that state blocks the lead, which could pick another model. Some failures never look like a retry: a terminal error, or a stream that goes silent. Providers also report how much of their rate-limit window is used on every successful response, and the host discards it.
+The host retries a retryable provider error up to 10 times and honours an announced wait up to 15 minutes each (verified on 2.1.3), with no configuration: up to two and a half hours. A subagent in that state blocks the lead, which could pick another model. Some failures never look like a retry: a terminal error, or a stream that goes silent. Providers also report how much of their rate-limit window is used on every successful response, and the host discards it.
 
 ## Decision
 
@@ -21,7 +21,7 @@ The host retries a rate-limited call for as long as the provider asks, up to wee
 
 ## Consequences
 
-- Providers that send no quota headers get no quota note (ASM-003).
+- Providers that send no quota headers get no quota note; `squad_metrics` lists their quota as unknown (ASM-003, FR-047).
 - Thresholds are configuration (CON-006, CON-007).
 
-Satisfies RFC 0001: GOAL-4, GOAL-3, FR-034 to FR-039. Details: `src/rate-limit-guard.js`, `src/quota.js`.
+Satisfies RFC 0001: GOAL-4, GOAL-3, FR-034 to FR-039, FR-047. Details: `src/rate-limit-guard.js`, `src/quota.js`.

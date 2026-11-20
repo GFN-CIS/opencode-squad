@@ -99,3 +99,47 @@ export const promptAndWait = (h, text) =>
     const context = yield* h.opencode.sessions.context({ sessionID: session.id });
     return { session, context };
   });
+
+/** The text a session's tool call returned, by tool-call id. */
+export const toolText = (context, id) =>
+  context
+    .flatMap((m) => m.content ?? [])
+    .find((p) => p.type === "tool" && p.id === id)
+    ?.state?.content?.map((c) => c.text ?? "")
+    .join("\n") ?? "";
+
+/**
+ * One session that runs `js` once through Code Mode's execute tool and
+ * returns what it printed.
+ *
+ * @param {string} js
+ * @param {Record<string, unknown>} [configExtra]
+ * @param {{agent?: string, prepare?: (project: string) => Promise<void>}} [opts]
+ */
+export const runCode = (js, configExtra = {}, { agent, prepare } = {}) =>
+  withHost(
+    (h) =>
+      Effect.gen(function* () {
+        let called = false;
+        yield* h.llm.serve((request) => {
+          if ((request.tools ?? []).length === 0) return TestLLM.text("Title", "title");
+          if (!called) {
+            called = true;
+            return TestLLM.tool("t-1", "execute", { code: js });
+          }
+          return TestLLM.text("done", "answer");
+        });
+        const session = yield* h.opencode.sessions.create({
+          location: h.location,
+          model: model.ref,
+          ...(agent ? { agent } : {}),
+        });
+        yield* h.opencode.sessions.prompt({ sessionID: session.id, text: "PARENT-ASK" });
+        yield* h.opencode.sessions
+          .wait({ sessionID: session.id })
+          .pipe(Effect.timeout("45 seconds"));
+        return toolText(yield* h.opencode.sessions.context({ sessionID: session.id }), "t-1");
+      }),
+    configExtra,
+    { prepare },
+  );

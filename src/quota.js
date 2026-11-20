@@ -249,3 +249,38 @@ export function createQuotaReporter() {
     return clause;
   };
 }
+
+/**
+ * The last quota snapshot seen per provider in this process, for squad_metrics.
+ * A provider no response has carried quota headers for reads "unknown": absent
+ * data stays absent rather than looking like headroom (RFC 0001 FR-047).
+ *
+ * @returns {{record: (providerID: string, headers: Record<string, string>, now: number) => void,
+ *   block: (providerIDs: string[], now: number) => string}}
+ */
+export function createQuotaLog() {
+  /** @type {Map<string, {snapshot: NonNullable<ReturnType<typeof parseQuotaHeaders>>, at: number}>} */
+  const seen = new Map();
+  return {
+    record(providerID, headers, now) {
+      const snapshot = parseQuotaHeaders(headers);
+      if (snapshot) seen.set(providerID, { snapshot, at: now });
+    },
+    block(providerIDs, now) {
+      const lines = [...new Set(providerIDs)].sort().map((p) => {
+        const last = seen.get(p);
+        if (!last) return `- ${p}: unknown (no rate-limit headers seen from this provider)`;
+        const { snapshot, at } = last;
+        const windows = snapshot.windows
+          .map(
+            (w) => `${w.label} ${pct(w.used)}${w.label === snapshot.binding ? " (binding)" : ""}`,
+          )
+          .join(", ");
+        const mins = Math.max(0, Math.round((now - at) / 60000));
+        const rejecting = snapshot.blocked ? ", provider REJECTING" : "";
+        return `- ${p}: ${windows} used${rejecting} (as of ${mins < 1 ? "<1" : mins}m ago)`;
+      });
+      return lines.length ? `Provider quota, last seen in this process:\n${lines.join("\n")}` : "";
+    },
+  };
+}

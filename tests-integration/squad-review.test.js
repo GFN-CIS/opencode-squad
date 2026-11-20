@@ -50,7 +50,7 @@ const liveAgent = (h, id) =>
     .list({ location: { directory: h.project } })
     .pipe(Effect.map((out) => out.data.find((a) => a.id === id)));
 
-test("#87: the first request of a session started directly for a drill offers only drill tools", async () => {
+test("FR-003, FR-005 (#87): the first request of a session started directly for a drill offers only drill tools", async () => {
   await writeRoster({ drills: { "p/m": {} } });
   const requests = [];
   const out = await withHost(
@@ -110,7 +110,7 @@ async function definitionWith(roster, id, files) {
   );
 }
 
-test("#88: a hand-authored agent holding a roster id keeps its whole effective definition", async () => {
+test("FR-010 (#88): a hand-authored agent holding a roster id keeps its whole effective definition", async () => {
   const files = async (project) => {
     await fs.mkdir(path.join(project, "agent"), { recursive: true });
     await fs.writeFile(path.join(project, "agent", "drill-p-foreign.md"), HAND);
@@ -140,7 +140,7 @@ const legacy = (role, modelId) =>
     "",
   ].join("\n");
 
-test("#88: a verified legacy file does not hide another agent the host loaded at its id", async () => {
+test("FR-012 (#88): a verified legacy file does not hide another agent the host loaded at its id", async () => {
   const files = async (project) => {
     // Ours, verified by its marker, in the global agent dir...
     await fs.mkdir(path.join(configDir(), "agent"), { recursive: true });
@@ -159,7 +159,7 @@ test("#88: a verified legacy file does not hide another agent the host loaded at
   expect(live).toEqual(alone);
 }, 180_000);
 
-test("#91: with model_data.json unreadable, the live description says the owner rules are unknown", async () => {
+test("FR-027 (#91): with model_data.json unreadable, the live description says the owner rules are unknown", async () => {
   await writeRoster({ grunts: { "p/m": {} } });
   // The owner's rule is in there, but the file does not parse.
   await fs.writeFile(
@@ -185,7 +185,7 @@ test("#91: with model_data.json unreadable, the live description says the owner 
   }
 }, 120_000);
 
-test("#92: an equal-size roster with the old mtime still takes effect on the next request", async () => {
+test("FR-022 (#92): an equal-size roster with the old mtime still takes effect on the next request", async () => {
   await writeRoster({ grunts: { "p/m": { variant: "low" } } });
   // A whole second, so it can be put back exactly.
   const stamp = new Date("2026-01-01T00:00:00Z");
@@ -214,7 +214,7 @@ test("#92: an equal-size roster with the old mtime still takes effect on the nex
   expect(live).toEqual({ before: "low", after: "max" });
 }, 120_000);
 
-test("#88: a project agent with the legacy file's model and prompt but its own fields is left alone", async () => {
+test("FR-012 (#88): a project agent with the legacy file's model and prompt but its own fields is left alone", async () => {
   const mine = legacy("drill", "old/m#high").replace('"stale description"', '"mine"');
   const files = async (project) => {
     await fs.mkdir(path.join(configDir(), "agent"), { recursive: true });
@@ -230,7 +230,7 @@ test("#88: a project agent with the legacy file's model and prompt but its own f
   expect(await definitionWith({}, "drill-old-m", files)).toEqual(alone);
 }, 180_000);
 
-test("#88: the plugin still recognises its own legacy file: hidden with an empty roster", async () => {
+test("FR-012, FR-013 (#88): the plugin still recognises its own legacy file: hidden with an empty roster", async () => {
   const files = async (project) => {
     for (const dir of [path.join(configDir(), "agent"), path.join(project, "agent")]) {
       await fs.mkdir(dir, { recursive: true });
@@ -245,7 +245,7 @@ test("#88: the plugin still recognises its own legacy file: hidden with an empty
   expect(await definitionWith({}, "drill-old-m", files)).toBeUndefined();
 }, 180_000);
 
-test("#88: a hand-authored agent named like the plugin's probe is left intact", async () => {
+test("FR-011 (#88): a hand-authored agent named like the plugin's probe is left intact", async () => {
   const files = async (project) => {
     await fs.mkdir(path.join(project, "agent"), { recursive: true });
     await fs.writeFile(path.join(project, "agent", "opencode-squad-probe.md"), HAND);
@@ -257,3 +257,41 @@ test("#88: a hand-authored agent named like the plugin's probe is left intact", 
   expect(alone?.system).toContain("HAND-WRITTEN PROMPT");
   expect(await definitionWith({}, "opencode-squad-probe", files)).toEqual(alone);
 }, 180_000);
+
+test("FR-003: a drill under a global allow-all cannot redirect output or write a file", async () => {
+  await writeRoster({ drills: { "p/m": {} } });
+  const out = await withHost(
+    (h) =>
+      Effect.gen(function* () {
+        let step = 0;
+        yield* h.llm.serve((request) => {
+          if (isTitleRequest(request)) return TestLLM.text("Title", "title");
+          step++;
+          if (step === 1)
+            return TestLLM.tool("c-redirect", "shell", { command: "git log > out.txt" });
+          if (step === 2)
+            return TestLLM.tool("c-write", "write", { filePath: "x.txt", content: "x" });
+          return TestLLM.text("done", "answer");
+        });
+        const session = yield* h.opencode.sessions.create({
+          location: h.location,
+          model: model.ref,
+          agent: "drill-p-m",
+        });
+        yield* h.opencode.sessions.prompt({ sessionID: session.id, text: "CHILD-DRILL" });
+        yield* h.opencode.sessions
+          .wait({ sessionID: session.id })
+          .pipe(Effect.timeout("45 seconds"));
+        return yield* h.opencode.sessions.context({ sessionID: session.id });
+      }),
+    GLOBAL_ALLOW,
+  );
+  const state = (id) =>
+    JSON.stringify(
+      out.flatMap((m) => m.content ?? []).find((p) => p.type === "tool" && p.id === id)?.state ??
+        null,
+    );
+  expect(state("c-redirect")).toContain("permission.rejected");
+  // `write` is not even offered to a drill: the call fails as unknown or rejected.
+  expect(state("c-write")).not.toContain('"status":"completed"');
+}, 120_000);

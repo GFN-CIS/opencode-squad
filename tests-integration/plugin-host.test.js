@@ -9,7 +9,7 @@ import { model, PLUGIN_DIR, promptAndWait, TestLLM, withHost } from "./host.js";
 /** The host's first call titles the session and carries no tools. */
 const isTitleRequest = (request) => (request.tools ?? []).length === 0;
 
-test("the plugin loads from disk and its bootstrap reaches the orchestrator's system prompt", async () => {
+test("FR-029: the plugin loads from disk and its bootstrap reaches the orchestrator's system prompt", async () => {
   const out = await withHost((h) =>
     Effect.gen(function* () {
       yield* h.llm.serve((request) =>
@@ -33,7 +33,7 @@ test("the plugin loads from disk and its bootstrap reaches the orchestrator's sy
   expect(JSON.stringify(turn ?? null)).toContain("tools.squad_session(");
 });
 
-test("a scripted tool call reaches squad_session in the real host and returns its report", async () => {
+test("FR-042: a scripted tool call reaches squad_session in the real host and returns its report", async () => {
   const out = await withHost((h) =>
     Effect.gen(function* () {
       let called = false;
@@ -63,7 +63,7 @@ test("a scripted tool call reaches squad_session in the real host and returns it
   expect(part?.state?.content?.[0]?.text ?? "").toMatch(/^now: /);
 });
 
-test("a subagent whose model stream hangs is interrupted, and its orchestrator told once", async () => {
+test("FR-036: a subagent whose model stream hangs is interrupted, and its orchestrator told once", async () => {
   const out = await withHost(
     (h) =>
       Effect.gen(function* () {
