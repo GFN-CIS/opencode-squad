@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Effect } from "effect";
 import { afterEach, expect, test } from "vitest";
+import { writeFileAtomic } from "../src/fs-atomic.js";
 import { indexSuperIndex, SUPERINDEX_FORMAT } from "../src/metrics.js";
 import { metricsDir } from "../src/metrics-cache.js";
 import { model, runCode, TestLLM, toolText, withHost } from "./host.js";
@@ -28,8 +29,10 @@ test("FR-040, FR-041, FR-047: squad_metrics offline keeps the cached figures, ma
     JSON.stringify({ version: 1, grunts: { "test/test-model": {} }, drills: {} }),
   );
   // Older than the refresh age, so the plugin tries to refetch and fails offline.
-  await fs.mkdir(metricsDir(), { recursive: true });
-  await fs.writeFile(
+  // The OS temp dir is the run's private one (setup.js); written the way the
+  // plugin writes its cache.
+  await fs.mkdir(metricsDir(), { recursive: true, mode: 0o700 });
+  writeFileAtomic(
     metricsFile(),
     JSON.stringify({
       superindex: {
